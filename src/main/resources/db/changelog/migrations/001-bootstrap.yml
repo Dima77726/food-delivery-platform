@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-app-init-check
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/001-create-app-init-check.sql
+            relativeToChangelogFile: true
+            splitStatements: true

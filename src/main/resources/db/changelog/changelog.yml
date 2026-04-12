@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: migrations/001-bootstrap.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/002-create-restaurant.yml
+      relativeToChangelogFile: true
