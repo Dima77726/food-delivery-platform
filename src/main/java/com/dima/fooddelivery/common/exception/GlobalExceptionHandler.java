@@ -2,11 +2,13 @@ package com.dima.fooddelivery.common.exception;
 
 import com.dima.fooddelivery.common.api.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -15,6 +17,8 @@ public class GlobalExceptionHandler {
             ResourceNotFoundException exception,
             HttpServletRequest request
     ) {
+        log.warn("Resource not foung for path={}: {}", request.getRequestURI(), exception.getMessage());
+
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.NOT_FOUND.value(),
                 HttpStatus.NOT_FOUND.getReasonPhrase(),
@@ -27,6 +31,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleExceptionAll(Exception exception, HttpServletRequest request) {
+        log.error("Exception: ", exception);
+
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(),
