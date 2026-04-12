@@ -1,9 +1,11 @@
 package com.dima.fooddelivery.restaurant.service;
 
+import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.restaurant.api.RestaurantResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+
 
 @Service
 public class RestaurantService {
@@ -19,6 +21,6 @@ public class RestaurantService {
         return getRestaurantAll().stream()
                 .filter(restaurant -> restaurant.id().equals(id))
                 .findFirst()
-                .orElse(null);
+                .orElseThrow(() -> new ResourceNotFoundException("Restaurant with id=" + id + " not found"));
     }
 }
