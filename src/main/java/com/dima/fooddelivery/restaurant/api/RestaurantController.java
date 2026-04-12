@@ -2,6 +2,7 @@ package com.dima.fooddelivery.restaurant.api;
 
 import com.dima.fooddelivery.restaurant.service.RestaurantService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,7 +19,12 @@ public class RestaurantController {
     }
 
     @GetMapping
-    public List<RestaurantResponse> getAllRestaurants(RestaurantService restaurantService) {
+    public List<RestaurantResponse> getAllRestaurants() {
         return restaurantService.getRestaurantAll();
+    }
+
+    @GetMapping({"/{id}"})
+    public RestaurantResponse getRestaurantById(@PathVariable Long id) {
+        return restaurantService.getRestaurantById(id);
     }
 }

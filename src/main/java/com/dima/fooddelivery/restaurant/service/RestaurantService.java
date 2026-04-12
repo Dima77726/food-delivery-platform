@@ -14,4 +14,11 @@ public class RestaurantService {
                 new RestaurantResponse(3L, "Land Pizza", "Pyatigorsk", true)
         );
     }
+
+    public RestaurantResponse getRestaurantById(Long id){
+        return getRestaurantAll().stream()
+                .filter(restaurant -> restaurant.id().equals(id))
+                .findFirst()
+                .orElse(null);
+    }
 }
