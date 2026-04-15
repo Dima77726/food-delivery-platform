@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-create-menu-category-and-menu-item
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/004-create-menu-category-and-menu-item.sql
+            relativeToChangelogFile: true
+            splitStatements: true
