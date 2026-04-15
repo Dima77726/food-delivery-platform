@@ -5,3 +5,9 @@ databaseChangeLog:
   - include:
       file: migrations/002-create-restaurant.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/003-add-restaurant-description.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/004-create-menu-category-and-menu-item.yml
+      relativeToChangelogFile: true
