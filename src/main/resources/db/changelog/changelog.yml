@@ -11,3 +11,6 @@ databaseChangeLog:
   - include:
       file: migrations/004-create-menu-category-and-menu-item.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/005-create-cart-and-cart-item.yml
+      relativeToChangelogFile: true
