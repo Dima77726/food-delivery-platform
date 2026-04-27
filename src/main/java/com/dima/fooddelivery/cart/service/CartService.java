@@ -1,13 +1,16 @@
 package com.dima.fooddelivery.cart.service;
 
+import com.dima.fooddelivery.cart.api.AddCartItemRequest;
 import com.dima.fooddelivery.cart.api.CartItemResponse;
 import com.dima.fooddelivery.cart.api.CartResponse;
 import com.dima.fooddelivery.cart.persistence.CartRow;
 import com.dima.fooddelivery.cart.persistence.CartRowMapper;
+import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -21,6 +24,7 @@ public class CartService {
     private final JdbcTemplate jdbcTemplate;
     private final CartRowMapper cartRowMapper;
 
+    //метод ищет активную корзину клиента по ресторану
     public CartResponse getActiveCart(Long customerId, Long restaurantId) {
         log.info("Fetching active cart for customerId={}, restaurantId={}",  customerId, restaurantId);
 
@@ -49,7 +53,9 @@ public class CartService {
 
         if (rows.isEmpty()) {
             log.warn("Active cart not found for customerId={}, restaurantId={}", customerId, restaurantId);
-            throw new RuntimeException("Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId);
+            throw new ResourceNotFoundException(
+                    "Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId
+            );
         }
 
         CartResponse response = buildCartResponse(rows);
@@ -62,8 +68,209 @@ public class CartService {
         return response;
     }
 
+    //метод добавляет товар в корзину
+    @Transactional
+    public CartResponse addItemToCart(Long customerId, Long restaurantId, AddCartItemRequest request) {
+        log.info("Adding item to cart: customerId={}, restaurantId={}, menuItemId={}, quantity={}",
+                customerId,
+                restaurantId,
+                request.menuItemId(),
+                request.quantity()
+        );
+
+        validateRestaurantIsActive(restaurantId);
+
+        MenuItemSelection menuItem = findMenuItemForCart(restaurantId, request.menuItemId());
+
+        Long cartId = findActiveCartId(customerId, restaurantId);
+
+        if (cartId == null) {
+           cartId = createActiveCart(customerId, restaurantId);
+           log.info("Created new active cart: cartId={}, customerId={}, restaurantId={}",
+                   cartId,
+                   customerId,
+                   restaurantId
+           );
+        } else {
+            log.info("Using existing active cart: cartId={}", cartId);
+        }
+
+        addOrIncreaseCartItem(cartId, menuItem.id(), request.quantity(), menuItem.price());
+
+        touchCart(cartId);
+
+        CartResponse response = getActiveCart(customerId, restaurantId);
+
+        log.info("Item added to cart successfully: cartId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+    }
+
+    private void touchCart(Long cartId) {
+        String sql = """
+                UPDATE food_app.cart
+                SET updated_at = CURRENT_TIMESTAMP
+                Where id = ?
+                """;
+
+        int updatedRows = jdbcTemplate.update(sql, cartId);
+
+        if (updatedRows == 0) {
+            throw new IllegalStateException("Failed to update cart timestamp for cartId=" + cartId);
+        }
+    }
+
+    //добавить товар в корзину
+    private void addOrIncreaseCartItem(Long cartId,
+                                     Long menuItemId,
+                                     Integer quantity,
+                                     BigDecimal price) {
+        String sql = """
+                INSERT INTO food_app.cart_item (
+                                                  cart_id,
+                                                  menu_item_id,
+                                                  quantity,
+                                                  price
+                )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (cart_id, menu_item_id)
+                    DO UPDATE SET
+                    quantity = food_app.cart_item.quantity + EXCLUDED.quantity,
+                    updated_at = CURRENT_TIMESTAMP
+                """;
+
+        int updatedRows = jdbcTemplate.update(sql, cartId, menuItemId, quantity, price);
+
+        if (updatedRows == 0) {
+            throw new IllegalStateException("Failed to add menu item to cart: cartId=" + cartId + ", menuItemId=" + menuItemId);
+        }
+    }
+
+    //создаем новую корзину если до этого не было
+    private Long createActiveCart(Long customerId, Long restaurantId) {
+        String sql = """
+                INSERT INTO food_app.cart (
+                                             customer_id,
+                                             restaurant_id,
+                                             status
+                )
+                VALUES (?, ?, 'ACTIVE')
+                Returning id
+                """;
+        Long cartId = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                customerId,
+                restaurantId
+        );
+
+        if (cartId == null) {
+            throw new IllegalStateException("Failed to create active cart for customerId=" + customerId + " and restaurantId=" + restaurantId);
+        }
+
+        return cartId;
+    }
+
+    //поиск активной корзины
+    private Long findActiveCartId(Long customerId, Long restaurantId) {
+
+        String sql = """
+                SELECT
+                    c.id
+                FROM food_app.cart c
+                WHERE c.customer_id = ?
+                AND c.restaurant_id = ?
+                AND c.status = 'ACTIVE'
+        """;
+
+        List<Long> cartIds = jdbcTemplate.query(sql,
+                (rs, rowNum) -> rs.getLong("id"),
+                customerId,
+                restaurantId
+        );
+
+        return cartIds.isEmpty() ? null : cartIds.get(0);
+    }
+
+    //проверка блюда перед добавлением в корзину
+    private MenuItemSelection findMenuItemForCart(Long restaurantId, Long menuItemId) {
+        String sql = """
+                SELECT
+                    mi.id,
+                    mi.price,
+                    mi.is_available
+                FROM food_app.menu_item mi
+                join food_app.menu_category mc on mc.id = mi.category_id
+                where mc.restaurant_id = ?
+                and mi.id = ?
+        """;
+
+        List<MenuItemSelectionRow> rows = jdbcTemplate.query(sql,
+                (rs, rowNum) -> new MenuItemSelectionRow(
+                        rs.getLong("id"),
+                        rs.getBigDecimal("price"),
+                        rs.getBoolean("is_available")
+                ),
+                restaurantId,
+                menuItemId
+        );
+
+        if (rows.isEmpty()) {
+            log.warn("Menu item not found in restaursant: restaurantId={}, menuItemId={}",
+                    restaurantId,
+                    menuItemId
+            );
+            throw new ResourceNotFoundException("Menu item with id=" + menuItemId + " not found in restaurant with id=" + restaurantId);
+        }
+
+        MenuItemSelectionRow row = rows.get(0);
+
+        if (!Boolean.TRUE.equals(row.isAvailable())) {
+            log.warn("Menu item is unavailable: restaurantId={}, menuItemId={}",
+                    restaurantId,
+                    menuItemId
+            );
+            throw new ResourceNotFoundException("Menu item with id=" + menuItemId + " is unavailable");
+        }
+
+        return new MenuItemSelection(row.id(), row.price());
+    }
+
+    //проверка ресторана
+    private void validateRestaurantIsActive(Long restaurantId) {
+
+        String sql = """
+                select r.is_active
+                from food_app.restaurant r
+                where r.id = ?
+                """;
+
+        List<Boolean> states = jdbcTemplate.query(sql,
+                (rs, rowNum) -> rs.getBoolean("is_active"),
+                restaurantId
+        );
+
+        if (states.isEmpty()) {
+            log.warn("Restaurant not found for restaurantId={}", restaurantId);
+            throw new ResourceNotFoundException("Restaurant not found for restaurantId=" + restaurantId);
+        }
+
+        Boolean isActive = states.get(0);
+        
+        if (!Boolean.TRUE.equals(isActive)) {
+            log.warn("Restaurant is not active for restaurantId={}", restaurantId);
+            throw new IllegalStateException("Restaurant is not active for restaurantId=" + restaurantId);
+        }
+        
+
+    }
+
     private CartResponse buildCartResponse(List<CartRow> rows) {
-       CartRow firsRow = rows.get(0);
+       CartRow firstRow = rows.get(0);
 
         List<CartItemResponse> items = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
@@ -86,12 +293,25 @@ public class CartService {
             }
         }
         return new CartResponse(
-                firsRow.cartId(),
-                firsRow.customerId(),
-                firsRow.restaurantId(),
-                firsRow.cartStatus(),
+                firstRow.cartId(),
+                firstRow.customerId(),
+                firstRow.restaurantId(),
+                firstRow.cartStatus(),
                 items,
                 totalAmount
         );
+    }
+
+    private record MenuItemSelection(
+            Long id,
+            BigDecimal price
+    ) {
+    }
+
+    private record MenuItemSelectionRow(
+            Long id,
+            BigDecimal price,
+            Boolean isAvailable
+    ) {
     }
 }
