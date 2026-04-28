@@ -77,4 +77,30 @@ public class CartController {
         return response;
     }
 
+    @DeleteMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart/items/{cartItemId}")
+    public CartResponse removeCartItem(
+            @PathVariable Long customerId,
+            @PathVariable Long restaurantId,
+            @PathVariable Long cartItemId
+    ) {
+        log.info(
+                "Received request to remove cart item: customerId={}, restaurantId={}, cartItemId={}",
+                customerId,
+                restaurantId,
+                cartItemId
+        );
+
+       CartResponse response = cartService.removeCartItem(customerId, restaurantId, cartItemId);
+
+        log.info(
+                "Cart item removed successfully: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                cartItemId,
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+    }
+
 }

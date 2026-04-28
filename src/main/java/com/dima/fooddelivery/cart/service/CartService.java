@@ -374,6 +374,61 @@ public class CartService {
         );
     }
 
+    public CartResponse removeCartItem(Long customerId, Long restaurantId, Long cartItemId) {
+        log.info(
+                "Removing cart item: customerId={}, restaurantId={}, cartItemId={}",
+                customerId,
+                restaurantId,
+                cartItemId
+        );
+
+        validateRestaurantIsActive(restaurantId);
+
+        Long cartId = findActiveCartId(customerId, restaurantId);
+
+        if (cartId == null) {
+            log.warn(
+                    "Active cart not found while removing cart item: customerId={}, restaurantId={}",
+                    customerId,
+                    restaurantId
+            );
+            throw new ResourceNotFoundException("Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId);
+        }
+
+        deleteCartItemById(cartId, cartItemId);
+
+        touchCart(cartId);
+
+        CartResponse response = getActiveCart(customerId, restaurantId);
+
+        log.info(
+                "Cart item removed: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                cartItemId,
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+    }
+
+    private void deleteCartItemById(Long cartId, Long cartItemId) {
+
+        String sql = """
+                DELETE FROM food_app.cart_item ci
+                where ci.id = ?
+                and ci.cart_id = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(sql, cartItemId, cartId);
+
+        if (updateRows == 0) {
+            log.warn("Cart item not found in active cart while deleting: cartId={}, cartItemId={}", cartId, cartItemId);
+
+            throw new ResourceNotFoundException("Cart item with id=" + cartItemId + " not found in active cart with id=" + cartId);
+        }
+    }
+
     private record MenuItemSelection(
             Long id,
             BigDecimal price
