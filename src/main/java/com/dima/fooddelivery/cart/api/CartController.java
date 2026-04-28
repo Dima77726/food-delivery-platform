@@ -45,4 +45,36 @@ public class CartController {
         return response;
     }
 
+    @PatchMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart/items/{cartItemId}")
+    public CartResponse updateCartItemQuantity(
+            @PathVariable Long customerId,
+            @PathVariable Long restaurantId,
+            @PathVariable Long cartItemId,
+            @Valid @RequestBody UpdateCartItemQuantityRequest request
+    ) {
+        log.info( "Received request to update cart item quantity: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
+                customerId,
+                restaurantId,
+                cartItemId,
+                request.quantity()
+        );
+
+        CartResponse response = cartService.updateCartItemQuantity(
+                customerId,
+                restaurantId,
+                cartItemId,
+                request
+        );
+
+        log.info(
+                "Cart item quantity updated successfully: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                cartItemId,
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+    }
+
 }

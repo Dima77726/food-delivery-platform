@@ -3,9 +3,13 @@ package com.dima.fooddelivery.cart.service;
 import com.dima.fooddelivery.cart.api.AddCartItemRequest;
 import com.dima.fooddelivery.cart.api.CartItemResponse;
 import com.dima.fooddelivery.cart.api.CartResponse;
+import com.dima.fooddelivery.cart.api.UpdateCartItemQuantityRequest;
 import com.dima.fooddelivery.cart.persistence.CartRow;
 import com.dima.fooddelivery.cart.persistence.CartRowMapper;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -108,6 +112,74 @@ public class CartService {
         );
 
         return response;
+    }
+
+    @Transactional
+    public CartResponse updateCartItemQuantity(
+            Long customerId,
+            Long restaurantId,
+            Long cartItemId,
+            UpdateCartItemQuantityRequest request
+    ) {
+        log.info(
+                "Updating cart item quantity: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
+                customerId,
+                restaurantId,
+                cartItemId,
+                request.quantity()
+        );
+
+        validateRestaurantIsActive(restaurantId);
+
+        Long cartId = findActiveCartId(customerId, restaurantId);
+
+        if (cartId == null) {
+            log.warn(
+                    "Active cart not found while updating cart item quantity: customerId={}, restaurantId={}",
+                    customerId,
+                    restaurantId
+            );
+            throw new ResourceNotFoundException(
+                    "Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId
+            );
+        }
+
+            updateCartItemQuantityByid(cartId, cartItemId, request.quantity());
+
+            touchCart(cartId);
+
+            CartResponse response = getActiveCart(customerId, restaurantId);
+
+            log.info(
+                    "Cart item quantity updated: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                    response.id(),
+                    cartItemId,
+                    response.items().size(),
+                    response.totalAmount()
+            );
+
+            return response;
+    }
+
+    private void updateCartItemQuantityByid(
+            Long cartId,
+            Long cartItemId,
+            Integer quantity
+    ) {
+        String sql = """
+                UPDATE food_app.cart_item ci
+                SET quantity = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE ci.id = ?
+                and ci.cart_id = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(sql, quantity,  cartItemId, cartId);
+
+        if (updateRows == 0) {
+            log.warn("Cart item not found in active cart: cartId={}, cartItemId={}", cartId, cartItemId);
+            throw new ResourceNotFoundException("Cart item with id=" + cartItemId + " not found in active cart with id=" + cartId);
+        }
     }
 
     private void touchCart(Long cartId) {
@@ -260,12 +332,12 @@ public class CartService {
         }
 
         Boolean isActive = states.get(0);
-        
+
         if (!Boolean.TRUE.equals(isActive)) {
             log.warn("Restaurant is not active for restaurantId={}", restaurantId);
             throw new IllegalStateException("Restaurant is not active for restaurantId=" + restaurantId);
         }
-        
+
 
     }
 
