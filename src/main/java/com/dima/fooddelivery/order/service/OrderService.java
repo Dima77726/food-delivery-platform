@@ -1,0 +1,282 @@
+package com.dima.fooddelivery.order.service;
+
+import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.order.api.OrderItemResponse;
+import com.dima.fooddelivery.order.api.OrderResponse;
+import com.dima.fooddelivery.order.persistence.OrderRow;
+import com.dima.fooddelivery.order.persistence.OrderRowMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final JdbcTemplate jdbcTemplate;
+    private final OrderRowMapper orderRowMapper;
+
+    @Transactional
+    public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
+        log.info("createOrderFromActiveCart customerId = {}, restaurantId = {}", customerId, restaurantId);
+
+        Long cartId = findActiveCartId(customerId, restaurantId);
+
+        if (cartId == null) {
+            log.warn(
+                    "Active cart not found while creating order: customerId={}, restaurantId={}",
+                    customerId,
+                    restaurantId
+            );
+
+            throw new ResourceNotFoundException("Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId);
+        }
+
+        List<CartItemForOrder> cartItems = findCartItemsForOrder(cartId);
+
+        if (cartItems.isEmpty()) {
+            log.warn("Cannot create order from empty cart: cartId={}", cartId);
+
+            throw new IllegalStateException("Cannot create order from empty cart: cartId=" + cartId);
+        }
+
+        BigDecimal totalAmount = calculateTotalAmount(cartItems);
+
+        Long orderId = createOrder(cartId, customerId, restaurantId, totalAmount);
+
+        createOrderItems(orderId, cartItems);
+
+        checkoutCart(cartId);
+
+        OrderResponse response = getOrderById(orderId);
+
+        log.info(
+                "Order created from cart successfully: orderId={}, cartId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                response.cartId(),
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+
+    }
+
+    private OrderResponse getOrderById(Long orderId) {
+        String sql = """
+                SELECT
+                    co.id AS order_id,
+                    co.cart_id,
+                    co.customer_id,
+                    co.restaurant_id,
+                    co.status AS order_status,
+                    co.total_amount,
+
+                    coi.id AS order_item_id,
+                    coi.menu_item_id,
+                    coi.menu_item_name,
+                    coi.quantity,
+                    coi.price,
+                    coi.line_total
+                FROM food_app.customer_order co
+                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
+                WHERE co.id = ?
+                ORDER BY coi.id
+                """;
+
+        List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId);
+
+        if (rows.isEmpty()) {
+            throw new ResourceNotFoundException("Order not found for orderId=" + orderId);
+        }
+
+        return buildOrderResponse(rows);
+    }
+
+    private OrderResponse buildOrderResponse(List<OrderRow> rows) {
+        OrderRow firstRow = rows.get(0);
+
+        List<OrderItemResponse> items = new ArrayList<>();
+
+        for (OrderRow row : rows) {
+            if (row.orderItemId() != null) {
+                items.add(
+                        new OrderItemResponse(
+                            row.orderItemId(),
+                            row.menuItemId(),
+                            row.menuItemName(),
+                            row.quantity(),
+                            row.price(),
+                            row.lineTotal()
+                        )
+                );
+            }
+        }
+        return new OrderResponse(
+                firstRow.orderId(),
+                firstRow.cartId(),
+                firstRow.customerId(),
+                firstRow.restaurantId(),
+                firstRow.orderStatus(),
+                firstRow.totalAmount(),
+                items
+        );
+    }
+
+    private void checkoutCart(Long cartId) {
+        String sql = """
+                UPDATE food_app.cart
+                SET status = 'CHECKED_OUT',
+                    updated_at = CURRENT_TIMESTAMP
+                where id = ?
+                and status = 'ACTIVE'
+                """;
+
+        int updateRows = jdbcTemplate.update(sql, cartId);
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Failed to checkout active cart with id=" + cartId);
+        }
+    }
+
+    private void createOrderItems(Long orderId, List<CartItemForOrder> cartItems) {
+        String sql = """
+                INSERT INTO food_app.customer_order_item (
+                                                          order_id,
+                                                          menu_item_id,
+                                                          menu_item_name,
+                                                          quantity,
+                                                          price,
+                                                          line_total
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """;
+
+        int[] updatedRows  = jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+
+                    @Override
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        CartItemForOrder item = cartItems.get(i);
+
+                        ps.setLong(1, orderId);
+                        ps.setLong(2, item.menuItemId);
+                        ps.setString(3, item.menuItemName);
+                        ps.setInt(4, item.quantity);
+                        ps.setBigDecimal(5, item.price);
+                        ps.setBigDecimal(6, item.lineTotal);
+                    }
+
+                    @Override
+                    public int getBatchSize() {
+                        return cartItems.size();
+                    }
+                }
+        );
+
+        if (updatedRows.length != cartItems.size()) {
+            throw new IllegalStateException("Failed to create all order items for orderId=" + orderId);
+        }
+    }
+
+    private Long createOrder(Long cartId, Long customerId, Long restaurantId, BigDecimal totalAmount) {
+        String sql = """
+                INSERT INTO food_app.customer_order (
+                                                     cart_id,
+                                                     customer_id,
+                                                     restaurant_id,
+                                                     status,
+                                                     total_amount
+                )
+                VALUES (?, ?, ?, 'CREATED', ?)
+                RETURNING id;
+                """;
+
+        Long orderId = jdbcTemplate.queryForObject(sql, Long.class, cartId, customerId, restaurantId, totalAmount);
+
+        if (orderId == null) {
+            throw new ResourceNotFoundException( "Failed to create order for customerId=" + customerId + " and restaurantId=" + restaurantId);
+        }
+        
+        return orderId;
+    }
+
+    private BigDecimal calculateTotalAmount(List<CartItemForOrder> cartItems) {
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        
+        for (CartItemForOrder cartItem : cartItems) {
+            totalAmount = totalAmount.add(cartItem.lineTotal());
+        }
+        
+        return totalAmount;
+    }
+
+    private List<CartItemForOrder> findCartItemsForOrder(Long cartId) {
+
+        String sql = """
+                SELECT
+                   ci.menu_item_id,
+                   mi.name as menu_item_name,
+                   ci.quantity,
+                   ci.price
+                from food_app.cart_item ci 
+                join food_app.menu_item mi on ci.menu_item_id = mi.id
+                where ci.cart_id = ?
+                order by ci.created_at, ci.id
+                """;
+
+        return jdbcTemplate.query(sql,
+                (rs, rowNum) -> {
+                    BigDecimal price = rs.getBigDecimal("price");
+                    Integer quantity = rs.getObject("quantity", Integer.class);
+                    BigDecimal lineTotal = price.multiply(BigDecimal.valueOf(quantity));
+
+                    return new CartItemForOrder(
+                            rs.getLong("menu_item_id"),
+                            rs.getString("menu_item_name"),
+                            quantity,
+                            price,
+                            lineTotal
+                    );
+                },
+                cartId
+        );
+    }
+
+    private Long findActiveCartId(Long customerId, Long restaurantId) {
+
+        String sql = """
+                SELECT c.id
+                from food_app.cart c
+                where c.customer_id = ?
+                and c.restaurant_id = ?
+                and c.status = 'ACTIVE'
+                """;
+
+        List<Long> cartIds = jdbcTemplate.query(sql,
+                (rs, rowNum) -> rs.getLong("id"),
+                customerId,
+                restaurantId);
+
+        return cartIds.isEmpty() ? null : cartIds.get(0);
+    }
+
+    private record CartItemForOrder(
+            Long menuItemId,
+            String menuItemName,
+            Integer quantity,
+            BigDecimal price,
+            BigDecimal lineTotal
+    ) {
+    }
+
+}
