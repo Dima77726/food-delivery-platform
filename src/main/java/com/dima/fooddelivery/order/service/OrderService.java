@@ -72,6 +72,58 @@ public class OrderService {
 
     }
 
+    public OrderResponse getOrderByIdForCustomer(Long customerId, Long orderId) {
+        log.info("Fetching order for customer: customerId = {}, orderId = {}",
+                customerId,
+                orderId
+        );
+
+        String sql = """
+                SELECT
+                    co.id AS order_id,
+                    co.cart_id,
+                    co.customer_id,
+                    co.restaurant_id,
+                    co.status AS order_status,
+                    co.total_amount,
+
+                    coi.id AS order_item_id,
+                    coi.menu_item_id,
+                    coi.menu_item_name,
+                    coi.quantity,
+                    coi.price,
+                    coi.line_total
+                FROM food_app.customer_order co
+                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
+                WHERE co.id = ?
+                and co.customer_id = ?
+                ORDER BY coi.id 
+                """;
+
+        List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId, customerId);
+
+        if (rows.isEmpty()) {
+            log.warn("Order not found for customer: customerId={}, orderId={}",
+                    customerId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException( "Order with id=" + orderId + " not found for customerId=" + customerId);
+        }
+
+        OrderResponse response = buildOrderResponse(rows);
+
+        log.info("Order loaded for customer: customerId={}, orderId={}, status={}, totalAmount={}, itemsCount={}",
+                response.customerId(),
+                response.id(),
+                response.status(),
+                response.totalAmount(),
+                response.items().size()
+                );
+
+        return response;
+    }
+
     private OrderResponse getOrderById(Long orderId) {
         String sql = """
                 SELECT
@@ -206,17 +258,17 @@ public class OrderService {
         if (orderId == null) {
             throw new ResourceNotFoundException( "Failed to create order for customerId=" + customerId + " and restaurantId=" + restaurantId);
         }
-        
+
         return orderId;
     }
 
     private BigDecimal calculateTotalAmount(List<CartItemForOrder> cartItems) {
         BigDecimal totalAmount = BigDecimal.ZERO;
-        
+
         for (CartItemForOrder cartItem : cartItems) {
             totalAmount = totalAmount.add(cartItem.lineTotal());
         }
-        
+
         return totalAmount;
     }
 
@@ -269,6 +321,7 @@ public class OrderService {
 
         return cartIds.isEmpty() ? null : cartIds.get(0);
     }
+
 
     private record CartItemForOrder(
             Long menuItemId,
