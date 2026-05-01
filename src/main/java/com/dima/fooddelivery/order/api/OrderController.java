@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @Slf4j
 @RequiredArgsConstructor
@@ -59,6 +61,26 @@ public class OrderController {
                 response.status(),
                 response.totalAmount(),
                 response.items().size()
+        );
+
+        return response;
+    }
+
+    @GetMapping("/api/v1/customers/{customerId}/orders")
+    public List<OrderSummaryResponse> getOrdersByCustomer(
+            @PathVariable Long customerId
+    ) {
+        log.info(
+                "Received request to fetch customer orders: customerId={}",
+                customerId
+        );
+
+        List<OrderSummaryResponse> response = orderService.getOrdersByCustomer(customerId);
+
+        log.info(
+                "Returning customer orders: customerId={}, ordersCount={}",
+                customerId,
+                response.size()
         );
 
         return response;
