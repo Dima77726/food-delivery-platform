@@ -3,6 +3,7 @@ package com.dima.fooddelivery.order.service;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.order.api.OrderItemResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
+import com.dima.fooddelivery.order.api.OrderSummaryResponse;
 import com.dima.fooddelivery.order.persistence.OrderRow;
 import com.dima.fooddelivery.order.persistence.OrderRowMapper;
 import lombok.RequiredArgsConstructor;
@@ -122,6 +123,54 @@ public class OrderService {
                 );
 
         return response;
+    }
+
+    public List<OrderSummaryResponse> getOrdersByCustomer(Long customerId) {
+        log.info("Fetching orders for customer: customerId = {}", customerId);
+
+        String sql = """
+                SELECT
+                    co.id AS order_id,
+                    co.cart_id,
+                    co.customer_id,
+                    co.restaurant_id,
+                    co.status AS order_status,
+                    co.total_amount,
+                    co.created_at,
+                    COUNT(coi.id) AS items_count
+                FROM food_app.customer_order co
+                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
+                WHERE co.customer_id = ?
+                GROUP BY co.id,
+                         co.cart_id,
+                         co.customer_id,
+                         co.restaurant_id,
+                         co.status,
+                         co.total_amount,
+                         co.created_at
+                ORDER BY co.created_at  DESC, co.id DESC
+                """;
+
+        List<OrderSummaryResponse> orders = jdbcTemplate.query(sql,
+                (rs, rowNum) -> new OrderSummaryResponse(
+                        rs.getLong("order_id"),
+                        rs.getLong("cart_id"),
+                        rs.getLong("customer_id"),
+                        rs.getLong("restaurant_id"),
+                        rs.getString("order_status"),
+                        rs.getBigDecimal("total_amount"),
+                        rs.getObject("items_count", Long.class),
+                        rs.getObject("created_at", java.time.OffsetDateTime.class)
+                ),
+                customerId
+        );
+        log.info(
+                "Orders loaded for customer: customerId={}, ordersCount={}",
+                customerId,
+                orders.size()
+        );
+
+        return orders;
     }
 
     private OrderResponse getOrderById(Long orderId) {
@@ -321,6 +370,7 @@ public class OrderService {
 
         return cartIds.isEmpty() ? null : cartIds.get(0);
     }
+
 
 
     private record CartItemForOrder(
