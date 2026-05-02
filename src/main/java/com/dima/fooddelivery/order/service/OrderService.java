@@ -4,6 +4,7 @@ import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.order.api.OrderItemResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
 import com.dima.fooddelivery.order.api.OrderSummaryResponse;
+import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.order.persistence.OrderRow;
 import com.dima.fooddelivery.order.persistence.OrderRowMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,9 +27,6 @@ public class OrderService {
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRowMapper orderRowMapper;
-
-    private static final String ORDER_STATUS_CREATED = "CREATED";
-    private static final String ORDER_STATUS_CANCELLED = "CANCELED";
 
     @Transactional
     public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
@@ -196,7 +194,7 @@ public class OrderService {
             throw new ResourceNotFoundException("Order with id=" + orderId + " not found for customerId=" + customerId);
         }
 
-        if (!ORDER_STATUS_CREATED.equals(orderStatusSnapshot.status)) {
+        if (!orderStatusSnapshot.status().canBeCanceledByCustomer()) {
             log.warn(
                     "Order cannot be canceled: customerId={}, orderId={}, currentStatus={}",
                     customerId,
@@ -231,7 +229,12 @@ public class OrderService {
                 and status = ?
                 """;
 
-        int updateRows = jdbcTemplate.update(sql, ORDER_STATUS_CANCELLED, orderId, customerId, ORDER_STATUS_CREATED);
+        int updateRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.CANCELED.getDbValue(),
+                orderId,
+                customerId,
+                OrderStatus.CREATED.getDbValue());
 
         if (updateRows == 0) {
             throw new IllegalStateException("Failed to cancel order with id=" + orderId + " for customerId=" + customerId);
@@ -251,7 +254,7 @@ public class OrderService {
         List<OrderStatusSnapshot> statuses = jdbcTemplate.query(sql,
                 (rs, rowNum) -> new OrderStatusSnapshot(
                         rs.getLong("id"),
-                        rs.getString("status")
+                        OrderStatus.fromDbValue(rs.getString("status"))
                 ),
                 orderId,
                 customerId
@@ -385,11 +388,18 @@ public class OrderService {
                                                      status,
                                                      total_amount
                 )
-                VALUES (?, ?, ?, 'CREATED', ?)
+                VALUES (?, ?, ?, ?, ?)
                 RETURNING id;
                 """;
 
-        Long orderId = jdbcTemplate.queryForObject(sql, Long.class, cartId, customerId, restaurantId, totalAmount);
+        Long orderId = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                cartId,
+                customerId,
+                restaurantId,
+                OrderStatus.CREATED.getDbValue(),
+                totalAmount);
 
         if (orderId == null) {
             throw new ResourceNotFoundException( "Failed to create order for customerId=" + customerId + " and restaurantId=" + restaurantId);
@@ -471,7 +481,7 @@ public class OrderService {
 
     private record OrderStatusSnapshot(
             Long orderId,
-            String status
+            OrderStatus status
     ) {
     }
 
