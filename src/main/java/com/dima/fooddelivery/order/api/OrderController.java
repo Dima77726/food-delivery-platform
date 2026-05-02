@@ -85,4 +85,27 @@ public class OrderController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/customers/{customerId}/orders/{orderId}/cancel")
+    public OrderResponse cancelOrder(
+            @PathVariable Long customerId,
+            @PathVariable Long orderId
+    ) {
+        log.info(
+                "Received request to cancel order: customerId={}, orderId={}",
+                customerId,
+                orderId
+        );
+
+        OrderResponse response = orderService.cancelOrder(customerId, orderId);
+
+        log.info(
+                "Order canceled successfully: orderId={}, customerId={}, status={}",
+                response.id(),
+                response.customerId(),
+                response.status()
+        );
+
+        return response;
+    }
 }

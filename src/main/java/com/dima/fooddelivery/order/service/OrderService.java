@@ -27,6 +27,9 @@ public class OrderService {
     private final JdbcTemplate jdbcTemplate;
     private final OrderRowMapper orderRowMapper;
 
+    private static final String ORDER_STATUS_CREATED = "CREATED";
+    private static final String ORDER_STATUS_CANCELLED = "CANCELED";
+
     @Transactional
     public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
         log.info("createOrderFromActiveCart customerId = {}, restaurantId = {}", customerId, restaurantId);
@@ -171,6 +174,90 @@ public class OrderService {
         );
 
         return orders;
+    }
+
+    @Transactional
+    public OrderResponse cancelOrder(Long customerId, Long orderId) {
+        log.info(
+                "Canceling order: customerId={}, orderId={}",
+                customerId,
+                orderId
+        );
+
+        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForCustomer(customerId, orderId);
+
+        if (orderStatusSnapshot == null) {
+            log.warn(
+                    "Order not found while canceling: customerId={}, orderId={}",
+                    customerId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for customerId=" + customerId);
+        }
+
+        if (!ORDER_STATUS_CREATED.equals(orderStatusSnapshot.status)) {
+            log.warn(
+                    "Order cannot be canceled: customerId={}, orderId={}, currentStatus={}",
+                    customerId,
+                    orderId,
+                    orderStatusSnapshot.status()
+            );
+
+            throw new IllegalStateException("Only CREATED orders can be canceled. Current status=" + orderStatusSnapshot.status());
+        }
+
+        updateOrderStatusToCanceled(customerId, orderId);
+
+        OrderResponse response = getOrderByIdForCustomer(customerId, orderId);
+
+        log.info(
+                "Order canceled: customerId={}, orderId={}, newStatus={}",
+                customerId,
+                orderId,
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateOrderStatusToCanceled(Long customerId, Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order
+                set status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                and customer_id = ?
+                and status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(sql, ORDER_STATUS_CANCELLED, orderId, customerId, ORDER_STATUS_CREATED);
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Failed to cancel order with id=" + orderId + " for customerId=" + customerId);
+        }
+    }
+
+    private OrderStatusSnapshot findOrderStatusForCustomer(Long customerId, Long orderId) {
+        String sql = """
+                SELECT
+                    co.id,
+                    co.status
+                FROM food_app.customer_order co
+                where co.id = ?
+                and co.customer_id = ?
+                """;
+
+        List<OrderStatusSnapshot> statuses = jdbcTemplate.query(sql,
+                (rs, rowNum) -> new OrderStatusSnapshot(
+                        rs.getLong("id"),
+                        rs.getString("status")
+                ),
+                orderId,
+                customerId
+        );
+
+        return  statuses.isEmpty() ? null : statuses.get(0);
     }
 
     private OrderResponse getOrderById(Long orderId) {
@@ -379,6 +466,12 @@ public class OrderService {
             Integer quantity,
             BigDecimal price,
             BigDecimal lineTotal
+    ) {
+    }
+
+    private record OrderStatusSnapshot(
+            Long orderId,
+            String status
     ) {
     }
 
