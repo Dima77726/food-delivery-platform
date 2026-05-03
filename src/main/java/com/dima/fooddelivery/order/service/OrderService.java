@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.order.service;
 
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.order.api.OrderEventResponse;
 import com.dima.fooddelivery.order.api.OrderItemResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
 import com.dima.fooddelivery.order.api.OrderSummaryResponse;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -230,6 +232,78 @@ public class OrderService {
         );
 
         return response;
+    }
+
+    public List<OrderEventResponse> getOrderEventsForCustomer(Long customerId, Long orderId) {
+        log.info(
+                "Fetching order events for customer: customerId={}, orderId={}",
+                customerId,
+                orderId
+        );
+
+        boolean orderExist = existsOrderForCustomer(customerId, orderId);
+
+        if (!orderExist) {
+            log.warn(
+                    "Order not found while fetching events: customerId={}, orderId={}",
+                    customerId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for customerId=" + customerId );
+        }
+
+        String sql = """
+                SELECT 
+                    e.id,
+                    e.order_id,
+                    e.event_type,
+                    e.description,
+                    e.created_at
+                FROM food_app.customer_order_event e
+                where e.order_id = ?
+                order by e.created_at ASC , e.id ASC 
+                """;
+
+        List<OrderEventResponse> events = jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new OrderEventResponse(
+                        rs.getLong("id"),
+                        rs.getLong("order_id"),
+                        rs.getString("event_type"),
+                        rs.getString("description"),
+                        rs.getObject("created_at", OffsetDateTime.class)
+                ),
+                orderId
+        );
+
+        log.info(
+                "Order events loaded: customerId={}, orderId={}, eventsCount={}",
+                customerId,
+                orderId,
+                events.size()
+        );
+
+        return events;
+    }
+
+    private boolean existsOrderForCustomer(Long customerId, Long orderId) {
+        String sql = """
+                SELECT EXISTS (
+                SELECT 1 FROM food_app.customer_order co
+                where co.id = ?
+                and co.customer_id = ?
+                )
+                """;
+
+        Boolean exists = jdbcTemplate.queryForObject(
+                sql,
+                Boolean.class,
+                orderId,
+                customerId
+        );
+
+        return Boolean.TRUE.equals(exists);
     }
 
     private void updateOrderStatusToCanceled(Long customerId, Long orderId) {
