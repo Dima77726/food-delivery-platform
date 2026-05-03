@@ -108,4 +108,27 @@ public class OrderController {
 
         return response;
     }
+
+    @GetMapping("/api/v1/customers/{customerId}/orders/{orderId}/events")
+    public List<OrderEventResponse> getOrderEvents(
+            @PathVariable Long customerId,
+            @PathVariable Long orderId
+    ) {
+        log.info(
+                "Received request to fetch order events: customerId={}, orderId={}",
+                customerId,
+                orderId
+        );
+
+        List<OrderEventResponse> response = orderService.getOrderEventsForCustomer(customerId, orderId);
+
+        log.info(
+                "Returning order events: customerId={}, orderId={}, eventsCount={}",
+                customerId,
+                orderId,
+                response.size()
+        );
+
+        return response;
+    }
 }
