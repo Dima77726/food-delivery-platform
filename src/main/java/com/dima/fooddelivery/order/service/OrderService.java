@@ -4,6 +4,7 @@ import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.order.api.OrderItemResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
 import com.dima.fooddelivery.order.api.OrderSummaryResponse;
+import com.dima.fooddelivery.order.domain.OrderEventType;
 import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.order.persistence.OrderRow;
 import com.dima.fooddelivery.order.persistence.OrderRowMapper;
@@ -59,6 +60,12 @@ public class OrderService {
         createOrderItems(orderId, cartItems);
 
         checkoutCart(cartId);
+
+        createOrderEvent(
+                orderId,
+                OrderEventType.ORDER_CREATED,
+                "Order created from active cart"
+        );
 
         OrderResponse response = getOrderById(orderId);
 
@@ -207,6 +214,12 @@ public class OrderService {
 
         updateOrderStatusToCanceled(customerId, orderId);
 
+        createOrderEvent(
+                orderId,
+                OrderEventType.ORDER_CANCELED,
+                "Order canceled by customer"
+        );
+
         OrderResponse response = getOrderByIdForCustomer(customerId, orderId);
 
         log.info(
@@ -337,6 +350,27 @@ public class OrderService {
 
         if (updateRows == 0) {
             throw new IllegalStateException("Failed to checkout active cart with id=" + cartId);
+        }
+    }
+
+    private void createOrderEvent(
+            Long orderId,
+            OrderEventType eventType,
+            String description
+    ) {
+        String sql = """
+                INSERT INTO food_app.customer_order_event (
+                                                           order_id,
+                                                           event_type,
+                                                           description
+                )
+                values (?,?,?)
+        """;
+
+        int updateRows = jdbcTemplate.update(sql, orderId, eventType.getDbValue(), description);
+
+        if (updateRows != 1) {
+            throw new IllegalStateException("Failed to create order event for orderId=" + orderId + ", eventType=" + eventType.getDbValue());
         }
     }
 
