@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-add-order-accepted-event-type
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/008-add-order-accepted-event-type.sql
+            relativeToChangelogFile: true
+            splitStatements: true
