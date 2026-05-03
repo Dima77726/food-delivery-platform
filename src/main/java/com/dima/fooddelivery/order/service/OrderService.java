@@ -287,6 +287,105 @@ public class OrderService {
         return events;
     }
 
+    public OrderResponse acceptOrder(Long restaurantId, Long orderId) {
+        log.info(
+                "Accepting order: restaurantId={}, orderId={}",
+                restaurantId,
+                orderId
+        );
+
+        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
+
+        if (orderStatusSnapshot == null) {
+            log.warn(
+                    "Order not found while accepting: restaurantId={}, orderId={}",
+                    restaurantId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for restaurantId=" + restaurantId);
+        }
+
+        if (!orderStatusSnapshot.status().canBeAcceptedByRestaurant()) {
+            log.warn(
+                    "Order cannot be accepted: restaurantId={}, orderId={}, currentStatus={}",
+                    restaurantId,
+                    orderId,
+                    orderStatusSnapshot.status()
+            );
+
+            throw new IllegalStateException("Only CREATED orders can be accepted by restaurant. Current status=" +  orderStatusSnapshot.status().getDbValue());
+        }
+
+        updateOrderStatusToAccepted(restaurantId, orderId);
+
+        createOrderEvent(
+                orderId,
+                OrderEventType.ORDER_ACCEPTED,
+                "Order accepted by restaurant"
+        );
+
+        OrderResponse response = getOrderById(orderId);
+
+        log.info(
+                "Order accepted: restaurantId={}, orderId={}, newStatus={}",
+                restaurantId,
+                orderId,
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateOrderStatusToAccepted(Long restaurantId, Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order 
+                set status = ?,
+                    updated_at = current_timestamp
+                where id = ?
+                and restaurant_id = ?
+                and status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.ACCEPTED.getDbValue(),
+                orderId,
+                restaurantId,
+                OrderStatus.CREATED.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException(
+                    "Failed to accept order with id=" + orderId + " for restaurantId=" + restaurantId
+            );
+        }
+    }
+
+    private OrderStatusSnapshot findOrderStatusForRestaurant(Long restaurantId, Long orderId) {
+
+        String sql = """
+                SELECT 
+                    co.id,
+                    co.status
+                from food_app.customer_order co
+                where co.id = ?
+                and co.restaurant_id = ?
+                """;
+
+        List<OrderStatusSnapshot> statuses = jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new OrderStatusSnapshot(
+                        rs.getLong("id"),
+                        OrderStatus.fromDbValue(rs.getString("status"))
+                ),
+                orderId,
+                restaurantId
+        );
+
+        return statuses.isEmpty() ? null : statuses.get(0);
+    }
+
     private boolean existsOrderForCustomer(Long customerId, Long orderId) {
         String sql = """
                 SELECT EXISTS (

@@ -131,4 +131,28 @@ public class OrderController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/restaurants/{restaurantId}/orders/{orderId}/accept")
+
+    public OrderResponse acceptOrder(
+            @PathVariable Long restaurantId,
+            @PathVariable Long orderId
+    ) {
+        log.info(
+            "Received request to accept order: restaurantId={}, orderId={}",
+            restaurantId,
+            orderId
+        );
+
+        OrderResponse response = orderService.acceptOrder(restaurantId, orderId);
+
+        log.info(
+                "Order accepted successfully: restaurantId={}, orderId={}, status={}",
+                restaurantId,
+                orderId,
+                response.status()
+        );
+
+        return response;
+    }
 }

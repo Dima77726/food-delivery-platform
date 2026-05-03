@@ -25,6 +25,10 @@ public enum OrderStatus {
         return this == CREATED;
     }
 
+    public boolean canBeAcceptedByRestaurant() {
+        return this == CREATED;
+    }
+
     public static OrderStatus fromDbValue(String dbValue) {
         for (OrderStatus status : values()) {
             if (status.dbValue.equals(dbValue)) {
