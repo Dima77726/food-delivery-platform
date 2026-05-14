@@ -337,6 +337,80 @@ public class OrderService {
         return response;
     }
 
+    @Transactional
+    public OrderResponse startCookingOrder(Long restaurantId, Long orderId) {
+        log.info(
+                "Starting cooking order: restaurantId={}, orderId={}",
+                restaurantId,
+                orderId
+        );
+
+        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
+
+        if (orderStatusSnapshot == null) {
+            log.warn(
+                    "Order not found while starting cooking: restaurantId={}, orderId={}",
+                    restaurantId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for restaurantId=" + restaurantId);
+        }
+
+        if (!orderStatusSnapshot.status().canStartCookingByRestaurant()) {
+            log.warn(
+                    "Order cannot start cooking: restaurantId={}, orderId={}, currentStatus={}",
+                    restaurantId,
+                    orderId,
+                    orderStatusSnapshot.status()
+            );
+
+            throw new IllegalStateException("Only ACCEPTED orders can start cooking. Current status=" + orderStatusSnapshot.status().getDbValue());
+        }
+
+        updateOrderStatusToCooking(restaurantId, orderId);
+
+        createOrderEvent(
+                orderId,
+                OrderEventType.ORDER_COOKING_STARTED,
+                "Order cooking started by restaurant"
+        );
+
+        OrderResponse response = getOrderById(orderId);
+
+        log.info(
+                "Order cooking started: restaurantId={}, orderId={}, newStatus={}",
+                restaurantId,
+                orderId,
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateOrderStatusToCooking(Long restaurantId, Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order
+                set status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                where id = ?
+                and restaurant_id = ?
+                and status = ?
+                """;
+
+        int updatedRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.COOKING.getDbValue(),
+                orderId,
+                restaurantId,
+                OrderStatus.ACCEPTED.getDbValue()
+        );
+
+        if (updatedRows == 0) {
+            throw new IllegalStateException("Failed to start cooking order with id=" + orderId + " for restaurantId=" + restaurantId);
+        }
+    }
+
     private void updateOrderStatusToAccepted(Long restaurantId, Long orderId) {
         String sql = """
                 UPDATE food_app.customer_order 

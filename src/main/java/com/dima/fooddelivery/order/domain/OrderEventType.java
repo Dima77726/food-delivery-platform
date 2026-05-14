@@ -6,7 +6,9 @@ public enum OrderEventType {
 
     ORDER_CANCELED("ORDER_CANCELED"),
 
-    ORDER_ACCEPTED("ORDER_ACCEPTED");
+    ORDER_ACCEPTED("ORDER_ACCEPTED"),
+
+    ORDER_COOKING_STARTED("ORDER_COOKING_STARTED");
 
     private final String dbValue;
 
