@@ -155,4 +155,28 @@ public class OrderController {
 
         return response;
     }
+
+    @PostMapping("api/v1/restaurants/{restaurantId}/orders/{orderId}/start-cooking")
+    public OrderResponse startCookingOrder(
+            @PathVariable Long restaurantId,
+            @PathVariable Long orderId
+    )
+    {
+        log.info(
+                "Received request to start cooking order: restaurantId={}, orderId={}",
+                restaurantId,
+                orderId
+                );
+
+        OrderResponse response = orderService.startCookingOrder(restaurantId, orderId);
+
+        log.info(
+                "Order cooking started successfully: restaurantId={}, orderId={}, status={}",
+                restaurantId,
+                response.id(),
+                response.status()
+        );
+
+        return response;
+    }
 }

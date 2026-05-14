@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 010-fix-order-event-type-check-constraint
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/010-fix-order-event-type-check-constraint.sql
+            relativeToChangelogFile: true
+            splitStatements: true

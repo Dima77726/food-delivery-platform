@@ -23,3 +23,9 @@ databaseChangeLog:
   - include:
       file: migrations/008-add-order-accepted-event-type.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/009-add-order-cooking-started-event-type.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/010-fix-order-event-type-check-constraint.yml
+      relativeToChangelogFile: true
