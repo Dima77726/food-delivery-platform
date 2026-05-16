@@ -388,6 +388,83 @@ public class OrderService {
         return response;
     }
 
+    @Transactional
+    public OrderResponse markOrderReadyForDelivery(Long restaurantId, Long orderId) {
+        log.info(
+                "Marking order ready for delivery: restaurantId={}, orderId={}",
+                restaurantId,
+                orderId
+        );
+
+        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
+
+        if (orderStatusSnapshot == null) {
+            log.warn(
+                    "Order not found while marking ready for delivery: restaurantId={}, orderId={}",
+                    restaurantId,
+                    orderId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Order with id=" + orderId + " not found for restaurantId=" + restaurantId
+            );
+        }
+
+        if (!orderStatusSnapshot.status().canBeMarkedReadyForDeliveryByRestaurant()) {
+            log.warn(
+                    "Order cannot be marked ready for delivery: restaurantId={}, orderId={}, currentStatus={}",
+                    restaurantId,
+                    orderId,
+                    orderStatusSnapshot.status()
+            );
+
+            throw new IllegalStateException("Only COOKING orders can be marked ready for delivery. Current status="
+                    +  orderStatusSnapshot.status().getDbValue());
+        }
+
+        updateOrderStatusToReadyForDelivery(restaurantId, orderId);
+
+        createOrderEvent(
+                orderId,
+                OrderEventType.ORDER_READY_FOR_DELIVERY,
+                "Order marked ready for delivery by restaurant"
+        );
+
+        OrderResponse response = getOrderById(orderId);
+
+        log.info(
+                "Order marked ready for delivery: restaurantId={}, orderId={}, newStatus={}",
+                restaurantId,
+                orderId,
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateOrderStatusToReadyForDelivery(Long restaurantId, Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order
+                set status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                where restaurant_id = ?
+                and id = ?
+                and status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.READY_FOR_DELIVERY.getDbValue(),
+                restaurantId,
+                orderId,
+                OrderStatus.COOKING.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Failed to mark order ready for delivery with id=" + orderId + " for restaurantId=" + restaurantId);
+        }
+    }
+
     private void updateOrderStatusToCooking(Long restaurantId, Long orderId) {
         String sql = """
                 UPDATE food_app.customer_order

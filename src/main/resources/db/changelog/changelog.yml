@@ -29,3 +29,6 @@ databaseChangeLog:
   - include:
       file: migrations/010-fix-order-event-type-check-constraint.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/011-add-order-ready-for-delivery-event-type.yml
+      relativeToChangelogFile: true
