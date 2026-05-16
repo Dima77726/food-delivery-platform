@@ -179,4 +179,27 @@ public class OrderController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/restaurants/{restaurantId}/orders/{orderId}/ready-for-delivery")
+    public OrderResponse markOrderReadyForDelivery(
+            @PathVariable Long restaurantId,
+            @PathVariable Long orderId
+    ) {
+        log.info(
+                "Received request to mark order ready for delivery: restaurantId={}, orderId={}",
+                restaurantId,
+                orderId
+        );
+
+        OrderResponse response = orderService.markOrderReadyForDelivery(restaurantId, orderId);
+
+        log.info(
+                "Order marked ready for delivery successfully: restaurantId={}, orderId={}, status={}",
+                restaurantId,
+                response.id(),
+                response.status()
+        );
+
+        return response;
+    }
 }

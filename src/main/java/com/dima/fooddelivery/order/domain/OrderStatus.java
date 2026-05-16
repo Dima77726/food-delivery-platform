@@ -33,6 +33,10 @@ public enum OrderStatus {
         return this == ACCEPTED;
     }
 
+    public boolean canBeMarkedReadyForDeliveryByRestaurant() {
+        return this == COOKING;
+    }
+
     public static OrderStatus fromDbValue(String dbValue) {
         for (OrderStatus status : values()) {
             if (status.dbValue.equals(dbValue)) {
