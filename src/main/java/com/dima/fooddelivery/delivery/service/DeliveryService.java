@@ -68,6 +68,108 @@ public class DeliveryService {
         return response;
     }
 
+    @Transactional
+    public DeliveryResponse assignCourierToDelivery(Long courierId, Long deliveryId) {
+        log.info(
+                "Начинаем назначение курьера на доставку: deliveryId={}, courierId={}",
+                deliveryId,
+                courierId
+        );
+
+        validationCourierId(courierId);
+
+        DeliveryStatusSnapshot deliveryStatusSnapshot = findDeliveryStatus(deliveryId);
+
+        if (deliveryStatusSnapshot == null) {
+            log.warn(
+                    "Доставка для назначения курьера не найдена: deliveryId={}, courierId={}",
+                    deliveryId,
+                    courierId
+            );
+
+            throw new ResourceNotFoundException("Доставка с id=" + deliveryId + " не найдена");
+        }
+
+        if (!deliveryStatusSnapshot.status().canBeAssignedToCourier()) {
+            log.warn(
+                    "Нельзя назначить курьера на доставку в текущем статусе: deliveryId={}, courierId={}, currentStatus={}",
+                    deliveryId,
+                    courierId,
+                    deliveryStatusSnapshot.status().getDbValue()
+            );
+
+            throw new IllegalStateException(
+                    "Курьера можно назначить только на доставку в статусе CREATED. Текущий статус="
+                    + deliveryStatusSnapshot.status().getDbValue()
+            );
+        }
+
+        updateDeliveryCourier(deliveryId, courierId);
+
+        DeliveryResponse response = getDeliveryById(deliveryId);
+
+        log.info(
+                "Курьер назначен на доставку: deliveryId={}, courierId={}, newStatus={}",
+                response.id(),
+                response.courierId(),
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateDeliveryCourier(Long deliveryId, Long courierId) {
+        String sql = """
+                UPDATE food_app.delivery
+                SET courier_id = ?,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                AND status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                courierId,
+                DeliveryStatus.ASSIGNED.getDbValue(),
+                deliveryId,
+                DeliveryStatus.CREATED.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Не удалось назначить курьера на доставку с id=" + deliveryId);
+        }
+    }
+
+    private DeliveryStatusSnapshot findDeliveryStatus(Long deliveryId) {
+        String sql = """
+                SELECT 
+                 d.id,
+                 d.status,
+                 d.courier_id
+                FROM food_app.delivery d
+                where d.id = ?
+                """;
+
+        List<DeliveryStatusSnapshot> deliveries = jdbcTemplate.query(
+                sql,
+                (resultSet, rowNum) -> new DeliveryStatusSnapshot(
+                        resultSet.getLong("id"),
+                        DeliveryStatus.fromDbValue(resultSet.getString("status")),
+                        resultSet.getObject("courier_id", Long.class)
+                ),
+                deliveryId
+        );
+
+        return deliveries.isEmpty() ? null : deliveries.get(0);
+    }
+
+    private void validationCourierId(Long courierId) {
+        if (courierId == null || courierId <= 0) {
+            throw new IllegalArgumentException("Идентификатор курьера должен быть положительным числом");
+        }
+    }
+
     private DeliveryResponse getDeliveryById(Long deliveryId) {
         String sql = """
                 SELECT
@@ -168,9 +270,17 @@ public class DeliveryService {
         }
     }
 
+
     private record OrderForDeliverySnapshot(
             Long orderId,
             OrderStatus status
+    ) {
+    }
+
+    private record DeliveryStatusSnapshot(
+            Long deliveryId,
+            DeliveryStatus status,
+            Long ccurierId
     ) {
     }
 }
