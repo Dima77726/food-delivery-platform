@@ -32,4 +32,27 @@ public class DeliveryController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/assign")
+    public DeliveryResponse assignCourierToDelivery(
+            @PathVariable Long courierId,
+            @PathVariable Long deliveryId
+    ) {
+        log.info(
+                "Получен запрос на назначение курьера на доставку: courierId={}, deliveryId={}",
+                courierId,
+                deliveryId
+        );
+
+        DeliveryResponse response = deliveryService.assignCourierToDelivery(courierId, deliveryId);
+
+        log.info(
+                "Курьер успешно назначен на доставку: courierId={}, deliveryId={}, status={}",
+                response.courierId(),
+                response.id(),
+                response.status()
+        );
+
+        return response;
+    }
 }
