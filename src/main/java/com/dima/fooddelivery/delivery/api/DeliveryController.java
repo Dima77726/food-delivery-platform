@@ -55,4 +55,29 @@ public class DeliveryController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/pick-up")
+    public DeliveryResponse pickUpDelivery(
+            @PathVariable Long courierId,
+            @PathVariable Long deliveryId
+    ) {
+        log.info(
+                "Получен запрос на забор заказа курьером: courierId={}, deliveryId={}",
+                courierId,
+                deliveryId
+        );
+
+        DeliveryResponse response = deliveryService.pickUpDelivery(courierId, deliveryId);
+
+        log.info(
+                "Курьер забрал заказ: courierId={}, deliveryId={}, orderId={}, deliveryStatus={}, picked_up_at={}",
+                response.courierId(),
+                response.id(),
+                response.orderId(),
+                response.status(),
+                response.pickedUpAt()
+        );
+
+        return response;
+    }
 }

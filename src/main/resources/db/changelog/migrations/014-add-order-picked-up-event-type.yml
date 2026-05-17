@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 014-add-order-picked-up-event-type
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/014-add-order-picked-up-event-type.sql
+            relativeToChangelogFile: true
+            splitStatements: true

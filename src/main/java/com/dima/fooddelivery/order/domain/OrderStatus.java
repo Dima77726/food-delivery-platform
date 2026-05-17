@@ -41,6 +41,10 @@ public enum OrderStatus {
         return this == READY_FOR_DELIVERY;
     }
 
+    public boolean canBeMovedToInDeliveryByCourier() {
+        return this == READY_FOR_DELIVERY;
+    }
+
     public static OrderStatus fromDbValue(String dbValue) {
         for (OrderStatus status : values()) {
             if (status.dbValue.equals(dbValue)) {

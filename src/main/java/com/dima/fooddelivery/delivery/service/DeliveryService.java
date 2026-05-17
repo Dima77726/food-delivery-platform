@@ -5,6 +5,7 @@ import com.dima.fooddelivery.delivery.api.DeliveryResponse;
 import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
 import com.dima.fooddelivery.delivery.persistence.DeliveryRow;
 import com.dima.fooddelivery.delivery.persistence.DeliveryRowMapper;
+import com.dima.fooddelivery.order.domain.OrderEventType;
 import com.dima.fooddelivery.order.domain.OrderStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -116,6 +117,186 @@ public class DeliveryService {
         );
 
         return response;
+    }
+
+    @Transactional
+    public DeliveryResponse pickUpDelivery(Long courierId, Long deliveryId) {
+        log.info(
+                "Начинаем забор заказа курьером: deliveryId={}, courierId={}",
+                deliveryId,
+                courierId
+        );
+
+        validationCourierId(courierId);
+
+        DeliveryForPickupSnapshot  delivery = findDeliveryForPickup(deliveryId);
+
+        if (delivery == null) {
+            log.warn(
+                    "Доставка для забора заказа не найдена: deliveryId={}, courierId={}",
+                    delivery,
+                    courierId
+            );
+
+            throw new ResourceNotFoundException("Доставка с id=" + deliveryId + " не найдена");
+        }
+
+        if (!courierId.equals(delivery.courierId())) {
+            log.warn(
+                    "Курьер не назначен на эту доставку: deliveryId={}, expectedCourierId={}, actualCourierId={}",
+                    deliveryId,
+                    delivery.courierId(),
+                    courierId
+            );
+
+            throw new IllegalStateException("Эта доставка назначена другому курьеру");
+        }
+
+        if (!delivery.deliveryStatus().canBePickedUpByCourier()) {
+            log.warn(
+                    "Нельзя забрать доставку в текущем статусе: deliveryId={}, currentDeliveryStatus={}",
+                    deliveryId,
+                    delivery.deliveryStatus().getDbValue()
+            );
+
+            throw new IllegalStateException(
+                    "Забрать можно только доставку в статусе ASSIGNED. Текущий статус="
+                            + delivery.deliveryStatus().getDbValue()
+            );
+        }
+
+        if (!delivery.orderStatus().canBeMovedToInDeliveryByCourier()) {
+            log.warn(
+                    "Нельзя перевести заказ в доставку из текущего статуса: orderId={}, currentOrderStatus={}",
+                    delivery.orderId(),
+                    delivery.orderStatus().getDbValue()
+            );
+
+            throw new IllegalStateException(
+                    "Заказ можно передать курьеру только из статуса READY_FOR_DELIVERY. Текущий статус="
+                            + delivery.orderStatus().getDbValue()
+            );
+        }
+
+        updateDeliveryStatusToPickedUp(deliveryId, courierId);
+
+        updateOrderStatusToInDelivery(delivery.orderId());
+
+        createOrderEvent(
+                delivery.orderId(),
+                OrderEventType.ORDER_PICKED_UP_BY_COURIER,
+                "Заказ забран курьером из ресторана"
+        );
+
+        DeliveryResponse response = getDeliveryById(deliveryId);
+
+        log.info(
+                "Забор заказа курьером успешно завершён: deliveryId={}, courierId={}, orderId={}, deliveryStatus={}",
+                response.id(),
+                response.courierId(),
+                response.orderId(),
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void createOrderEvent(Long orderId, OrderEventType orderEventType, String description) {
+        String sql = """
+                INSERT INTO food_app.customer_order_event (
+                                                     order_id,
+                                                     event_type,
+                                                     description
+                )
+                VALUES (?, ?, ?)
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                orderId,
+                orderEventType.getDbValue(),
+                description
+        );
+
+        if (updateRows != 1) {
+            throw new IllegalStateException(
+                    "Не удалось записать событие заказа: orderId=" + orderId
+                    + ", eventType=" + orderEventType.getDbValue()
+            );
+        }
+    }
+
+    private void updateOrderStatusToInDelivery(Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order
+                SET status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                and status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.IN_DELIVERY.getDbValue(),
+                orderId,
+                OrderStatus.READY_FOR_DELIVERY.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Не удалось перевести заказ в статус IN_DELIVERY: orderId=" + orderId);
+        }
+    }
+
+    private void updateDeliveryStatusToPickedUp(Long deliveryId, Long courierId) {
+        String sql = """
+                UPDATE food_app.delivery
+                SET status = ?,
+                    picked_up_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                AND courier_id = ?
+                AND status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                DeliveryStatus.PICKED_UP.getDbValue(),
+                deliveryId,
+                courierId,
+                DeliveryStatus.ASSIGNED.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException("Не удалось отметить доставку как забранную: deliveryId=" + deliveryId);
+        }
+    }
+
+    private DeliveryForPickupSnapshot findDeliveryForPickup(Long deliveryId) {
+        String sql = """
+            SELECT
+                d.id AS delivery_id,
+                d.order_id,
+                d.courier_id,
+                d.status AS delivery_status,
+                co.status AS order_status
+            FROM food_app.delivery d
+            JOIN food_app.customer_order co ON co.id = d.order_id
+            WHERE d.id = ?
+            """;
+
+        List<DeliveryForPickupSnapshot> deliveries = jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new DeliveryForPickupSnapshot(
+                        rs.getLong("delivery_id"),
+                        rs.getLong("order_id"),
+                        rs.getObject("courier_id", Long.class),
+                        DeliveryStatus.fromDbValue(rs.getString("delivery_status")),
+                        OrderStatus.fromDbValue(rs.getString("order_status"))
+                ),
+                deliveryId
+        );
+
+        return deliveries.isEmpty() ? null : deliveries.get(0);
     }
 
     private void updateDeliveryCourier(Long deliveryId, Long courierId) {
@@ -271,6 +452,7 @@ public class DeliveryService {
     }
 
 
+
     private record OrderForDeliverySnapshot(
             Long orderId,
             OrderStatus status
@@ -282,5 +464,14 @@ public class DeliveryService {
             DeliveryStatus status,
             Long ccurierId
     ) {
+    }
+
+    private record DeliveryForPickupSnapshot(
+            Long deliveryId,
+            Long orderId,
+            Long courierId,
+            DeliveryStatus deliveryStatus,
+            OrderStatus orderStatus
+    ){
     }
 }
