@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 013-fix-delivery-order-id-type
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/013-fix-delivery-order-id-type.sql
+            relativeToChangelogFile: true
+            splitStatements: true
