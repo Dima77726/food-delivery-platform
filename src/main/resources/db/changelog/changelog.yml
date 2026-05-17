@@ -35,3 +35,6 @@ databaseChangeLog:
   - include:
       file: migrations/012-create-delivery-table.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/013-fix-delivery-order-id-type.yml
+      relativeToChangelogFile: true
