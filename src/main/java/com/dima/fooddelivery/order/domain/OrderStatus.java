@@ -37,6 +37,10 @@ public enum OrderStatus {
         return this == COOKING;
     }
 
+    public boolean canCreateDelivery() {
+        return this == READY_FOR_DELIVERY;
+    }
+
     public static OrderStatus fromDbValue(String dbValue) {
         for (OrderStatus status : values()) {
             if (status.dbValue.equals(dbValue)) {
