@@ -45,6 +45,10 @@ public enum OrderStatus {
         return this == READY_FOR_DELIVERY;
     }
 
+    public boolean canBeCompletedByCourier() {
+        return this == IN_DELIVERY;
+    }
+
     public static OrderStatus fromDbValue(String dbValue) {
         for (OrderStatus status : values()) {
             if (status.dbValue.equals(dbValue)) {
@@ -52,6 +56,6 @@ public enum OrderStatus {
             }
         }
 
-        throw new IllegalArgumentException("Unknown order status from database: " + dbValue);
+        throw new IllegalArgumentException("Неизвестный тип события заказа из базы данных: " + dbValue);
     }
 }

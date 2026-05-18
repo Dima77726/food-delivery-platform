@@ -12,7 +12,9 @@ public enum OrderEventType {
 
     ORDER_READY_FOR_DELIVERY("ORDER_READY_FOR_DELIVERY"),
 
-    ORDER_PICKED_UP_BY_COURIER("ORDER_PICKED_UP_BY_COURIER");
+    ORDER_PICKED_UP_BY_COURIER("ORDER_PICKED_UP_BY_COURIER"),
+
+    ORDER_DELIVERED("ORDER_DELIVERED");
 
     private final String dbValue;
 
@@ -32,6 +34,6 @@ public enum OrderEventType {
             }
         }
 
-        throw new IllegalArgumentException("Unknown order event type from database: " + dbValue);
+        throw new IllegalArgumentException("Неизвестный тип события заказа из базы данных: " + dbValue);
     }
 }
