@@ -201,6 +201,165 @@ public class DeliveryService {
         return response;
     }
 
+    @Transactional
+    public DeliveryResponse deliverDelivery(Long courierId, Long deliveryId) {
+        log.info(
+                "Начинаем завершение доставки: deliveryId={}, courierId={}",
+                deliveryId,
+                courierId
+        );
+
+        validationCourierId(courierId);
+
+        DeliveryForCompletionSnapshot delivery = findDeliveryCompletion(deliveryId);
+
+        if (delivery == null) {
+            log.warn(
+                    "Доставка для завершения не найдена: deliveryId={}, courierId={}",
+                    deliveryId,
+                    courierId
+            );
+
+            throw new ResourceNotFoundException("Доставка с id=" + deliveryId + " не найдена");
+        }
+
+        if (!courierId.equals(delivery.courierId())) {
+            log.warn(
+                    "Курьер не назначен на эту доставку: deliveryId={}, expectedCourierId={}, actualCourierId={}",
+                    deliveryId,
+                    delivery.courierId(),
+                    courierId
+            );
+
+            throw new IllegalStateException(
+                    "Эта доставка назначена другому курьеру"
+            );
+        }
+
+        if (!delivery.deliveryStatus().canBeDeliveredByCourier()) {
+            log.warn(
+                    "Нельзя завершить доставку в текущем статусе: deliveryId={}, currentDeliveryStatus={}",
+                    deliveryId,
+                    delivery.deliveryStatus().getDbValue()
+            );
+
+            throw new IllegalStateException(
+                    "Завершить можно только доставку в статусе PICKED_UP. Текущий статус="
+                            + delivery.deliveryStatus().getDbValue()
+            );
+        }
+
+        if (!delivery.orderStatus().canBeCompletedByCourier()) {
+            log.warn(
+                    "Нельзя завершить заказ из текущего статуса: orderId={}, currentOrderStatus={}",
+                    delivery.orderId(),
+                    delivery.orderStatus().getDbValue()
+            );
+
+            throw new IllegalStateException(
+                    "Заказ можно завершить только из статуса IN_DELIVERY. Текущий статус="
+                            + delivery.orderStatus().getDbValue()
+            );
+        }
+
+        updateDeliveredStatusToDelivered(deliveryId, courierId);
+        
+        updateOrderStatusToDelivered(delivery.orderId());
+
+        createOrderEvent(
+                delivery.orderId(),
+                OrderEventType.ORDER_DELIVERED,
+                "Заказ доставлен клиенту"
+        );
+
+        DeliveryResponse response = getDeliveryById(deliveryId);
+
+        log.info(
+                "Доставка успешно завершена: deliveryId={}, courierId={}, orderId={}, deliveryStatus={}",
+                response.id(),
+                response.courierId(),
+                response.orderId(),
+                response.status()
+        );
+
+        return response;
+    }
+
+    private void updateOrderStatusToDelivered(Long orderId) {
+        String sql = """
+                UPDATE food_app.customer_order
+                SET status = ?,
+                    updated_at = current_timestamp
+                where id = ?
+                and status = ?
+                """;
+
+        int updatedRows = jdbcTemplate.update(
+                sql,
+                OrderStatus.DELIVERED.getDbValue(),
+                orderId,
+                OrderStatus.IN_DELIVERY.getDbValue()
+        );
+
+        if (updatedRows == 0) {
+            throw new IllegalStateException(
+                    "Не удалось перевести заказ в статус DELIVERED: orderId=" + orderId
+            );
+        }
+    }
+
+    private void updateDeliveredStatusToDelivered(Long deliveryId, Long courierId) {
+        String sql = """
+                UPDATE food_app.delivery 
+                SET status = ?,
+                    delivered_at = current_timestamp,
+                    updated_at = current_timestamp
+                WHERE id = ?
+                and courier_id = ?
+                and status = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(
+                sql,
+                DeliveryStatus.DELIVERED.getDbValue(),
+                deliveryId,
+                courierId,
+                DeliveryStatus.PICKED_UP.getDbValue()
+        );
+
+        if (updateRows == 0) {
+            throw new IllegalStateException( "Не удалось завершить доставку: deliveryId=" + deliveryId);
+        }
+    }
+
+    private DeliveryForCompletionSnapshot findDeliveryCompletion(Long deliveryId) {
+        String sql = """
+                SELECT 
+                    d.id as delivery_id,
+                    d.order_id,
+                    d.courier_id,
+                    d.status as delivery_status,
+                    co.status as order_status
+                FROM delivery AS d
+                JOIN food_app.customer_order co on d.order_id = co.id
+                WHERE d.id = ?
+                """;
+
+        List<DeliveryForCompletionSnapshot> deliveries = jdbcTemplate.query(
+                sql,
+                (resultSet, rowNum) -> new DeliveryForCompletionSnapshot(
+                        resultSet.getLong("delivery_id"),
+                        resultSet.getLong("order_id"),
+                        resultSet.getObject("courier_id", Long.class),
+                        DeliveryStatus.fromDbValue(resultSet.getString("delivery_status")),
+                        OrderStatus.fromDbValue(resultSet.getString("order_status"))
+                ),
+                deliveryId
+        );
+
+        return deliveries.isEmpty() ? null : deliveries.get(0);
+    }
+
     private void createOrderEvent(Long orderId, OrderEventType orderEventType, String description) {
         String sql = """
                 INSERT INTO food_app.customer_order_event (
@@ -472,6 +631,15 @@ public class DeliveryService {
             Long courierId,
             DeliveryStatus deliveryStatus,
             OrderStatus orderStatus
-    ){
+    ) {
+    }
+
+    private record DeliveryForCompletionSnapshot(
+            Long deliveryId,
+            Long orderId,
+            Long courierId,
+            DeliveryStatus deliveryStatus,
+            OrderStatus orderStatus
+    ) {
     }
 }

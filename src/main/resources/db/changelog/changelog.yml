@@ -41,3 +41,9 @@ databaseChangeLog:
   - include:
       file: migrations/014-add-order-picked-up-event-type.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/015-add-order-delivery-event-type.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/016-fix-customer-order-delivered-status.yml
+      relativeToChangelogFile: true

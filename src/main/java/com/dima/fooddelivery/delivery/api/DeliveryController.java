@@ -80,4 +80,29 @@ public class DeliveryController {
 
         return response;
     }
+
+    @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/deliver")
+    public DeliveryResponse deliverDelivery(
+            @PathVariable Long courierId,
+            @PathVariable Long deliveryId
+    ) {
+        log.info(
+                "Получен запрос на завершение доставки: courierId={}, deliveryId={}",
+                courierId,
+                deliveryId
+        );
+
+        DeliveryResponse response = deliveryService.deliverDelivery(courierId, deliveryId);
+
+        log.info(
+                "Доставка успешно завершена: courierId={}, deliveryId={}, orderId={}, deliveryStatus={}, deliveredAt={}",
+                response.courierId(),
+                response.id(),
+                response.orderId(),
+                response.status(),
+                response.deliveredAt()
+        );
+
+        return response;
+    }
 }
