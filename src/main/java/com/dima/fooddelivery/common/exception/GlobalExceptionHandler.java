@@ -3,6 +3,7 @@ package com.dima.fooddelivery.common.exception;
 import com.dima.fooddelivery.common.api.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -22,7 +23,11 @@ public class GlobalExceptionHandler {
             ResourceNotFoundException exception,
             HttpServletRequest request
     ) {
-        log.warn("Resource not foung for path={}: {}", request.getRequestURI(), exception.getMessage());
+        log.warn(
+                "Ресурс не найден: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.NOT_FOUND.value(),
@@ -34,8 +39,50 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
+    @ExceptionHandler(BusinessRuleViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleBusinessRuleViolation(
+            BusinessRuleViolationException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Нарушено бизнес-правило: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+                );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Нарушено ограничение целостности данных: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiErrorResponse> hadleMethodArgumentNotValid(
+    public ResponseEntity<ApiErrorResponse> handleMethodArgumentNotValid(
             MethodArgumentNotValidException exception,
             HttpServletRequest request
     ) {
@@ -46,10 +93,13 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
 
         if (message.isBlank()) {
-            message = "Validation failed";
+            message = "Ошибка валидации тела запроса";
         }
 
-        log.warn("Validation failed for path={}: {}", request.getRequestURI(), message);
+        log.warn("Ошибка валидации тела запроса: path={}, message={}",
+                request.getRequestURI(),
+                message
+        );
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
@@ -62,13 +112,17 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    ResponseEntity<ApiErrorResponse> hadleMethodArgumentTypeMismatch(
+    ResponseEntity<ApiErrorResponse> handleMethodArgumentTypeMismatch(
             MethodArgumentTypeMismatchException exception,
             HttpServletRequest request
     ) {
-        String message = "Invalid value for parameter '" + exception.getName() + "': " + exception.getValue();
+        String message = "Некорректное значение параметра '" + exception.getName() + "': " + exception.getValue();
 
-        log.warn("Type mismatch for path={}: {}", request.getRequestURI(), message);
+        log.warn(
+                "Ошибка типа параметра запроса: path={}, message={}",
+                request.getRequestURI(),
+                message
+        );
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
@@ -85,9 +139,13 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException exception,
             HttpServletRequest request
     ) {
-        String message = "Request body is missing or malformed";
+        String message = "Тело запроса отсутствует или имеет некорректный формат";
 
-        log.warn("Malformed request body for path={}: {}", request.getRequestURI(), exception.getMessage());
+        log.warn(
+                "Некорректное тело запроса: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
@@ -104,11 +162,14 @@ public class GlobalExceptionHandler {
             IllegalStateException exception,
             HttpServletRequest request
     ) {
-        log.warn("Business rule violation for path={}: {}", request.getRequestURI(), exception.getMessage());
+        log.warn(
+                "Некорректное состояние для выполнения операции: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage());
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.CONFLICT.value(),
-                HttpStatus.CONTINUE.getReasonPhrase(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
                 exception.getMessage(),
                 request.getRequestURI()
         );
@@ -116,9 +177,34 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ApiErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Некорректные входные данные: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleExceptionAll(Exception exception, HttpServletRequest request) {
-        log.error("Exception: ", exception);
+        log.error(
+                "Непредвиденная ошибка приложения: path={}",
+                request.getRequestURI(),
+                exception
+        );
 
         ApiErrorResponse response = new ApiErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
@@ -126,6 +212,7 @@ public class GlobalExceptionHandler {
                 exception.getMessage(),
                 request.getRequestURI()
         );
+
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 }
