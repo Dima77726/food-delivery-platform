@@ -2,6 +2,7 @@ package com.dima.fooddelivery.cart.api;
 
 import com.dima.fooddelivery.cart.service.CartService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -9,26 +10,43 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @Slf4j
 @RequiredArgsConstructor
+@RequestMapping("/api/v1/customers/{customerId}/restaurants/{restaurantId}/cart")
 public class CartController {
+
     private final CartService cartService;
 
-    @GetMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart")
+    @GetMapping
     public CartResponse getActiveCart(@PathVariable Long customerId, @PathVariable Long restaurantId) {
 
-        log.info("Received request to fetch active cart for customerId={}, restaurantId={}", customerId, restaurantId);
+        log.info(
+                "Получен запрос на получение активной корзины: customerId={}, restaurantId={}",
+                customerId,
+                restaurantId
+        );
 
         CartResponse response = cartService.getActiveCart(customerId, restaurantId);
 
-        log.info( "Returning active cart: cartId={}, itemsCount={}, totalAmount={}", response.id(), response.items().size(), response.totalAmount());
+        log.info(
+                "Возвращаем активную корзину: cartId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                response.items().size(),
+                response.totalAmount()
+        );
 
         return response;
     }
 
-    @PostMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart")
-    public CartResponse addItemToCart(@PathVariable Long customerId,
-                                      @PathVariable Long restaurantId,
-                                      @Valid @RequestBody AddCartItemRequest request) {
-        log.info("Received request to add item to cart: customerId={}, restaurantId={}, menuItemId={}, quantity={}",
+    @PostMapping
+    public CartResponse addItemToCart(
+            @Positive(message = "customerId должен быть положительным числом")
+            @PathVariable Long customerId,
+
+            @Positive(message = "restaurantId должен быть положительным числом")
+            @PathVariable Long restaurantId,
+            @Valid @RequestBody AddCartItemRequest request
+    ) {
+        log.info(
+                "Получен запрос на добавление позиции в корзину: customerId={}, restaurantId={}, menuItemId={}, quantity={}",
                 customerId,
                 restaurantId,
                 request.menuItemId(),
@@ -37,22 +55,31 @@ public class CartController {
 
         CartResponse response = cartService.addItemToCart(customerId, restaurantId, request);
 
-        log.info("Item added to cart successfully: cartId={}, itemsCount={}, totalAmount={}",
+        log.info(
+                "Позиция успешно добавлена в корзину: cartId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 response.items().size(),
-                response.totalAmount());
+                response.totalAmount()
+        );
 
         return response;
     }
 
-    @PatchMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart/items/{cartItemId}")
+    @PatchMapping("/items/{cartItemId}")
     public CartResponse updateCartItemQuantity(
+            @Positive(message = "customerId должен быть положительным числом")
             @PathVariable Long customerId,
+
+            @Positive(message = "restaurantId должен быть положительным числом")
             @PathVariable Long restaurantId,
+
+            @Positive(message = "cartItemId должен быть положительным числом")
             @PathVariable Long cartItemId,
+
             @Valid @RequestBody UpdateCartItemQuantityRequest request
     ) {
-        log.info( "Received request to update cart item quantity: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
+        log.info(
+                "Получен запрос на изменение количества позиции корзины: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
                 customerId,
                 restaurantId,
                 cartItemId,
@@ -67,7 +94,7 @@ public class CartController {
         );
 
         log.info(
-                "Cart item quantity updated successfully: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                "Количество позиции корзины успешно изменено: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 cartItemId,
                 response.items().size(),
@@ -77,14 +104,19 @@ public class CartController {
         return response;
     }
 
-    @DeleteMapping("api/v1/customers/{customerId}/restaurants/{restaurantId}/cart/items/{cartItemId}")
+    @DeleteMapping("/items/{cartItemId}")
     public CartResponse removeCartItem(
+            @Positive(message = "customerId должен быть положительным числом")
             @PathVariable Long customerId,
+
+            @Positive(message = "restaurantId должен быть положительным числом")
             @PathVariable Long restaurantId,
+
+            @Positive(message = "cartItemId должен быть положительным числом")
             @PathVariable Long cartItemId
     ) {
         log.info(
-                "Received request to remove cart item: customerId={}, restaurantId={}, cartItemId={}",
+                "Получен запрос на удаление позиции из корзины: customerId={}, restaurantId={}, cartItemId={}",
                 customerId,
                 restaurantId,
                 cartItemId
@@ -93,7 +125,7 @@ public class CartController {
        CartResponse response = cartService.removeCartItem(customerId, restaurantId, cartItemId);
 
         log.info(
-                "Cart item removed successfully: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                "Позиция успешно удалена из корзины: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 cartItemId,
                 response.items().size(),

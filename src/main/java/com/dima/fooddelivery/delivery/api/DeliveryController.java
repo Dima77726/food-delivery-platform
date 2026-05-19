@@ -1,21 +1,27 @@
 package com.dima.fooddelivery.delivery.api;
 
 import com.dima.fooddelivery.delivery.service.DeliveryService;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @Slf4j
+@Validated
 @RequiredArgsConstructor
 public class DeliveryController {
 
     private final DeliveryService deliveryService;
 
     @PostMapping("/api/v1/orders/{orderId}/deliveries")
-    public DeliveryResponse createDelivery(@PathVariable Long orderId) {
+    public DeliveryResponse createDelivery(
+            @Positive(message = "orderId должен быть положительным числом")
+            @PathVariable Long orderId
+    ) {
         log.info(
                 "Получен запрос на создание доставки для заказа: orderId ={}",
                 orderId
@@ -35,7 +41,10 @@ public class DeliveryController {
 
     @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/assign")
     public DeliveryResponse assignCourierToDelivery(
+            @Positive(message = "courierId должен быть положительным числом")
             @PathVariable Long courierId,
+
+            @Positive(message = "deliveryId должен быть положительным числом")
             @PathVariable Long deliveryId
     ) {
         log.info(
@@ -58,7 +67,10 @@ public class DeliveryController {
 
     @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/pick-up")
     public DeliveryResponse pickUpDelivery(
+            @Positive(message = "courierId должен быть положительным числом")
             @PathVariable Long courierId,
+
+            @Positive(message = "deliveryId должен быть положительным числом")
             @PathVariable Long deliveryId
     ) {
         log.info(
@@ -83,7 +95,10 @@ public class DeliveryController {
 
     @PostMapping("/api/v1/couriers/{courierId}/deliveries/{deliveryId}/deliver")
     public DeliveryResponse deliverDelivery(
+            @Positive(message = "courierId должен быть положительным числом")
             @PathVariable Long courierId,
+
+            @Positive(message = "deliveryId должен быть положительным числом")
             @PathVariable Long deliveryId
     ) {
         log.info(

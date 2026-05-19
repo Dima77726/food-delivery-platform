@@ -6,10 +6,8 @@ import com.dima.fooddelivery.cart.api.CartResponse;
 import com.dima.fooddelivery.cart.api.UpdateCartItemQuantityRequest;
 import com.dima.fooddelivery.cart.persistence.CartRow;
 import com.dima.fooddelivery.cart.persistence.CartRowMapper;
+import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,11 +24,17 @@ import java.util.List;
 public class CartService {
 
     private final JdbcTemplate jdbcTemplate;
+
     private final CartRowMapper cartRowMapper;
 
     //метод ищет активную корзину клиента по ресторану
+    @Transactional(readOnly = true)
     public CartResponse getActiveCart(Long customerId, Long restaurantId) {
-        log.info("Fetching active cart for customerId={}, restaurantId={}",  customerId, restaurantId);
+        log.info(
+                "Начинаем загрузку активной корзины: customerId={}, restaurantId={}",
+                customerId,
+                restaurantId
+        );
 
         String sql = """
                 SELECT 
@@ -56,18 +60,25 @@ public class CartService {
         List<CartRow> rows = jdbcTemplate.query(sql, cartRowMapper, customerId, restaurantId);
 
         if (rows.isEmpty()) {
-            log.warn("Active cart not found for customerId={}, restaurantId={}", customerId, restaurantId);
+            log.warn(
+                    "Активная корзина не найдена: customerId={}, restaurantId={}",
+                    customerId,
+                    restaurantId
+            );
+
             throw new ResourceNotFoundException(
-                    "Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId
+                    "Активная корзина не найдена для customerId=" + customerId + " и restaurantId=" + restaurantId
             );
         }
 
         CartResponse response = buildCartResponse(rows);
 
-        log.info( "Active cart loaded: cartId={}, itemsCount={}, totalAmount={}",
+        log.info(
+                "Активная корзина загружена: cartId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 response.items().size(),
-                response.totalAmount());
+                response.totalAmount()
+        );
 
         return response;
     }
@@ -75,7 +86,8 @@ public class CartService {
     //метод добавляет товар в корзину
     @Transactional
     public CartResponse addItemToCart(Long customerId, Long restaurantId, AddCartItemRequest request) {
-        log.info("Adding item to cart: customerId={}, restaurantId={}, menuItemId={}, quantity={}",
+        log.info(
+                "Начинаем добавление позиции в корзину: customerId={}, restaurantId={}, menuItemId={}, quantity={}",
                 customerId,
                 restaurantId,
                 request.menuItemId(),
@@ -90,13 +102,15 @@ public class CartService {
 
         if (cartId == null) {
            cartId = createActiveCart(customerId, restaurantId);
-           log.info("Created new active cart: cartId={}, customerId={}, restaurantId={}",
-                   cartId,
-                   customerId,
-                   restaurantId
-           );
+
+            log.info(
+                    "Создана новая активная корзина: cartId={}, customerId={}, restaurantId={}",
+                    cartId,
+                    customerId,
+                    restaurantId
+            );
         } else {
-            log.info("Using existing active cart: cartId={}", cartId);
+            log.info("Используем существующую активную корзину: cartId={}", cartId);
         }
 
         addOrIncreaseCartItem(cartId, menuItem.id(), request.quantity(), menuItem.price());
@@ -105,7 +119,8 @@ public class CartService {
 
         CartResponse response = getActiveCart(customerId, restaurantId);
 
-        log.info("Item added to cart successfully: cartId={}, itemsCount={}, totalAmount={}",
+        log.info(
+                "Позиция успешно добавлена в корзину: cartId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 response.items().size(),
                 response.totalAmount()
@@ -122,7 +137,7 @@ public class CartService {
             UpdateCartItemQuantityRequest request
     ) {
         log.info(
-                "Updating cart item quantity: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
+                "Начинаем изменение количества позиции корзины: customerId={}, restaurantId={}, cartItemId={}, quantity={}",
                 customerId,
                 restaurantId,
                 cartItemId,
@@ -135,23 +150,24 @@ public class CartService {
 
         if (cartId == null) {
             log.warn(
-                    "Active cart not found while updating cart item quantity: customerId={}, restaurantId={}",
+                    "Активная корзина не найдена при изменении количества позиции: customerId={}, restaurantId={}",
                     customerId,
                     restaurantId
             );
+
             throw new ResourceNotFoundException(
-                    "Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId
+                    "Активная корзина не найдена для customerId=" + customerId + " и restaurantId=" + restaurantId
             );
         }
 
-            updateCartItemQuantityByid(cartId, cartItemId, request.quantity());
+            updateCartItemQuantityById(cartId, cartItemId, request.quantity());
 
             touchCart(cartId);
 
             CartResponse response = getActiveCart(customerId, restaurantId);
 
             log.info(
-                    "Cart item quantity updated: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                    "Количество позиции корзины изменено: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
                     response.id(),
                     cartItemId,
                     response.items().size(),
@@ -161,7 +177,49 @@ public class CartService {
             return response;
     }
 
-    private void updateCartItemQuantityByid(
+    @Transactional
+    public CartResponse removeCartItem(Long customerId, Long restaurantId, Long cartItemId) {
+        log.info(
+                "Начинаем удаление позиции из корзины: customerId={}, restaurantId={}, cartItemId={}",
+                customerId,
+                restaurantId,
+                cartItemId
+        );
+
+        validateRestaurantIsActive(restaurantId);
+
+        Long cartId = findActiveCartId(customerId, restaurantId);
+
+        if (cartId == null) {
+            log.warn(
+                    "Активная корзина не найдена при удалении позиции: customerId={}, restaurantId={}",
+                    customerId,
+                    restaurantId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Активная корзина не найдена для customerId=" + customerId + " и restaurantId=" + restaurantId
+            );
+        }
+
+        deleteCartItemById(cartId, cartItemId);
+
+        touchCart(cartId);
+
+        CartResponse response = getActiveCart(customerId, restaurantId);
+
+        log.info(
+                "Позиция удалена из корзины: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
+                response.id(),
+                cartItemId,
+                response.items().size(),
+                response.totalAmount()
+        );
+
+        return response;
+    }
+
+    private void updateCartItemQuantityById(
             Long cartId,
             Long cartItemId,
             Integer quantity
@@ -177,8 +235,15 @@ public class CartService {
         int updateRows = jdbcTemplate.update(sql, quantity,  cartItemId, cartId);
 
         if (updateRows == 0) {
-            log.warn("Cart item not found in active cart: cartId={}, cartItemId={}", cartId, cartItemId);
-            throw new ResourceNotFoundException("Cart item with id=" + cartItemId + " not found in active cart with id=" + cartId);
+            log.warn(
+                    "Позиция корзины не найдена в активной корзине: cartId={}, cartItemId={}",
+                    cartId,
+                    cartItemId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Позиция корзины с id=" + cartItemId + " не найдена в активной корзине с id=" + cartId
+            );
         }
     }
 
@@ -192,7 +257,9 @@ public class CartService {
         int updatedRows = jdbcTemplate.update(sql, cartId);
 
         if (updatedRows == 0) {
-            throw new IllegalStateException("Failed to update cart timestamp for cartId=" + cartId);
+            throw new IllegalStateException(
+                    "Не удалось обновить время изменения корзины: cartId=" + cartId
+            );
         }
     }
 
@@ -218,7 +285,9 @@ public class CartService {
         int updatedRows = jdbcTemplate.update(sql, cartId, menuItemId, quantity, price);
 
         if (updatedRows == 0) {
-            throw new IllegalStateException("Failed to add menu item to cart: cartId=" + cartId + ", menuItemId=" + menuItemId);
+            throw new IllegalStateException(
+                    "Не удалось добавить позицию меню в корзину: cartId=" + cartId + ", menuItemId=" + menuItemId
+            );
         }
     }
 
@@ -241,7 +310,10 @@ public class CartService {
         );
 
         if (cartId == null) {
-            throw new IllegalStateException("Failed to create active cart for customerId=" + customerId + " and restaurantId=" + restaurantId);
+            throw new IllegalStateException(
+                    "База данных не вернула id созданной корзины для customerId="
+                            + customerId + " и restaurantId=" + restaurantId
+            );
         }
 
         return cartId;
@@ -292,24 +364,55 @@ public class CartService {
         );
 
         if (rows.isEmpty()) {
-            log.warn("Menu item not found in restaursant: restaurantId={}, menuItemId={}",
+            log.warn(
+                    "Позиция меню не найдена в ресторане: restaurantId={}, menuItemId={}",
                     restaurantId,
                     menuItemId
             );
-            throw new ResourceNotFoundException("Menu item with id=" + menuItemId + " not found in restaurant with id=" + restaurantId);
+
+            throw new ResourceNotFoundException(
+                    "Позиция меню с id=" + menuItemId + " не найдена в ресторане с id=" + restaurantId
+            );
         }
 
         MenuItemSelectionRow row = rows.get(0);
 
         if (!Boolean.TRUE.equals(row.isAvailable())) {
-            log.warn("Menu item is unavailable: restaurantId={}, menuItemId={}",
+            log.warn(
+                    "Позиция меню недоступна для заказа: restaurantId={}, menuItemId={}",
                     restaurantId,
                     menuItemId
             );
-            throw new ResourceNotFoundException("Menu item with id=" + menuItemId + " is unavailable");
+
+            throw new BusinessRuleViolationException(
+                    "Позиция меню с id=" + menuItemId + " сейчас недоступна для заказа"
+            );
         }
 
         return new MenuItemSelection(row.id(), row.price());
+    }
+
+    private void deleteCartItemById(Long cartId, Long cartItemId) {
+
+        String sql = """
+                DELETE FROM food_app.cart_item ci
+                where ci.id = ?
+                and ci.cart_id = ?
+                """;
+
+        int updateRows = jdbcTemplate.update(sql, cartItemId, cartId);
+
+        if (updateRows == 0) {
+            log.warn(
+                    "Позиция корзины не найдена при удалении: cartId={}, cartItemId={}",
+                    cartId,
+                    cartItemId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Позиция корзины с id=" + cartItemId + " не найдена в активной корзине с id=" + cartId
+            );
+        }
     }
 
     //проверка ресторана
@@ -327,15 +430,28 @@ public class CartService {
         );
 
         if (states.isEmpty()) {
-            log.warn("Restaurant not found for restaurantId={}", restaurantId);
-            throw new ResourceNotFoundException("Restaurant not found for restaurantId=" + restaurantId);
+            log.warn(
+                    "Ресторан не найден: restaurantId={}",
+                    restaurantId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Ресторан с id=" + restaurantId + " не найден"
+            );
         }
 
         Boolean isActive = states.get(0);
 
         if (!Boolean.TRUE.equals(isActive)) {
-            log.warn("Restaurant is not active for restaurantId={}", restaurantId);
-            throw new IllegalStateException("Restaurant is not active for restaurantId=" + restaurantId);
+            log.warn(
+                    "Ресторан недоступен для заказов: restaurantId={}",
+                    restaurantId
+            );
+
+
+            throw new BusinessRuleViolationException(
+                    "Ресторан с id=" + restaurantId + " сейчас недоступен для заказов"
+            );
         }
 
 
@@ -372,61 +488,6 @@ public class CartService {
                 items,
                 totalAmount
         );
-    }
-
-    public CartResponse removeCartItem(Long customerId, Long restaurantId, Long cartItemId) {
-        log.info(
-                "Removing cart item: customerId={}, restaurantId={}, cartItemId={}",
-                customerId,
-                restaurantId,
-                cartItemId
-        );
-
-        validateRestaurantIsActive(restaurantId);
-
-        Long cartId = findActiveCartId(customerId, restaurantId);
-
-        if (cartId == null) {
-            log.warn(
-                    "Active cart not found while removing cart item: customerId={}, restaurantId={}",
-                    customerId,
-                    restaurantId
-            );
-            throw new ResourceNotFoundException("Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId);
-        }
-
-        deleteCartItemById(cartId, cartItemId);
-
-        touchCart(cartId);
-
-        CartResponse response = getActiveCart(customerId, restaurantId);
-
-        log.info(
-                "Cart item removed: cartId={}, cartItemId={}, itemsCount={}, totalAmount={}",
-                response.id(),
-                cartItemId,
-                response.items().size(),
-                response.totalAmount()
-        );
-
-        return response;
-    }
-
-    private void deleteCartItemById(Long cartId, Long cartItemId) {
-
-        String sql = """
-                DELETE FROM food_app.cart_item ci
-                where ci.id = ?
-                and ci.cart_id = ?
-                """;
-
-        int updateRows = jdbcTemplate.update(sql, cartItemId, cartId);
-
-        if (updateRows == 0) {
-            log.warn("Cart item not found in active cart while deleting: cartId={}, cartItemId={}", cartId, cartItemId);
-
-            throw new ResourceNotFoundException("Cart item with id=" + cartItemId + " not found in active cart with id=" + cartId);
-        }
     }
 
     private record MenuItemSelection(

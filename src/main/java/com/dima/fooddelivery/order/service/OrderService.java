@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.order.service;
 
+import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.order.api.OrderEventResponse;
 import com.dima.fooddelivery.order.api.OrderItemResponse;
@@ -33,26 +34,34 @@ public class OrderService {
 
     @Transactional
     public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
-        log.info("createOrderFromActiveCart customerId = {}, restaurantId = {}", customerId, restaurantId);
+        log.info(
+                "Начинаем создание заказа из активной корзины: customerId={}, restaurantId={}",
+                customerId,
+                restaurantId
+        );
 
         Long cartId = findActiveCartId(customerId, restaurantId);
 
         if (cartId == null) {
             log.warn(
-                    "Active cart not found while creating order: customerId={}, restaurantId={}",
+                    "Активная корзина не найдена при создании заказа: customerId={}, restaurantId={}",
                     customerId,
                     restaurantId
             );
 
-            throw new ResourceNotFoundException("Active cart not found for customerId=" + customerId + " and restaurantId=" + restaurantId);
+            throw new ResourceNotFoundException(
+                    "Активная корзина не найдена для customerId=" + customerId + " и restaurantId=" + restaurantId
+            );
         }
 
         List<CartItemForOrder> cartItems = findCartItemsForOrder(cartId);
 
         if (cartItems.isEmpty()) {
-            log.warn("Cannot create order from empty cart: cartId={}", cartId);
+            log.warn("Нельзя создать заказ из пустой корзины: cartId={}", cartId);
 
-            throw new IllegalStateException("Cannot create order from empty cart: cartId=" + cartId);
+            throw new BusinessRuleViolationException(
+                    "Нельзя создать заказ из пустой корзины: cartId=" + cartId
+            );
         }
 
         BigDecimal totalAmount = calculateTotalAmount(cartItems);
@@ -66,13 +75,13 @@ public class OrderService {
         createOrderEvent(
                 orderId,
                 OrderEventType.ORDER_CREATED,
-                "Order created from active cart"
+                "Заказ создан из активной корзины"
         );
 
         OrderResponse response = getOrderById(orderId);
 
         log.info(
-                "Order created from cart successfully: orderId={}, cartId={}, itemsCount={}, totalAmount={}",
+                "Заказ успешно создан из корзины: orderId={}, cartId={}, itemsCount={}, totalAmount={}",
                 response.id(),
                 response.cartId(),
                 response.items().size(),
@@ -84,7 +93,8 @@ public class OrderService {
     }
 
     public OrderResponse getOrderByIdForCustomer(Long customerId, Long orderId) {
-        log.info("Fetching order for customer: customerId = {}, orderId = {}",
+        log.info(
+                "Получаем заказ клиента: customerId={}, orderId={}",
                 customerId,
                 orderId
         );
@@ -114,17 +124,21 @@ public class OrderService {
         List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId, customerId);
 
         if (rows.isEmpty()) {
-            log.warn("Order not found for customer: customerId={}, orderId={}",
+            log.warn(
+                    "Заказ клиента не найден: customerId={}, orderId={}",
                     customerId,
                     orderId
             );
 
-            throw new ResourceNotFoundException( "Order with id=" + orderId + " not found for customerId=" + customerId);
+            throw new ResourceNotFoundException(
+                    "Заказ с id=" + orderId + " не найден для customerId=" + customerId
+            );
         }
 
         OrderResponse response = buildOrderResponse(rows);
 
-        log.info("Order loaded for customer: customerId={}, orderId={}, status={}, totalAmount={}, itemsCount={}",
+        log.info(
+                "Заказ клиента загружен: customerId={}, orderId={}, status={}, totalAmount={}, itemsCount={}",
                 response.customerId(),
                 response.id(),
                 response.status(),
@@ -135,8 +149,9 @@ public class OrderService {
         return response;
     }
 
+    @Transactional(readOnly = true)
     public List<OrderSummaryResponse> getOrdersByCustomer(Long customerId) {
-        log.info("Fetching orders for customer: customerId = {}", customerId);
+        log.info("Получаем список заказов клиента: customerId={}", customerId);
 
         String sql = """
                 SELECT
@@ -175,7 +190,7 @@ public class OrderService {
                 customerId
         );
         log.info(
-                "Orders loaded for customer: customerId={}, ordersCount={}",
+                "Список заказов клиента загружен: customerId={}, ordersCount={}",
                 customerId,
                 orders.size()
         );
@@ -186,7 +201,7 @@ public class OrderService {
     @Transactional
     public OrderResponse cancelOrder(Long customerId, Long orderId) {
         log.info(
-                "Canceling order: customerId={}, orderId={}",
+                "Начинаем отмену заказа: customerId={}, orderId={}",
                 customerId,
                 orderId
         );
@@ -195,23 +210,26 @@ public class OrderService {
 
         if (orderStatusSnapshot == null) {
             log.warn(
-                    "Order not found while canceling: customerId={}, orderId={}",
+                    "Заказ не найден при отмене: customerId={}, orderId={}",
                     customerId,
                     orderId
             );
 
-            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for customerId=" + customerId);
+            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для customerId=" + customerId);
         }
 
         if (!orderStatusSnapshot.status().canBeCanceledByCustomer()) {
             log.warn(
-                    "Order cannot be canceled: customerId={}, orderId={}, currentStatus={}",
+                    "Заказ нельзя отменить в текущем статусе: customerId={}, orderId={}, currentStatus={}",
                     customerId,
                     orderId,
                     orderStatusSnapshot.status()
             );
 
-            throw new IllegalStateException("Only CREATED orders can be canceled. Current status=" + orderStatusSnapshot.status());
+            throw new BusinessRuleViolationException(
+                    "Отменить можно только заказ в статусе CREATED. Текущий статус="
+                            + orderStatusSnapshot.status().getDbValue()
+            );
         }
 
         updateOrderStatusToCanceled(customerId, orderId);
@@ -219,13 +237,13 @@ public class OrderService {
         createOrderEvent(
                 orderId,
                 OrderEventType.ORDER_CANCELED,
-                "Order canceled by customer"
+                "Заказ отменён клиентом"
         );
 
         OrderResponse response = getOrderByIdForCustomer(customerId, orderId);
 
         log.info(
-                "Order canceled: customerId={}, orderId={}, newStatus={}",
+                "Заказ успешно отменён: customerId={}, orderId={}, newStatus={}",
                 customerId,
                 orderId,
                 response.status()
@@ -234,9 +252,10 @@ public class OrderService {
         return response;
     }
 
+    @Transactional(readOnly = true)
     public List<OrderEventResponse> getOrderEventsForCustomer(Long customerId, Long orderId) {
         log.info(
-                "Fetching order events for customer: customerId={}, orderId={}",
+                "Получаем историю событий заказа: customerId={}, orderId={}",
                 customerId,
                 orderId
         );
@@ -245,12 +264,12 @@ public class OrderService {
 
         if (!orderExist) {
             log.warn(
-                    "Order not found while fetching events: customerId={}, orderId={}",
+                    "Заказ не найден при получении истории событий: customerId={}, orderId={}",
                     customerId,
                     orderId
             );
 
-            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for customerId=" + customerId );
+            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для customerId=" + customerId);
         }
 
         String sql = """
@@ -278,7 +297,7 @@ public class OrderService {
         );
 
         log.info(
-                "Order events loaded: customerId={}, orderId={}, eventsCount={}",
+                "История событий заказа загружена: customerId={}, orderId={}, eventsCount={}",
                 customerId,
                 orderId,
                 events.size()
@@ -287,9 +306,10 @@ public class OrderService {
         return events;
     }
 
+    @Transactional
     public OrderResponse acceptOrder(Long restaurantId, Long orderId) {
         log.info(
-                "Accepting order: restaurantId={}, orderId={}",
+                "Начинаем принятие заказа рестораном: restaurantId={}, orderId={}",
                 restaurantId,
                 orderId
         );
@@ -298,23 +318,26 @@ public class OrderService {
 
         if (orderStatusSnapshot == null) {
             log.warn(
-                    "Order not found while accepting: restaurantId={}, orderId={}",
+                    "Заказ не найден при принятии рестораном: restaurantId={}, orderId={}",
                     restaurantId,
                     orderId
             );
 
-            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for restaurantId=" + restaurantId);
+            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId);
         }
 
         if (!orderStatusSnapshot.status().canBeAcceptedByRestaurant()) {
             log.warn(
-                    "Order cannot be accepted: restaurantId={}, orderId={}, currentStatus={}",
+                    "Заказ нельзя принять в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
                     restaurantId,
                     orderId,
-                    orderStatusSnapshot.status()
+                    orderStatusSnapshot.status().getDbValue()
             );
 
-            throw new IllegalStateException("Only CREATED orders can be accepted by restaurant. Current status=" +  orderStatusSnapshot.status().getDbValue());
+            throw new BusinessRuleViolationException(
+                    "Принять можно только заказ в статусе CREATED. Текущий статус="
+                            + orderStatusSnapshot.status().getDbValue()
+            );
         }
 
         updateOrderStatusToAccepted(restaurantId, orderId);
@@ -322,13 +345,13 @@ public class OrderService {
         createOrderEvent(
                 orderId,
                 OrderEventType.ORDER_ACCEPTED,
-                "Order accepted by restaurant"
+                "Заказ принят рестораном"
         );
 
         OrderResponse response = getOrderById(orderId);
 
         log.info(
-                "Order accepted: restaurantId={}, orderId={}, newStatus={}",
+                "Заказ принят рестораном: restaurantId={}, orderId={}, newStatus={}",
                 restaurantId,
                 orderId,
                 response.status()
@@ -340,7 +363,7 @@ public class OrderService {
     @Transactional
     public OrderResponse startCookingOrder(Long restaurantId, Long orderId) {
         log.info(
-                "Starting cooking order: restaurantId={}, orderId={}",
+                "Начинаем готовку заказа: restaurantId={}, orderId={}",
                 restaurantId,
                 orderId
         );
@@ -349,23 +372,26 @@ public class OrderService {
 
         if (orderStatusSnapshot == null) {
             log.warn(
-                    "Order not found while starting cooking: restaurantId={}, orderId={}",
+                    "Заказ не найден при начале готовки: restaurantId={}, orderId={}",
                     restaurantId,
                     orderId
             );
 
-            throw new ResourceNotFoundException("Order with id=" + orderId + " not found for restaurantId=" + restaurantId);
+            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId);
         }
 
         if (!orderStatusSnapshot.status().canStartCookingByRestaurant()) {
             log.warn(
-                    "Order cannot start cooking: restaurantId={}, orderId={}, currentStatus={}",
+                    "Нельзя начать готовку заказа в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
                     restaurantId,
                     orderId,
-                    orderStatusSnapshot.status()
+                    orderStatusSnapshot.status().getDbValue()
             );
 
-            throw new IllegalStateException("Only ACCEPTED orders can start cooking. Current status=" + orderStatusSnapshot.status().getDbValue());
+            throw new BusinessRuleViolationException(
+                    "Начать готовку можно только для заказа в статусе ACCEPTED. Текущий статус="
+                            + orderStatusSnapshot.status().getDbValue()
+            );
         }
 
         updateOrderStatusToCooking(restaurantId, orderId);
@@ -373,13 +399,13 @@ public class OrderService {
         createOrderEvent(
                 orderId,
                 OrderEventType.ORDER_COOKING_STARTED,
-                "Order cooking started by restaurant"
+                "Ресторан начал готовить заказ"
         );
 
         OrderResponse response = getOrderById(orderId);
 
         log.info(
-                "Order cooking started: restaurantId={}, orderId={}, newStatus={}",
+                "Готовка заказа начата: restaurantId={}, orderId={}, newStatus={}",
                 restaurantId,
                 orderId,
                 response.status()
@@ -391,7 +417,7 @@ public class OrderService {
     @Transactional
     public OrderResponse markOrderReadyForDelivery(Long restaurantId, Long orderId) {
         log.info(
-                "Marking order ready for delivery: restaurantId={}, orderId={}",
+                "Отмечаем заказ готовым к доставке: restaurantId={}, orderId={}",
                 restaurantId,
                 orderId
         );
@@ -400,26 +426,28 @@ public class OrderService {
 
         if (orderStatusSnapshot == null) {
             log.warn(
-                    "Order not found while marking ready for delivery: restaurantId={}, orderId={}",
+                    "Заказ не найден при отметке готовности к доставке: restaurantId={}, orderId={}",
                     restaurantId,
                     orderId
             );
 
             throw new ResourceNotFoundException(
-                    "Order with id=" + orderId + " not found for restaurantId=" + restaurantId
+                    "Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId
             );
         }
 
         if (!orderStatusSnapshot.status().canBeMarkedReadyForDeliveryByRestaurant()) {
             log.warn(
-                    "Order cannot be marked ready for delivery: restaurantId={}, orderId={}, currentStatus={}",
+                    "Нельзя отметить заказ готовым к доставке в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
                     restaurantId,
                     orderId,
-                    orderStatusSnapshot.status()
+                    orderStatusSnapshot.status().getDbValue()
             );
 
-            throw new IllegalStateException("Only COOKING orders can be marked ready for delivery. Current status="
-                    +  orderStatusSnapshot.status().getDbValue());
+            throw new BusinessRuleViolationException(
+                    "Отметить готовым к доставке можно только заказ в статусе COOKING. Текущий статус="
+                            + orderStatusSnapshot.status().getDbValue()
+            );
         }
 
         updateOrderStatusToReadyForDelivery(restaurantId, orderId);
@@ -427,13 +455,13 @@ public class OrderService {
         createOrderEvent(
                 orderId,
                 OrderEventType.ORDER_READY_FOR_DELIVERY,
-                "Order marked ready for delivery by restaurant"
+                "Заказ отмечен рестораном как готовый к доставке"
         );
 
         OrderResponse response = getOrderById(orderId);
 
         log.info(
-                "Order marked ready for delivery: restaurantId={}, orderId={}, newStatus={}",
+                "Заказ отмечен готовым к доставке: restaurantId={}, orderId={}, newStatus={}",
                 restaurantId,
                 orderId,
                 response.status()
@@ -461,7 +489,10 @@ public class OrderService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Failed to mark order ready for delivery with id=" + orderId + " for restaurantId=" + restaurantId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось отметить заказ готовым к доставке: orderId=" + orderId
+                            + ". Возможно, заказ уже изменил статус"
+            );
         }
     }
 
@@ -484,7 +515,10 @@ public class OrderService {
         );
 
         if (updatedRows == 0) {
-            throw new IllegalStateException("Failed to start cooking order with id=" + orderId + " for restaurantId=" + restaurantId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось начать готовку заказа с id=" + orderId
+                            + ". Возможно, заказ уже изменил статус"
+            );
         }
     }
 
@@ -507,8 +541,9 @@ public class OrderService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException(
-                    "Failed to accept order with id=" + orderId + " for restaurantId=" + restaurantId
+            throw new BusinessRuleViolationException(
+                    "Не удалось принять заказ с id=" + orderId
+                            + ". Возможно, заказ уже изменил статус"
             );
         }
     }
@@ -574,7 +609,10 @@ public class OrderService {
                 OrderStatus.CREATED.getDbValue());
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Failed to cancel order with id=" + orderId + " for customerId=" + customerId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось отменить заказ с id=" + orderId
+                            + ". Возможно, заказ уже изменил статус"
+            );
         }
     }
 
@@ -625,7 +663,7 @@ public class OrderService {
         List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId);
 
         if (rows.isEmpty()) {
-            throw new ResourceNotFoundException("Order not found for orderId=" + orderId);
+            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден");
         }
 
         return buildOrderResponse(rows);
@@ -673,7 +711,10 @@ public class OrderService {
         int updateRows = jdbcTemplate.update(sql, cartId);
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Failed to checkout active cart with id=" + cartId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось оформить корзину с id=" + cartId
+                            + ". Возможно, корзина уже была оформлена или изменила статус"
+            );
         }
     }
 
@@ -694,7 +735,10 @@ public class OrderService {
         int updateRows = jdbcTemplate.update(sql, orderId, eventType.getDbValue(), description);
 
         if (updateRows != 1) {
-            throw new IllegalStateException("Failed to create order event for orderId=" + orderId + ", eventType=" + eventType.getDbValue());
+            throw new IllegalStateException(
+                    "Не удалось записать событие заказа: orderId=" + orderId
+                            + ", eventType=" + eventType.getDbValue()
+            );
         }
     }
 
@@ -733,7 +777,9 @@ public class OrderService {
         );
 
         if (updatedRows.length != cartItems.size()) {
-            throw new IllegalStateException("Failed to create all order items for orderId=" + orderId);
+            throw new IllegalStateException(
+                    "Не удалось создать все позиции заказа: orderId=" + orderId
+            );
         }
     }
 
@@ -760,7 +806,10 @@ public class OrderService {
                 totalAmount);
 
         if (orderId == null) {
-            throw new ResourceNotFoundException( "Failed to create order for customerId=" + customerId + " and restaurantId=" + restaurantId);
+            throw new IllegalStateException(
+                    "База данных не вернула id созданного заказа для customerId="
+                            + customerId + " и restaurantId=" + restaurantId
+            );
         }
 
         return orderId;
