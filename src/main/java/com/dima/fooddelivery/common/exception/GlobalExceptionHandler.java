@@ -2,6 +2,7 @@ package com.dima.fooddelivery.common.exception;
 
 import com.dima.fooddelivery.common.api.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -111,6 +112,36 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleConstraintViolation(
+            ConstraintViolationException exception,
+            HttpServletRequest request
+    ){
+        String message = exception.getConstraintViolations()
+                .stream()
+                .map(error -> error.getPropertyPath() + ": " + error.getMessage())
+                .collect(Collectors.joining("; "));
+
+        if (message.isBlank()) {
+            message = "Ошибка валидации параметров запроса";
+        }
+
+        log.warn(
+                "Ошибка валидации параметров запроса: path={}, message={}",
+                request.getRequestURI(),
+                message
+        );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                message,
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ApiErrorResponse> handleMethodArgumentTypeMismatch(
             MethodArgumentTypeMismatchException exception,
@@ -135,7 +166,7 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    ResponseEntity<ApiErrorResponse> HttpMessageNotReadable(
+    ResponseEntity<ApiErrorResponse> httpMessageNotReadable(
             HttpMessageNotReadableException exception,
             HttpServletRequest request
     ) {
@@ -168,13 +199,13 @@ public class GlobalExceptionHandler {
                 exception.getMessage());
 
         ApiErrorResponse response = new ApiErrorResponse(
-                HttpStatus.CONFLICT.value(),
-                HttpStatus.CONFLICT.getReasonPhrase(),
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(),
                 exception.getMessage(),
                 request.getRequestURI()
         );
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

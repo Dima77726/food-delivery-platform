@@ -1,8 +1,10 @@
 package com.dima.fooddelivery.restaurant.api;
 
 import com.dima.fooddelivery.restaurant.service.RestaurantService;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,6 +14,7 @@ import java.util.List;
 
 @Slf4j
 @RequiredArgsConstructor
+@Validated
 @RestController
 @RequestMapping("/api/v1/restaurants")
 public class RestaurantController {
@@ -20,21 +23,29 @@ public class RestaurantController {
 
     @GetMapping
     public List<RestaurantResponse> getAllRestaurants() {
-        log.info("Getting all restaurants");
+        log.info("Получен запрос на получение списка ресторанов");
 
         List<RestaurantResponse> restaurants = restaurantService.getRestaurantAll();
 
-        log.info("Returning {} restaurants", restaurants.size());
+        log.info("Возвращаем список ресторанов: restaurantsCount={}", restaurants.size());
         return restaurants;
     }
 
     @GetMapping("/{id}")
-    public RestaurantResponse getRestaurantById(@PathVariable Long id) {
-        log.info("Getting restaurant by id {}", id);
+    public RestaurantResponse getRestaurantById(
+            @Positive(message = "restaurantId должен быть положительным числом")
+            @PathVariable Long id
+    ) {
+        log.info("Получен запрос на получение ресторана по id: restaurantId={}", id);
 
         RestaurantResponse restaurant = restaurantService.getRestaurantById(id);
 
-        log.info("Restaurant found: id = {}, name = {}", restaurant.id(), restaurant.name());
+        log.info(
+                "Возвращаем ресторан: restaurantId={}, name={}",
+                restaurant.id(),
+                restaurant.name()
+        );
+
         return restaurant;
     }
 }

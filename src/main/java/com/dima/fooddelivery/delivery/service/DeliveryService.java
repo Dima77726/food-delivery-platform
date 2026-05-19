@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.delivery.service;
 
+import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.delivery.api.DeliveryResponse;
 import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
@@ -49,7 +50,7 @@ public class DeliveryService {
                     order.status().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Доставку можно создать только для заказа в статусе READY_FOR_DELIVERY. Текущий статус="
                             + order.status().getDbValue()
             );
@@ -99,7 +100,7 @@ public class DeliveryService {
                     deliveryStatusSnapshot.status().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Курьера можно назначить только на доставку в статусе CREATED. Текущий статус="
                     + deliveryStatusSnapshot.status().getDbValue()
             );
@@ -149,7 +150,7 @@ public class DeliveryService {
                     courierId
             );
 
-            throw new IllegalStateException("Эта доставка назначена другому курьеру");
+            throw new BusinessRuleViolationException("Эта доставка назначена другому курьеру");
         }
 
         if (!delivery.deliveryStatus().canBePickedUpByCourier()) {
@@ -159,7 +160,7 @@ public class DeliveryService {
                     delivery.deliveryStatus().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Забрать можно только доставку в статусе ASSIGNED. Текущий статус="
                             + delivery.deliveryStatus().getDbValue()
             );
@@ -172,7 +173,7 @@ public class DeliveryService {
                     delivery.orderStatus().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Заказ можно передать курьеру только из статуса READY_FOR_DELIVERY. Текущий статус="
                             + delivery.orderStatus().getDbValue()
             );
@@ -231,9 +232,7 @@ public class DeliveryService {
                     courierId
             );
 
-            throw new IllegalStateException(
-                    "Эта доставка назначена другому курьеру"
-            );
+            throw new BusinessRuleViolationException("Эта доставка назначена другому курьеру");
         }
 
         if (!delivery.deliveryStatus().canBeDeliveredByCourier()) {
@@ -243,7 +242,7 @@ public class DeliveryService {
                     delivery.deliveryStatus().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Завершить можно только доставку в статусе PICKED_UP. Текущий статус="
                             + delivery.deliveryStatus().getDbValue()
             );
@@ -256,7 +255,7 @@ public class DeliveryService {
                     delivery.orderStatus().getDbValue()
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Заказ можно завершить только из статуса IN_DELIVERY. Текущий статус="
                             + delivery.orderStatus().getDbValue()
             );
@@ -302,8 +301,9 @@ public class DeliveryService {
         );
 
         if (updatedRows == 0) {
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Не удалось перевести заказ в статус DELIVERED: orderId=" + orderId
+                            + ". Возможно, заказ уже изменил статус"
             );
         }
     }
@@ -328,7 +328,10 @@ public class DeliveryService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException( "Не удалось завершить доставку: deliveryId=" + deliveryId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось завершить доставку: deliveryId=" + deliveryId
+                    + ". Возможно, доставка уже изменила статус или назначена другому курьеру"
+            );
         }
     }
 
@@ -402,7 +405,10 @@ public class DeliveryService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Не удалось перевести заказ в статус IN_DELIVERY: orderId=" + orderId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось перевести заказ в статус IN_DELIVERY: orderId=" + orderId
+                   + ". Возможно, заказ уже изменил статус"
+            );
         }
     }
 
@@ -426,7 +432,10 @@ public class DeliveryService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Не удалось отметить доставку как забранную: deliveryId=" + deliveryId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось отметить доставку как забранную: deliveryId=" + deliveryId
+                            + ". Возможно, доставка уже изменила статус или назначена другому курьеру"
+            );
         }
     }
 
@@ -477,7 +486,9 @@ public class DeliveryService {
         );
 
         if (updateRows == 0) {
-            throw new IllegalStateException("Не удалось назначить курьера на доставку с id=" + deliveryId);
+            throw new BusinessRuleViolationException(
+                    "Не удалось назначить курьера на доставку с id=" + deliveryId
+                            + ". Возможно, доставка уже изменила статус");
         }
     }
 
@@ -604,7 +615,7 @@ public class DeliveryService {
                     orderId
             );
 
-            throw new IllegalStateException(
+            throw new BusinessRuleViolationException(
                     "Доставка для заказа с id=" + orderId + " уже существует"
             );
         }

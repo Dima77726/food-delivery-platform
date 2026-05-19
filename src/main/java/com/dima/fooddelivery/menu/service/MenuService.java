@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,9 +26,12 @@ public class MenuService {
     private final JdbcTemplate jdbcTemplate;
     private final MenuRowMapper menuRowMapper;
 
-
+    @Transactional(readOnly = true)
     public RestaurantMenuResponse getRestaurantMenu(Long restaurantId) {
-        log.info("Fetching menu for restaurantId={}", restaurantId);
+        log.info(
+                "Начинаем загрузку меню ресторана: restaurantId={}",
+                restaurantId
+        );
 
         validateRestaurantExists(restaurantId);
 
@@ -54,10 +58,12 @@ public class MenuService {
 
         RestaurantMenuResponse response = buildMenuResponse(restaurantId, rows);
 
-        log.info("Menu loaded for restaurantId={}, categoriesCount={}",
+        log.info(
+                "Меню ресторана загружено: restaurantId={}, categoriesCount={}",
                 restaurantId,
                 response.categories().size()
         );
+
         return response;
     }
 
@@ -75,8 +81,14 @@ public class MenuService {
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, restaurantId);
 
         if (!Boolean.TRUE.equals(exists)) {
-            log.warn("Restaurant not found while loading menu: restaurantId={}", restaurantId);
-            throw new ResourceNotFoundException("Restaurant with id=" + restaurantId + " not found");
+            log.warn(
+                    "Ресторан не найден при загрузке меню: restaurantId={}",
+                    restaurantId
+            );
+
+            throw new ResourceNotFoundException(
+                    "Ресторан с id=" + restaurantId + " не найден"
+            );
         }
     }
 

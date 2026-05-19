@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -19,7 +20,9 @@ public class RestaurantService {
 
     private final RestaurantRowMapper restaurantRowMapper;
 
+    @Transactional(readOnly = true)
     public List<RestaurantResponse> getRestaurantAll(){
+        log.info("Начинаем загрузку списка ресторанов");
 
         String sql = """
                 SELECT id,name, description, city, is_active 
@@ -29,15 +32,28 @@ public class RestaurantService {
 
         List<RestaurantResponse> restaurants = jdbcTemplate.query(sql, restaurantRowMapper);
 
-        log.info("Fetched {} restaurants from database", restaurants.size());
+        log.info(
+                "Список ресторанов загружен из базы данных: restaurantsCount={}",
+                restaurants.size()
+        );
+
         return restaurants;
     }
 
+    @Transactional(readOnly = true)
     public RestaurantResponse getRestaurantById(Long id){
-        log.debug("Searching restaurant by id={}", id);
+        log.info(
+                "Начинаем поиск ресторана по id: restaurantId={}",
+                id
+        );
 
         String sql = """
-                SELECT id,name, description, city, is_active
+                SELECT 
+                    id,
+                    name, 
+                    description, 
+                    city, 
+                    is_active
                 FROM food_app.restaurant
                 WHERE id = ?
         """;
@@ -45,14 +61,23 @@ public class RestaurantService {
         List<RestaurantResponse> restaurants  = jdbcTemplate.query(sql, restaurantRowMapper, id);
 
         if(restaurants.isEmpty()){
-            log.error("No restaurant found with id={}", id);
+            log.warn(
+                    "Ресторан не найден: restaurantId={}",
+                    id
+            );
 
-            throw new ResourceNotFoundException("No restaurant found with id={}");
+            throw new ResourceNotFoundException(
+                    "Ресторан с id=" + id + " не найден"
+            );
         }
 
         RestaurantResponse restaurantResponse = restaurants.get(0);
 
-        log.info("Restaurant found in database: id={}, name={}", restaurantResponse.id(), restaurantResponse.name());
+        log.info(
+                "Ресторан найден: restaurantId={}, name={}",
+                restaurantResponse.id(),
+                restaurantResponse.name()
+        );
         return restaurantResponse;
 
     }
