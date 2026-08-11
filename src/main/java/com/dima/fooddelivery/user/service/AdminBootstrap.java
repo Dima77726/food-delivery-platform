@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Создаёт первого администратора.
@@ -34,8 +33,19 @@ public class AdminBootstrap {
     @Value("${app.security.bootstrap-admin.password:}")
     private String adminPassword;
 
+    /**
+     * Транзакции на этом методе намеренно нет.
+     *
+     * <p>{@code @Transactional} открывает соединение прокси при входе в метод, а не при первом
+     * запросе. Ранний выход на незаданных переменных окружения до этого не доходил, и
+     * приложение без базы падало на старте, хотя лезть в неё не собиралось. Ловится это только
+     * там, где базы нет, — локально Postgres обычно поднят, и проблема не проявляется.
+     *
+     * <p>Собственная транзакция здесь и не нужна: {@code existsByEmail} — одиночное чтение,
+     * а {@link UserService#createUser} открывает транзакцию сам. Гонка двух одновременных
+     * стартов закрыта уникальным индексом по e-mail.
+     */
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void createAdminIfMissing() {
         if (adminEmail.isBlank() || adminPassword.isBlank()) {
             log.info(

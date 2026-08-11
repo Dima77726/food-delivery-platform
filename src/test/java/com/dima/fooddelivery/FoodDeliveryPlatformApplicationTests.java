@@ -4,18 +4,23 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Быстрая проверка, что контекст вообще собирается: все бины находят свои зависимости,
- * нет циклов и опечаток в конфигурации.
+ * Проверяет, что контекст собирается: все бины находят зависимости, нет циклов
+ * и опечаток в конфигурации.
  *
- * <p>База здесь не поднимается — миграции выключены, соединение не открывается. Это
- * сознательно: тест обязан отработать за секунду и не требовать Docker. Всё, что связано
- * с реальными запросами, проверяют классы {@code *IT}.
+ * <p>Datasource намеренно указывает на заведомо недоступный порт. Смысл не в том, чтобы
+ * обойтись без базы ради скорости, а в том, чтобы тест доказывал утверждение: при старте
+ * приложение не открывает соединение раньше, чем оно понадобится.
+ *
+ * <p>Без этого тест зависел бы от того, поднят ли у разработчика Postgres. Именно так и
+ * случилось: {@code AdminBootstrap} с {@code @Transactional} открывал соединение при входе
+ * в метод, локально оно устанавливалось и тест был зелёным, а на CI без базы контекст падал.
  */
 @SpringBootTest(properties = {
         "spring.liquibase.enabled=false",
         "preliquibase.enabled=false",
         "spring.sql.init.mode=never",
-        "app.notification.dispatch-enabled=false"
+        "app.notification.dispatch-enabled=false",
+        "spring.datasource.url=jdbc:postgresql://localhost:1/unreachable-on-purpose"
 })
 class FoodDeliveryPlatformApplicationTests {
 
