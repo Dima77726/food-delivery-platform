@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.restaurant.api;
 
 import com.dima.fooddelivery.restaurant.service.RestaurantService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ import java.util.List;
 @Validated
 @RestController
 @RequestMapping("/api/v1/restaurants")
+@Tag(name = "Restaurant", description = "Витрина ресторанов; доступна без входа")
 public class RestaurantController {
 
     private final RestaurantService restaurantService;
@@ -25,7 +27,7 @@ public class RestaurantController {
     public List<RestaurantResponse> getAllRestaurants() {
         log.info("Получен запрос на получение списка ресторанов");
 
-        List<RestaurantResponse> restaurants = restaurantService.getRestaurantAll();
+        List<RestaurantResponse> restaurants = restaurantService.getAllRestaurants();
 
         log.info("Возвращаем список ресторанов: restaurantsCount={}", restaurants.size());
         return restaurants;

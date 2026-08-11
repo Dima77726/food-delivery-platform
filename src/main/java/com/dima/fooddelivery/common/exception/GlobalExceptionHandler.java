@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.common.exception;
 
 import com.dima.fooddelivery.common.api.ApiErrorResponse;
+import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -8,7 +9,11 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -59,6 +64,113 @@ public class GlobalExceptionHandler {
         );
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    /**
+     * Неверные учётные данные. Формулировка ответа намеренно не различает «нет пользователя»
+     * и «неверный пароль»: иначе форма входа превращается в способ проверить,
+     * зарегистрирован ли адрес.
+     */
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<ApiErrorResponse> handleBadCredentials(
+            BadCredentialsException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Неудачная аутентификация: path={}", request.getRequestURI());
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.UNAUTHORIZED.value(),
+                HttpStatus.UNAUTHORIZED.getReasonPhrase(),
+                "Неверный e-mail или пароль",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<ApiErrorResponse> handleDisabledAccount(
+            DisabledException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Вход заблокированной учётной записи: path={}", request.getRequestURI());
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.FORBIDDEN.value(),
+                HttpStatus.FORBIDDEN.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+
+    /**
+     * Ресурс есть, но чужой. Отдельно от 404 и 409: раньше эта ситуация маскировалась
+     * под «статус изменился», потому что проверка владельца стояла в WHERE у UPDATE.
+     */
+    @ExceptionHandler(AccessDeniedForResourceException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccessDeniedForResource(
+            AccessDeniedForResourceException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Отказано в доступе к ресурсу: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.FORBIDDEN.value(),
+                HttpStatus.FORBIDDEN.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+
+    /**
+     * Пользователь не прошёл проверку прав Spring Security (роль не та). Без этого обработчика
+     * исключение попало бы в catch-all и превратилось в 500 вместо 403.
+     */
+    @ExceptionHandler(AuthorizationDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuthorizationDenied(
+            AuthorizationDeniedException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Недостаточно прав: path={}", request.getRequestURI());
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.FORBIDDEN.value(),
+                HttpStatus.FORBIDDEN.getReasonPhrase(),
+                "Недостаточно прав для выполнения операции",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+
+    /**
+     * Валидация параметров метода контроллера в Spring Framework 6.1+ работает и без
+     * {@code @Validated} на классе, но бросает уже не ConstraintViolationException.
+     * Без этой ветки catch-all отдал бы 500 на обычную ошибку ввода.
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleHandlerMethodValidation(
+            HandlerMethodValidationException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Некорректные параметры запроса: path={}", request.getRequestURI());
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                "Некорректные параметры запроса",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

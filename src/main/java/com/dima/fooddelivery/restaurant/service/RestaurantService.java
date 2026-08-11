@@ -1,84 +1,80 @@
 package com.dima.fooddelivery.restaurant.service;
 
+import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.restaurant.api.RestaurantResponse;
-import com.dima.fooddelivery.restaurant.persistence.RestaurantRowMapper;
+import com.dima.fooddelivery.restaurant.api.RestaurantResponseMapper;
+import com.dima.fooddelivery.restaurant.domain.Restaurant;
+import com.dima.fooddelivery.restaurant.persistence.RestaurantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Модуль Restaurant.
+ *
+ * <p>Публичный вход для других модулей — {@link #requireActiveRestaurant(Long)}. Модуль Cart
+ * обращается сюда, а не в таблицу {@code restaurant} напрямую: правило «в закрытом ресторане
+ * нельзя заказывать» принадлежит этому модулю и должно меняться в одном месте.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class RestaurantService {
 
-    private final JdbcTemplate jdbcTemplate;
-
-    private final RestaurantRowMapper restaurantRowMapper;
+    private final RestaurantRepository restaurantRepository;
 
     @Transactional(readOnly = true)
-    public List<RestaurantResponse> getRestaurantAll(){
-        log.info("Начинаем загрузку списка ресторанов");
+    public List<RestaurantResponse> getAllRestaurants() {
+        List<Restaurant> restaurants = restaurantRepository.findAll();
 
-        String sql = """
-                SELECT id,name, description, city, is_active 
-                FROM food_app.restaurant
-                ORDER BY id
-                """;
+        log.debug("Список ресторанов загружен: restaurantsCount={}", restaurants.size());
 
-        List<RestaurantResponse> restaurants = jdbcTemplate.query(sql, restaurantRowMapper);
-
-        log.info(
-                "Список ресторанов загружен из базы данных: restaurantsCount={}",
-                restaurants.size()
-        );
-
-        return restaurants;
+        return RestaurantResponseMapper.toResponses(restaurants);
     }
 
     @Transactional(readOnly = true)
-    public RestaurantResponse getRestaurantById(Long id){
-        log.info(
-                "Начинаем поиск ресторана по id: restaurantId={}",
-                id
-        );
+    public RestaurantResponse getRestaurantById(Long restaurantId) {
+        Restaurant restaurant = requireRestaurant(restaurantId);
 
-        String sql = """
-                SELECT 
-                    id,
-                    name, 
-                    description, 
-                    city, 
-                    is_active
-                FROM food_app.restaurant
-                WHERE id = ?
-        """;
+        return RestaurantResponseMapper.toResponse(restaurant);
+    }
 
-        List<RestaurantResponse> restaurants  = jdbcTemplate.query(sql, restaurantRowMapper, id);
+    /**
+     * Возвращает ресторан или бросает 404.
+     *
+     * @throws ResourceNotFoundException если ресторана нет
+     */
+    @Transactional(readOnly = true)
+    public Restaurant requireRestaurant(Long restaurantId) {
+        return restaurantRepository.findById(restaurantId)
+                .orElseThrow(() -> {
+                    log.warn("Ресторан не найден: restaurantId={}", restaurantId);
+                    return new ResourceNotFoundException("Ресторан с id=" + restaurantId + " не найден");
+                });
+    }
 
-        if(restaurants.isEmpty()){
-            log.warn(
-                    "Ресторан не найден: restaurantId={}",
-                    id
-            );
+    /**
+     * Проверяет, что ресторан существует и принимает заказы.
+     *
+     * @throws ResourceNotFoundException      если ресторана нет
+     * @throws BusinessRuleViolationException если ресторан отключён
+     */
+    @Transactional(readOnly = true)
+    public Restaurant requireActiveRestaurant(Long restaurantId) {
+        Restaurant restaurant = requireRestaurant(restaurantId);
 
-            throw new ResourceNotFoundException(
-                    "Ресторан с id=" + id + " не найден"
+        if (!restaurant.active()) {
+            log.warn("Ресторан недоступен для заказов: restaurantId={}", restaurantId);
+
+            throw new BusinessRuleViolationException(
+                    "Ресторан с id=" + restaurantId + " сейчас недоступен для заказов"
             );
         }
 
-        RestaurantResponse restaurantResponse = restaurants.get(0);
-
-        log.info(
-                "Ресторан найден: restaurantId={}, name={}",
-                restaurantResponse.id(),
-                restaurantResponse.name()
-        );
-        return restaurantResponse;
-
+        return restaurant;
     }
 }

@@ -1,895 +1,290 @@
 package com.dima.fooddelivery.order.service;
 
+import com.dima.fooddelivery.cart.domain.Cart;
+import com.dima.fooddelivery.cart.domain.CartItem;
+import com.dima.fooddelivery.cart.service.CartService;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.order.api.OrderEventResponse;
-import com.dima.fooddelivery.order.api.OrderItemResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
+import com.dima.fooddelivery.order.api.OrderResponseMapper;
 import com.dima.fooddelivery.order.api.OrderSummaryResponse;
+import com.dima.fooddelivery.order.domain.Order;
+import com.dima.fooddelivery.order.domain.OrderAccess;
 import com.dima.fooddelivery.order.domain.OrderEventType;
 import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.order.persistence.OrderRow;
-import com.dima.fooddelivery.order.persistence.OrderRowMapper;
+import com.dima.fooddelivery.order.persistence.OrderEventRepository;
+import com.dima.fooddelivery.order.persistence.OrderRepository;
+import com.dima.fooddelivery.payment.service.PaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Сценарии работы с заказом со стороны клиента и ресторана.
+ *
+ * <p>SQL здесь больше нет: запросы живут в {@link OrderRepository}, смена статусов — в
+ * {@link OrderStatusService}. Этому классу остались решения: кто вправе, что считать ошибкой
+ * и в каком порядке дёргать соседние модули.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
 
-    private final JdbcTemplate jdbcTemplate;
-    private final OrderRowMapper orderRowMapper;
+    private final OrderRepository orderRepository;
+    private final OrderEventRepository orderEventRepository;
+    private final OrderStatusService orderStatusService;
+    private final CartService cartService;
+    private final PaymentService paymentService;
 
+    /**
+     * Создаёт заказ из активной корзины клиента.
+     *
+     * <p>Порядок шагов важен: корзина закрывается до фиксации транзакции, поэтому два
+     * параллельных запроса не смогут создать два заказа из одной корзины — второй упадёт
+     * на compare-and-set внутри {@link CartService#checkout(Long)}.
+     */
     @Transactional
     public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
-        log.info(
-                "Начинаем создание заказа из активной корзины: customerId={}, restaurantId={}",
-                customerId,
-                restaurantId
-        );
+        Cart cart = cartService.requireActiveCart(customerId, restaurantId);
 
-        Long cartId = findActiveCartId(customerId, restaurantId);
-
-        if (cartId == null) {
-            log.warn(
-                    "Активная корзина не найдена при создании заказа: customerId={}, restaurantId={}",
-                    customerId,
-                    restaurantId
-            );
-
-            throw new ResourceNotFoundException(
-                    "Активная корзина не найдена для customerId=" + customerId + " и restaurantId=" + restaurantId
-            );
-        }
-
-        List<CartItemForOrder> cartItems = findCartItemsForOrder(cartId);
-
-        if (cartItems.isEmpty()) {
-            log.warn("Нельзя создать заказ из пустой корзины: cartId={}", cartId);
+        if (cart.isEmpty()) {
+            log.warn("Попытка создать заказ из пустой корзины: cartId={}", cart.id());
 
             throw new BusinessRuleViolationException(
-                    "Нельзя создать заказ из пустой корзины: cartId=" + cartId
+                    "Нельзя создать заказ из пустой корзины: cartId=" + cart.id()
             );
         }
 
-        BigDecimal totalAmount = calculateTotalAmount(cartItems);
+        BigDecimal totalAmount = cart.totalAmount();
 
-        Long orderId = createOrder(cartId, customerId, restaurantId, totalAmount);
+        Long orderId = orderRepository.insert(
+                cart.id(),
+                customerId,
+                restaurantId,
+                OrderStatus.CREATED,
+                totalAmount
+        );
 
-        createOrderItems(orderId, cartItems);
+        orderRepository.insertItems(orderId, cart.items().stream()
+                .map(OrderService::toNewOrderItem)
+                .toList());
 
-        checkoutCart(cartId);
+        cartService.checkout(cart.id());
 
-        createOrderEvent(
+        orderStatusService.recordEvent(
                 orderId,
                 OrderEventType.ORDER_CREATED,
                 "Заказ создан из активной корзины"
         );
 
-        OrderResponse response = getOrderById(orderId);
-
         log.info(
-                "Заказ успешно создан из корзины: orderId={}, cartId={}, itemsCount={}, totalAmount={}",
-                response.id(),
-                response.cartId(),
-                response.items().size(),
-                response.totalAmount()
+                "Заказ создан: orderId={}, customerId={}, itemsCount={}, totalAmount={}",
+                orderId,
+                customerId,
+                cart.items().size(),
+                totalAmount
         );
 
-        return response;
-
+        return OrderResponseMapper.toResponse(requireOrder(orderId));
     }
 
+    @Transactional(readOnly = true)
     public OrderResponse getOrderByIdForCustomer(Long customerId, Long orderId) {
-        log.info(
-                "Получаем заказ клиента: customerId={}, orderId={}",
-                customerId,
-                orderId
+        Order order = orderRepository.findByIdAndCustomerId(orderId, customerId)
+                .orElseThrow(() -> {
+                    log.warn("Заказ клиента не найден: customerId={}, orderId={}", customerId, orderId);
+
+                    return new ResourceNotFoundException(
+                            "Заказ с id=" + orderId + " не найден для customerId=" + customerId
+                    );
+                });
+
+        return OrderResponseMapper.toResponse(order);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderSummaryResponse> getOrdersByCustomer(Long customerId) {
+        return OrderResponseMapper.toSummaryResponses(
+                orderRepository.findSummariesByCustomerId(customerId)
         );
+    }
 
-        String sql = """
-                SELECT
-                    co.id AS order_id,
-                    co.cart_id,
-                    co.customer_id,
-                    co.restaurant_id,
-                    co.status AS order_status,
-                    co.total_amount,
+    @Transactional(readOnly = true)
+    public List<OrderSummaryResponse> getOrdersForRestaurant(Long restaurantId, OrderStatus status) {
+        return OrderResponseMapper.toSummaryResponses(
+                orderRepository.findSummariesByRestaurantId(restaurantId, status)
+        );
+    }
 
-                    coi.id AS order_item_id,
-                    coi.menu_item_id,
-                    coi.menu_item_name,
-                    coi.quantity,
-                    coi.price,
-                    coi.line_total
-                FROM food_app.customer_order co
-                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
-                WHERE co.id = ?
-                and co.customer_id = ?
-                ORDER BY coi.id 
-                """;
-
-        List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId, customerId);
-
-        if (rows.isEmpty()) {
-            log.warn(
-                    "Заказ клиента не найден: customerId={}, orderId={}",
-                    customerId,
-                    orderId
-            );
+    @Transactional(readOnly = true)
+    public List<OrderEventResponse> getOrderEventsForCustomer(Long customerId, Long orderId) {
+        if (!orderRepository.existsForCustomer(orderId, customerId)) {
+            log.warn("Заказ не найден при чтении истории: customerId={}, orderId={}", customerId, orderId);
 
             throw new ResourceNotFoundException(
                     "Заказ с id=" + orderId + " не найден для customerId=" + customerId
             );
         }
 
-        OrderResponse response = buildOrderResponse(rows);
-
-        log.info(
-                "Заказ клиента загружен: customerId={}, orderId={}, status={}, totalAmount={}, itemsCount={}",
-                response.customerId(),
-                response.id(),
-                response.status(),
-                response.totalAmount(),
-                response.items().size()
-                );
-
-        return response;
-    }
-
-    @Transactional(readOnly = true)
-    public List<OrderSummaryResponse> getOrdersByCustomer(Long customerId) {
-        log.info("Получаем список заказов клиента: customerId={}", customerId);
-
-        String sql = """
-                SELECT
-                    co.id AS order_id,
-                    co.cart_id,
-                    co.customer_id,
-                    co.restaurant_id,
-                    co.status AS order_status,
-                    co.total_amount,
-                    co.created_at,
-                    COUNT(coi.id) AS items_count
-                FROM food_app.customer_order co
-                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
-                WHERE co.customer_id = ?
-                GROUP BY co.id,
-                         co.cart_id,
-                         co.customer_id,
-                         co.restaurant_id,
-                         co.status,
-                         co.total_amount,
-                         co.created_at
-                ORDER BY co.created_at  DESC, co.id DESC
-                """;
-
-        List<OrderSummaryResponse> orders = jdbcTemplate.query(sql,
-                (rs, rowNum) -> new OrderSummaryResponse(
-                        rs.getLong("order_id"),
-                        rs.getLong("cart_id"),
-                        rs.getLong("customer_id"),
-                        rs.getLong("restaurant_id"),
-                        rs.getString("order_status"),
-                        rs.getBigDecimal("total_amount"),
-                        rs.getObject("items_count", Long.class),
-                        rs.getObject("created_at", java.time.OffsetDateTime.class)
-                ),
-                customerId
-        );
-        log.info(
-                "Список заказов клиента загружен: customerId={}, ordersCount={}",
-                customerId,
-                orders.size()
-        );
-
-        return orders;
+        return OrderResponseMapper.toEventResponses(orderEventRepository.findByOrderId(orderId));
     }
 
     @Transactional
     public OrderResponse cancelOrder(Long customerId, Long orderId) {
-        log.info(
-                "Начинаем отмену заказа: customerId={}, orderId={}",
-                customerId,
-                orderId
-        );
+        OrderAccess access = requireCustomerOrder(customerId, orderId);
 
-        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForCustomer(customerId, orderId);
-
-        if (orderStatusSnapshot == null) {
-            log.warn(
-                    "Заказ не найден при отмене: customerId={}, orderId={}",
-                    customerId,
-                    orderId
-            );
-
-            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для customerId=" + customerId);
-        }
-
-        if (!orderStatusSnapshot.status().canBeCanceledByCustomer()) {
-            log.warn(
-                    "Заказ нельзя отменить в текущем статусе: customerId={}, orderId={}, currentStatus={}",
-                    customerId,
-                    orderId,
-                    orderStatusSnapshot.status()
-            );
-
+        if (!access.status().canBeCanceledByCustomer()) {
             throw new BusinessRuleViolationException(
-                    "Отменить можно только заказ в статусе CREATED. Текущий статус="
-                            + orderStatusSnapshot.status().getDbValue()
+                    "Отменить можно только заказ в статусе CREATED или PAID. Текущий статус="
+                            + access.status().getDbValue()
             );
         }
 
-        updateOrderStatusToCanceled(customerId, orderId);
+        boolean wasPaid = access.status() == OrderStatus.PAID;
 
-        createOrderEvent(
+        orderStatusService.transition(
                 orderId,
+                access.status(),
+                OrderStatus.CANCELED,
                 OrderEventType.ORDER_CANCELED,
                 "Заказ отменён клиентом"
         );
 
-        OrderResponse response = getOrderByIdForCustomer(customerId, orderId);
-
-        log.info(
-                "Заказ успешно отменён: customerId={}, orderId={}, newStatus={}",
-                customerId,
-                orderId,
-                response.status()
-        );
-
-        return response;
-    }
-
-    @Transactional(readOnly = true)
-    public List<OrderEventResponse> getOrderEventsForCustomer(Long customerId, Long orderId) {
-        log.info(
-                "Получаем историю событий заказа: customerId={}, orderId={}",
-                customerId,
-                orderId
-        );
-
-        boolean orderExist = existsOrderForCustomer(customerId, orderId);
-
-        if (!orderExist) {
-            log.warn(
-                    "Заказ не найден при получении истории событий: customerId={}, orderId={}",
-                    customerId,
-                    orderId
-            );
-
-            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для customerId=" + customerId);
+        // Возврат после смены статуса, а не до: если переход не состоялся из-за гонки,
+        // деньги возвращать не за что. Обе операции в одной транзакции.
+        if (wasPaid) {
+            paymentService.refundForOrder(orderId);
         }
 
-        String sql = """
-                SELECT 
-                    e.id,
-                    e.order_id,
-                    e.event_type,
-                    e.description,
-                    e.created_at
-                FROM food_app.customer_order_event e
-                where e.order_id = ?
-                order by e.created_at ASC , e.id ASC 
-                """;
-
-        List<OrderEventResponse> events = jdbcTemplate.query(
-                sql,
-                (rs, rowNum) -> new OrderEventResponse(
-                        rs.getLong("id"),
-                        rs.getLong("order_id"),
-                        rs.getString("event_type"),
-                        rs.getString("description"),
-                        rs.getObject("created_at", OffsetDateTime.class)
-                ),
-                orderId
-        );
-
-        log.info(
-                "История событий заказа загружена: customerId={}, orderId={}, eventsCount={}",
-                customerId,
-                orderId,
-                events.size()
-        );
-
-        return events;
+        return OrderResponseMapper.toResponse(requireOrder(orderId));
     }
 
     @Transactional
     public OrderResponse acceptOrder(Long restaurantId, Long orderId) {
-        log.info(
-                "Начинаем принятие заказа рестораном: restaurantId={}, orderId={}",
-                restaurantId,
-                orderId
-        );
+        OrderAccess access = requireRestaurantOrder(restaurantId, orderId);
 
-        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
-
-        if (orderStatusSnapshot == null) {
-            log.warn(
-                    "Заказ не найден при принятии рестораном: restaurantId={}, orderId={}",
-                    restaurantId,
-                    orderId
-            );
-
-            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId);
-        }
-
-        if (!orderStatusSnapshot.status().canBeAcceptedByRestaurant()) {
-            log.warn(
-                    "Заказ нельзя принять в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
-                    restaurantId,
-                    orderId,
-                    orderStatusSnapshot.status().getDbValue()
-            );
-
+        if (!access.status().canBeAcceptedByRestaurant()) {
             throw new BusinessRuleViolationException(
-                    "Принять можно только заказ в статусе CREATED. Текущий статус="
-                            + orderStatusSnapshot.status().getDbValue()
+                    "Принять можно только оплаченный заказ (статус PAID). Текущий статус="
+                            + access.status().getDbValue()
             );
         }
 
-        updateOrderStatusToAccepted(restaurantId, orderId);
-
-        createOrderEvent(
+        orderStatusService.transition(
                 orderId,
+                OrderStatus.PAID,
+                OrderStatus.ACCEPTED,
                 OrderEventType.ORDER_ACCEPTED,
                 "Заказ принят рестораном"
         );
 
-        OrderResponse response = getOrderById(orderId);
-
-        log.info(
-                "Заказ принят рестораном: restaurantId={}, orderId={}, newStatus={}",
-                restaurantId,
-                orderId,
-                response.status()
-        );
-
-        return response;
+        return OrderResponseMapper.toResponse(requireOrder(orderId));
     }
 
     @Transactional
     public OrderResponse startCookingOrder(Long restaurantId, Long orderId) {
-        log.info(
-                "Начинаем готовку заказа: restaurantId={}, orderId={}",
-                restaurantId,
-                orderId
-        );
+        OrderAccess access = requireRestaurantOrder(restaurantId, orderId);
 
-        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
-
-        if (orderStatusSnapshot == null) {
-            log.warn(
-                    "Заказ не найден при начале готовки: restaurantId={}, orderId={}",
-                    restaurantId,
-                    orderId
-            );
-
-            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId);
-        }
-
-        if (!orderStatusSnapshot.status().canStartCookingByRestaurant()) {
-            log.warn(
-                    "Нельзя начать готовку заказа в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
-                    restaurantId,
-                    orderId,
-                    orderStatusSnapshot.status().getDbValue()
-            );
-
+        if (!access.status().canStartCookingByRestaurant()) {
             throw new BusinessRuleViolationException(
                     "Начать готовку можно только для заказа в статусе ACCEPTED. Текущий статус="
-                            + orderStatusSnapshot.status().getDbValue()
+                            + access.status().getDbValue()
             );
         }
 
-        updateOrderStatusToCooking(restaurantId, orderId);
-
-        createOrderEvent(
+        orderStatusService.transition(
                 orderId,
+                OrderStatus.ACCEPTED,
+                OrderStatus.COOKING,
                 OrderEventType.ORDER_COOKING_STARTED,
                 "Ресторан начал готовить заказ"
         );
 
-        OrderResponse response = getOrderById(orderId);
-
-        log.info(
-                "Готовка заказа начата: restaurantId={}, orderId={}, newStatus={}",
-                restaurantId,
-                orderId,
-                response.status()
-        );
-
-        return response;
+        return OrderResponseMapper.toResponse(requireOrder(orderId));
     }
 
     @Transactional
     public OrderResponse markOrderReadyForDelivery(Long restaurantId, Long orderId) {
-        log.info(
-                "Отмечаем заказ готовым к доставке: restaurantId={}, orderId={}",
-                restaurantId,
-                orderId
-        );
+        OrderAccess access = requireRestaurantOrder(restaurantId, orderId);
 
-        OrderStatusSnapshot orderStatusSnapshot = findOrderStatusForRestaurant(restaurantId, orderId);
-
-        if (orderStatusSnapshot == null) {
-            log.warn(
-                    "Заказ не найден при отметке готовности к доставке: restaurantId={}, orderId={}",
-                    restaurantId,
-                    orderId
-            );
-
-            throw new ResourceNotFoundException(
-                    "Заказ с id=" + orderId + " не найден для restaurantId=" + restaurantId
-            );
-        }
-
-        if (!orderStatusSnapshot.status().canBeMarkedReadyForDeliveryByRestaurant()) {
-            log.warn(
-                    "Нельзя отметить заказ готовым к доставке в текущем статусе: restaurantId={}, orderId={}, currentStatus={}",
-                    restaurantId,
-                    orderId,
-                    orderStatusSnapshot.status().getDbValue()
-            );
-
+        if (!access.status().canBeMarkedReadyForDeliveryByRestaurant()) {
             throw new BusinessRuleViolationException(
                     "Отметить готовым к доставке можно только заказ в статусе COOKING. Текущий статус="
-                            + orderStatusSnapshot.status().getDbValue()
+                            + access.status().getDbValue()
             );
         }
 
-        updateOrderStatusToReadyForDelivery(restaurantId, orderId);
-
-        createOrderEvent(
+        orderStatusService.transition(
                 orderId,
+                OrderStatus.COOKING,
+                OrderStatus.READY_FOR_DELIVERY,
                 OrderEventType.ORDER_READY_FOR_DELIVERY,
                 "Заказ отмечен рестораном как готовый к доставке"
         );
 
-        OrderResponse response = getOrderById(orderId);
-
-        log.info(
-                "Заказ отмечен готовым к доставке: restaurantId={}, orderId={}, newStatus={}",
-                restaurantId,
-                orderId,
-                response.status()
-        );
-
-        return response;
+        return OrderResponseMapper.toResponse(requireOrder(orderId));
     }
 
-    private void updateOrderStatusToReadyForDelivery(Long restaurantId, Long orderId) {
-        String sql = """
-                UPDATE food_app.customer_order
-                set status = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                where restaurant_id = ?
-                and id = ?
-                and status = ?
-                """;
+    @Transactional(readOnly = true)
+    public Order requireOrder(Long orderId) {
+        return orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Заказ с id=" + orderId + " не найден"));
+    }
 
-        int updateRows = jdbcTemplate.update(
-                sql,
-                OrderStatus.READY_FOR_DELIVERY.getDbValue(),
-                restaurantId,
-                orderId,
-                OrderStatus.COOKING.getDbValue()
-        );
+    /**
+     * Проверка владения вынесена из SQL в сервис намеренно.
+     *
+     * <p>Раньше условие {@code AND customer_id = ?} стояло прямо в UPDATE, и чужой заказ давал
+     * 409 «статус изменился» вместо честного отказа в доступе. Теперь «не твой заказ» и «заказ
+     * уже уехал» — разные ошибки с разными кодами, а когда появится проверка прав на уровне
+     * Spring Security, переносить придётся только эти два метода.
+     */
+    private OrderAccess requireCustomerOrder(Long customerId, Long orderId) {
+        OrderAccess access = orderStatusService.requireAccess(orderId);
 
-        if (updateRows == 0) {
-            throw new BusinessRuleViolationException(
-                    "Не удалось отметить заказ готовым к доставке: orderId=" + orderId
-                            + ". Возможно, заказ уже изменил статус"
+        if (!access.belongsToCustomer(customerId)) {
+            log.warn(
+                    "Попытка обратиться к чужому заказу: orderId={}, customerId={}",
+                    orderId,
+                    customerId
             );
+
+            throw new AccessDeniedForResourceException("Заказ с id=" + orderId + " принадлежит другому клиенту");
         }
+
+        return access;
     }
 
-    private void updateOrderStatusToCooking(Long restaurantId, Long orderId) {
-        String sql = """
-                UPDATE food_app.customer_order
-                set status = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                where id = ?
-                and restaurant_id = ?
-                and status = ?
-                """;
+    private OrderAccess requireRestaurantOrder(Long restaurantId, Long orderId) {
+        OrderAccess access = orderStatusService.requireAccess(orderId);
 
-        int updatedRows = jdbcTemplate.update(
-                sql,
-                OrderStatus.COOKING.getDbValue(),
-                orderId,
-                restaurantId,
-                OrderStatus.ACCEPTED.getDbValue()
-        );
-
-        if (updatedRows == 0) {
-            throw new BusinessRuleViolationException(
-                    "Не удалось начать готовку заказа с id=" + orderId
-                            + ". Возможно, заказ уже изменил статус"
+        if (!access.belongsToRestaurant(restaurantId)) {
+            log.warn(
+                    "Попытка обратиться к заказу чужого ресторана: orderId={}, restaurantId={}",
+                    orderId,
+                    restaurantId
             );
-        }
-    }
 
-    private void updateOrderStatusToAccepted(Long restaurantId, Long orderId) {
-        String sql = """
-                UPDATE food_app.customer_order 
-                set status = ?,
-                    updated_at = current_timestamp
-                where id = ?
-                and restaurant_id = ?
-                and status = ?
-                """;
-
-        int updateRows = jdbcTemplate.update(
-                sql,
-                OrderStatus.ACCEPTED.getDbValue(),
-                orderId,
-                restaurantId,
-                OrderStatus.CREATED.getDbValue()
-        );
-
-        if (updateRows == 0) {
-            throw new BusinessRuleViolationException(
-                    "Не удалось принять заказ с id=" + orderId
-                            + ". Возможно, заказ уже изменил статус"
-            );
-        }
-    }
-
-    private OrderStatusSnapshot findOrderStatusForRestaurant(Long restaurantId, Long orderId) {
-
-        String sql = """
-                SELECT 
-                    co.id,
-                    co.status
-                from food_app.customer_order co
-                where co.id = ?
-                and co.restaurant_id = ?
-                """;
-
-        List<OrderStatusSnapshot> statuses = jdbcTemplate.query(
-                sql,
-                (rs, rowNum) -> new OrderStatusSnapshot(
-                        rs.getLong("id"),
-                        OrderStatus.fromDbValue(rs.getString("status"))
-                ),
-                orderId,
-                restaurantId
-        );
-
-        return statuses.isEmpty() ? null : statuses.get(0);
-    }
-
-    private boolean existsOrderForCustomer(Long customerId, Long orderId) {
-        String sql = """
-                SELECT EXISTS (
-                SELECT 1 FROM food_app.customer_order co
-                where co.id = ?
-                and co.customer_id = ?
-                )
-                """;
-
-        Boolean exists = jdbcTemplate.queryForObject(
-                sql,
-                Boolean.class,
-                orderId,
-                customerId
-        );
-
-        return Boolean.TRUE.equals(exists);
-    }
-
-    private void updateOrderStatusToCanceled(Long customerId, Long orderId) {
-        String sql = """
-                UPDATE food_app.customer_order
-                set status = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                and customer_id = ?
-                and status = ?
-                """;
-
-        int updateRows = jdbcTemplate.update(
-                sql,
-                OrderStatus.CANCELED.getDbValue(),
-                orderId,
-                customerId,
-                OrderStatus.CREATED.getDbValue());
-
-        if (updateRows == 0) {
-            throw new BusinessRuleViolationException(
-                    "Не удалось отменить заказ с id=" + orderId
-                            + ". Возможно, заказ уже изменил статус"
-            );
-        }
-    }
-
-    private OrderStatusSnapshot findOrderStatusForCustomer(Long customerId, Long orderId) {
-        String sql = """
-                SELECT
-                    co.id,
-                    co.status
-                FROM food_app.customer_order co
-                where co.id = ?
-                and co.customer_id = ?
-                """;
-
-        List<OrderStatusSnapshot> statuses = jdbcTemplate.query(sql,
-                (rs, rowNum) -> new OrderStatusSnapshot(
-                        rs.getLong("id"),
-                        OrderStatus.fromDbValue(rs.getString("status"))
-                ),
-                orderId,
-                customerId
-        );
-
-        return  statuses.isEmpty() ? null : statuses.get(0);
-    }
-
-    private OrderResponse getOrderById(Long orderId) {
-        String sql = """
-                SELECT
-                    co.id AS order_id,
-                    co.cart_id,
-                    co.customer_id,
-                    co.restaurant_id,
-                    co.status AS order_status,
-                    co.total_amount,
-
-                    coi.id AS order_item_id,
-                    coi.menu_item_id,
-                    coi.menu_item_name,
-                    coi.quantity,
-                    coi.price,
-                    coi.line_total
-                FROM food_app.customer_order co
-                LEFT JOIN food_app.customer_order_item coi ON coi.order_id = co.id
-                WHERE co.id = ?
-                ORDER BY coi.id
-                """;
-
-        List<OrderRow> rows = jdbcTemplate.query(sql, orderRowMapper, orderId);
-
-        if (rows.isEmpty()) {
-            throw new ResourceNotFoundException("Заказ с id=" + orderId + " не найден");
+            throw new AccessDeniedForResourceException("Заказ с id=" + orderId + " оформлен в другом ресторане");
         }
 
-        return buildOrderResponse(rows);
+        return access;
     }
 
-    private OrderResponse buildOrderResponse(List<OrderRow> rows) {
-        OrderRow firstRow = rows.get(0);
-
-        List<OrderItemResponse> items = new ArrayList<>();
-
-        for (OrderRow row : rows) {
-            if (row.orderItemId() != null) {
-                items.add(
-                        new OrderItemResponse(
-                            row.orderItemId(),
-                            row.menuItemId(),
-                            row.menuItemName(),
-                            row.quantity(),
-                            row.price(),
-                            row.lineTotal()
-                        )
-                );
-            }
-        }
-        return new OrderResponse(
-                firstRow.orderId(),
-                firstRow.cartId(),
-                firstRow.customerId(),
-                firstRow.restaurantId(),
-                firstRow.orderStatus(),
-                firstRow.totalAmount(),
-                items
+    private static OrderRepository.NewOrderItem toNewOrderItem(CartItem item) {
+        return new OrderRepository.NewOrderItem(
+                item.menuItemId(),
+                item.menuItemName(),
+                item.quantity(),
+                item.price(),
+                item.lineTotal()
         );
     }
-
-    private void checkoutCart(Long cartId) {
-        String sql = """
-                UPDATE food_app.cart
-                SET status = 'CHECKED_OUT',
-                    updated_at = CURRENT_TIMESTAMP
-                where id = ?
-                and status = 'ACTIVE'
-                """;
-
-        int updateRows = jdbcTemplate.update(sql, cartId);
-
-        if (updateRows == 0) {
-            throw new BusinessRuleViolationException(
-                    "Не удалось оформить корзину с id=" + cartId
-                            + ". Возможно, корзина уже была оформлена или изменила статус"
-            );
-        }
-    }
-
-    private void createOrderEvent(
-            Long orderId,
-            OrderEventType eventType,
-            String description
-    ) {
-        String sql = """
-                INSERT INTO food_app.customer_order_event (
-                                                           order_id,
-                                                           event_type,
-                                                           description
-                )
-                values (?,?,?)
-        """;
-
-        int updateRows = jdbcTemplate.update(sql, orderId, eventType.getDbValue(), description);
-
-        if (updateRows != 1) {
-            throw new IllegalStateException(
-                    "Не удалось записать событие заказа: orderId=" + orderId
-                            + ", eventType=" + eventType.getDbValue()
-            );
-        }
-    }
-
-    private void createOrderItems(Long orderId, List<CartItemForOrder> cartItems) {
-        String sql = """
-                INSERT INTO food_app.customer_order_item (
-                                                          order_id,
-                                                          menu_item_id,
-                                                          menu_item_name,
-                                                          quantity,
-                                                          price,
-                                                          line_total
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """;
-
-        int[] updatedRows  = jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
-
-                    @Override
-                    public void setValues(PreparedStatement ps, int i) throws SQLException {
-                        CartItemForOrder item = cartItems.get(i);
-
-                        ps.setLong(1, orderId);
-                        ps.setLong(2, item.menuItemId);
-                        ps.setString(3, item.menuItemName);
-                        ps.setInt(4, item.quantity);
-                        ps.setBigDecimal(5, item.price);
-                        ps.setBigDecimal(6, item.lineTotal);
-                    }
-
-                    @Override
-                    public int getBatchSize() {
-                        return cartItems.size();
-                    }
-                }
-        );
-
-        if (updatedRows.length != cartItems.size()) {
-            throw new IllegalStateException(
-                    "Не удалось создать все позиции заказа: orderId=" + orderId
-            );
-        }
-    }
-
-    private Long createOrder(Long cartId, Long customerId, Long restaurantId, BigDecimal totalAmount) {
-        String sql = """
-                INSERT INTO food_app.customer_order (
-                                                     cart_id,
-                                                     customer_id,
-                                                     restaurant_id,
-                                                     status,
-                                                     total_amount
-                )
-                VALUES (?, ?, ?, ?, ?)
-                RETURNING id;
-                """;
-
-        Long orderId = jdbcTemplate.queryForObject(
-                sql,
-                Long.class,
-                cartId,
-                customerId,
-                restaurantId,
-                OrderStatus.CREATED.getDbValue(),
-                totalAmount);
-
-        if (orderId == null) {
-            throw new IllegalStateException(
-                    "База данных не вернула id созданного заказа для customerId="
-                            + customerId + " и restaurantId=" + restaurantId
-            );
-        }
-
-        return orderId;
-    }
-
-    private BigDecimal calculateTotalAmount(List<CartItemForOrder> cartItems) {
-        BigDecimal totalAmount = BigDecimal.ZERO;
-
-        for (CartItemForOrder cartItem : cartItems) {
-            totalAmount = totalAmount.add(cartItem.lineTotal());
-        }
-
-        return totalAmount;
-    }
-
-    private List<CartItemForOrder> findCartItemsForOrder(Long cartId) {
-
-        String sql = """
-                SELECT
-                   ci.menu_item_id,
-                   mi.name as menu_item_name,
-                   ci.quantity,
-                   ci.price
-                from food_app.cart_item ci 
-                join food_app.menu_item mi on ci.menu_item_id = mi.id
-                where ci.cart_id = ?
-                order by ci.created_at, ci.id
-                """;
-
-        return jdbcTemplate.query(sql,
-                (rs, rowNum) -> {
-                    BigDecimal price = rs.getBigDecimal("price");
-                    Integer quantity = rs.getObject("quantity", Integer.class);
-                    BigDecimal lineTotal = price.multiply(BigDecimal.valueOf(quantity));
-
-                    return new CartItemForOrder(
-                            rs.getLong("menu_item_id"),
-                            rs.getString("menu_item_name"),
-                            quantity,
-                            price,
-                            lineTotal
-                    );
-                },
-                cartId
-        );
-    }
-
-    private Long findActiveCartId(Long customerId, Long restaurantId) {
-
-        String sql = """
-                SELECT c.id
-                from food_app.cart c
-                where c.customer_id = ?
-                and c.restaurant_id = ?
-                and c.status = 'ACTIVE'
-                """;
-
-        List<Long> cartIds = jdbcTemplate.query(sql,
-                (rs, rowNum) -> rs.getLong("id"),
-                customerId,
-                restaurantId);
-
-        return cartIds.isEmpty() ? null : cartIds.get(0);
-    }
-
-
-
-    private record CartItemForOrder(
-            Long menuItemId,
-            String menuItemName,
-            Integer quantity,
-            BigDecimal price,
-            BigDecimal lineTotal
-    ) {
-    }
-
-    private record OrderStatusSnapshot(
-            Long orderId,
-            OrderStatus status
-    ) {
-    }
-
 }
