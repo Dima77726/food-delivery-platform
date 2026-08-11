@@ -10,7 +10,7 @@ public enum DeliveryStatus {
 
     DELIVERED("DELIVERED"),
 
-    CANCELLED("CANCELLED");
+    CANCELED("CANCELED");
 
     private final String dbValue;
 

@@ -47,3 +47,6 @@ databaseChangeLog:
   - include:
       file: migrations/016-fix-customer-order-delivered-status.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/017-fix-order-item-money-constraints.yml
+      relativeToChangelogFile: true

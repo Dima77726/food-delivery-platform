@@ -13,6 +13,7 @@ class DeliveryStatusTest {
     void shouldResolveStatusFromDatabaseValue() {
         assertSame(DeliveryStatus.CREATED, DeliveryStatus.fromDbValue("CREATED"));
         assertSame(DeliveryStatus.PICKED_UP, DeliveryStatus.fromDbValue("PICKED_UP"));
+        assertSame(DeliveryStatus.CANCELED, DeliveryStatus.fromDbValue("CANCELED"));
     }
 
     @Test
