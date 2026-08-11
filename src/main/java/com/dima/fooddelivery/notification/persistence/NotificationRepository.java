@@ -1,0 +1,137 @@
+package com.dima.fooddelivery.notification.persistence;
+
+import com.dima.fooddelivery.notification.domain.Notification;
+import com.dima.fooddelivery.notification.domain.NotificationChannel;
+import com.dima.fooddelivery.notification.domain.NotificationStatus;
+import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.SqlParameterSource;
+import org.springframework.stereotype.Repository;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+@RequiredArgsConstructor
+public class NotificationRepository {
+
+    private static final RowMapper<Notification> NOTIFICATION = (rs, rowNum) -> new Notification(
+            rs.getLong("id"),
+            rs.getLong("recipient_id"),
+            NotificationChannel.fromDbValue(rs.getString("channel")),
+            rs.getString("type"),
+            rs.getString("subject"),
+            rs.getString("body"),
+            NotificationStatus.fromDbValue(rs.getString("status")),
+            rs.getObject("order_id", Long.class),
+            rs.getString("failure_reason"),
+            rs.getObject("created_at", OffsetDateTime.class),
+            rs.getObject("sent_at", OffsetDateTime.class)
+    );
+
+    private static final String SELECT_NOTIFICATION = """
+            SELECT n.id, n.recipient_id, n.channel, n.type, n.subject, n.body,
+                   n.status, n.order_id, n.failure_reason, n.created_at, n.sent_at
+            FROM notification n
+            """;
+
+    private final NamedParameterJdbcTemplate jdbc;
+
+    public Optional<Notification> findById(Long notificationId) {
+        return jdbc.query(
+                SELECT_NOTIFICATION + " WHERE n.id = :notificationId",
+                new MapSqlParameterSource("notificationId", notificationId),
+                NOTIFICATION
+        ).stream().findFirst();
+    }
+
+    public List<Notification> findByRecipientId(Long recipientId) {
+        return jdbc.query(
+                SELECT_NOTIFICATION + " WHERE n.recipient_id = :recipientId ORDER BY n.created_at DESC, n.id DESC",
+                new MapSqlParameterSource("recipientId", recipientId),
+                NOTIFICATION
+        );
+    }
+
+    public List<Notification> findPending(int limit) {
+        return jdbc.query(
+                SELECT_NOTIFICATION + """
+                         WHERE n.status = :status
+                         ORDER BY n.created_at, n.id
+                         LIMIT :limit
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("status", NotificationStatus.PENDING.name())
+                        .addValue("limit", limit),
+                NOTIFICATION
+        );
+    }
+
+    public Long insert(
+            Long recipientId,
+            NotificationChannel channel,
+            String type,
+            String subject,
+            String body,
+            Long orderId
+    ) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("recipientId", recipientId)
+                .addValue("channel", channel.name())
+                .addValue("type", type)
+                .addValue("subject", subject)
+                .addValue("body", body)
+                .addValue("orderId", orderId)
+                .addValue("status", NotificationStatus.PENDING.name());
+
+        return jdbc.queryForObject(
+                """
+                        INSERT INTO notification (recipient_id, channel, type, subject, body, order_id, status)
+                        VALUES (:recipientId, :channel, :type, :subject, :body, :orderId, :status)
+                        RETURNING id
+                        """,
+                params,
+                Long.class
+        );
+    }
+
+    public int markSent(Long notificationId) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("notificationId", notificationId)
+                .addValue("expected", NotificationStatus.PENDING.name())
+                .addValue("next", NotificationStatus.SENT.name());
+
+        return jdbc.update(
+                """
+                        UPDATE notification
+                        SET status = :next,
+                            sent_at = CURRENT_TIMESTAMP
+                        WHERE id = :notificationId
+                          AND status = :expected
+                        """,
+                params
+        );
+    }
+
+    public int markFailed(Long notificationId, String failureReason) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("notificationId", notificationId)
+                .addValue("expected", NotificationStatus.PENDING.name())
+                .addValue("next", NotificationStatus.FAILED.name())
+                .addValue("failureReason", failureReason);
+
+        return jdbc.update(
+                """
+                        UPDATE notification
+                        SET status = :next,
+                            failure_reason = :failureReason
+                        WHERE id = :notificationId
+                          AND status = :expected
+                        """,
+                params
+        );
+    }
+}
