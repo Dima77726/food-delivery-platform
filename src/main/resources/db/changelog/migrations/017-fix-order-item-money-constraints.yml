@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 017-fix-order-item-money-constraints
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/017-fix-order-item-money-constraints.sql
+            relativeToChangelogFile: true
+            splitStatements: true
