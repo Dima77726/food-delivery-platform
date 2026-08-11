@@ -28,6 +28,8 @@
     </scm>
     <properties>
         <java.version>21</java.version>
+        <!-- Ветка 3.x springdoc — единственная, совместимая со Spring Boot 4 / Framework 7. -->
+        <springdoc.version>3.1.0</springdoc.version>
     </properties>
     <dependencies>
         <dependency>
@@ -37,6 +39,26 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!--
+            Даёт JwtEncoder/JwtDecoder поверх Nimbus JOSE.
+            Свой парсер JWT писать не нужно: подпись, срок жизни и claims проверяет Spring Security.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
         </dependency>
 
         <dependency>
@@ -60,6 +82,23 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Даёт @ServiceConnection: контейнер объявляется бином, а Spring сам проставляет
+            url/username/password. Важно, что остальные свойства datasource из application.yml
+            при этом не затираются — иначе тесты потеряли бы currentSchema.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -111,6 +150,30 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <!--
+                Разделение тестов на два круга.
+
+                Surefire (фаза test) гоняет быстрые тесты: доменные enum'ы, обработчик ошибок.
+                Они не требуют ни Docker, ни базы и дают обратную связь за секунды.
+
+                Failsafe (фаза verify) гоняет классы *IT — интеграционные, на настоящем
+                PostgreSQL в контейнере. Они медленнее, но именно они проверяют SQL.
+
+                Практический вывод: во время работы достаточно ./mvnw test,
+                перед коммитом нужен ./mvnw verify.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
