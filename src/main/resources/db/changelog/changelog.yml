@@ -50,3 +50,18 @@ databaseChangeLog:
   - include:
       file: migrations/017-fix-order-item-money-constraints.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/018-create-app-user.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/019-create-payment.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/020-create-notification.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/021-create-audit-log.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/022-add-payment-order-event-types.yml
+      relativeToChangelogFile: true

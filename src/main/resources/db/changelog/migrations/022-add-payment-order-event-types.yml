@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 022-add-payment-order-event-types
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/022-add-payment-order-event-types.sql
+            relativeToChangelogFile: true
+            splitStatements: true

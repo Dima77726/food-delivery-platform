@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 018-create-app-user
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/018-create-app-user.sql
+            relativeToChangelogFile: true
+            splitStatements: true
