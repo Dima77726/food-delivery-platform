@@ -1,16 +1,26 @@
 package com.dima.fooddelivery.cart.api;
 
 import com.dima.fooddelivery.cart.service.CartService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @Slf4j
+@Validated
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/customers/{customerId}/restaurants/{restaurantId}/cart")
+@Tag(name = "Cart", description = "Корзина клиента в конкретном ресторане")
+@SecurityRequirement(name = "bearer-jwt")
+// customerId стоит в пути, поэтому одной роли CUSTOMER мало: без сверки с токеном
+// любой залогиненный клиент открыл бы чужую корзину, подставив чужой идентификатор.
+@PreAuthorize("hasRole('CUSTOMER') and @access.isSelf(#customerId)")
 public class CartController {
 
     private final CartService cartService;
