@@ -10,11 +10,11 @@ scrape_configs:
   - job_name: food-delivery
     # Actuator отдаёт метрики не по корню, а по своему пути.
     metrics_path: /actuator/prometheus
+    scrape_interval: 5s
     static_configs:
-      # Обращение по имени сервиса внутри сети compose и на служебный порт,
-      # который наружу не публикуется. Именно поэтому эндпоинт открыт без пароля:
-      # достучаться до него можно только изнутри.
-      - targets: ['app:8081']
+      # В режиме full работает app:8081; при запуске из IDE — host.docker.internal:8081.
+      # Один из двух targets будет DOWN, и для локальной конфигурации это ожидаемо.
+      - targets: ['app:8081', 'host.docker.internal:8081']
         labels:
           service: food-delivery-platform
 

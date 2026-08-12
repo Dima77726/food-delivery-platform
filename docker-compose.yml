@@ -40,6 +40,7 @@ services:
       - "${REDIS_PORT:-6379}:6379"
 
   app:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -85,8 +86,6 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: food-delivery-prometheus
     restart: unless-stopped
-    depends_on:
-      - app
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - food_delivery_prometheus_data:/prometheus
