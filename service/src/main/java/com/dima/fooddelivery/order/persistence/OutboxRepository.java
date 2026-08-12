@@ -21,7 +21,8 @@ public class OutboxRepository {
             rs.getLong("aggregate_id"),
             rs.getString("event_type"),
             rs.getString("payload"),
-            rs.getInt("attempts")
+            rs.getInt("attempts"),
+            rs.getString("correlation_id")
     );
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -38,22 +39,25 @@ public class OutboxRepository {
             String aggregateType,
             Long aggregateId,
             String eventType,
-            String payload
+            String payload,
+            String correlationId
     ) {
         SqlParameterSource params = new MapSqlParameterSource()
                 .addValue("eventId", eventId)
                 .addValue("aggregateType", aggregateType)
                 .addValue("aggregateId", aggregateId)
                 .addValue("eventType", eventType)
-                .addValue("payload", payload);
+                .addValue("payload", payload)
+                .addValue("correlationId", correlationId);
 
         jdbc.update(
                 """
                         INSERT INTO order_event_outbox (
-                            event_id, aggregate_type, aggregate_id, event_type, payload
+                            event_id, aggregate_type, aggregate_id, event_type, payload, correlation_id
                         )
                         VALUES (
-                            CAST(:eventId AS UUID), :aggregateType, :aggregateId, :eventType, :payload
+                            CAST(:eventId AS UUID), :aggregateType, :aggregateId, :eventType,
+                            :payload, :correlationId
                         )
                         """,
                 params
@@ -75,7 +79,8 @@ public class OutboxRepository {
     public List<OutboxRecord> lockPending(int limit) {
         return jdbc.query(
                 """
-                        SELECT id, event_id, aggregate_type, aggregate_id, event_type, payload, attempts
+                        SELECT id, event_id, aggregate_type, aggregate_id, event_type, payload,
+                               attempts, correlation_id
                         FROM order_event_outbox
                         WHERE status = 'PENDING'
                         ORDER BY id

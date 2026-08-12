@@ -13,6 +13,12 @@ public record AuditEntryResponse(
         String resourceId,
         AuditOutcome outcome,
         String details,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+
+        /**
+         * По этой метке администратор сшивает запись журнала с логами приложения
+         * и с уведомлением, порождённым тем же запросом.
+         */
+        String correlationId
 ) {
 }

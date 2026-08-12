@@ -2,6 +2,7 @@ package com.dima.fooddelivery.order.service;
 
 import com.dima.fooddelivery.order.domain.OrderStatusChangedEvent;
 import com.dima.fooddelivery.order.integration.OrderIntegrationEvent;
+import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.order.persistence.OutboxRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,12 +58,16 @@ public class OrderOutboxListener {
         // а не от того, что произошло в момент события.
         String payload = objectMapper.writeValueAsString(integrationEvent);
 
+        // Слушатель работает в потоке запроса, поэтому метка ещё доступна в MDC.
+        // Дальше её нужно нести явно: планировщик публикации и потребитель живут
+        // в других потоках, куда ThreadLocal не дотягивается.
         outboxRepository.append(
                 eventId,
                 AGGREGATE_TYPE,
                 event.orderId(),
                 event.eventType().getDbValue(),
-                payload
+                payload,
+                RequestContext.correlationId().orElse(null)
         );
 
         log.debug("Событие заказа помещено в outbox: orderId={}, eventId={}", event.orderId(), eventId);

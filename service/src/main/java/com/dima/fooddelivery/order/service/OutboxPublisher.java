@@ -1,14 +1,18 @@
 package com.dima.fooddelivery.order.service;
 
 import com.dima.fooddelivery.common.kafka.KafkaTopics;
+import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.order.persistence.OutboxRecord;
 import com.dima.fooddelivery.order.persistence.OutboxRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.slf4j.MDC;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -69,14 +73,26 @@ public class OutboxPublisher {
         return published;
     }
 
+    /**
+     * Публикация идёт в потоке планировщика, где MDC пуст. Метка восстанавливается
+     * из строки outbox на время отправки — иначе строка «не удалось опубликовать»
+     * оказалась бы единственной в цепочке без метки, ровно там, где она нужнее всего.
+     */
     private boolean publishOne(OutboxRecord record) {
+        if (record.correlationId() != null) {
+            MDC.put(RequestContext.CORRELATION_ID_MDC_KEY, record.correlationId());
+        }
+
         try {
-            // Ключ — идентификатор заказа. Только он гарантирует, что события одного заказа
-            // попадут в одну партицию и придут потребителю по порядку. Без ключа Kafka
-            // раскидает их по партициям, и «доставлен» может обогнать «оплачен».
-            kafkaTemplate
-                    .send(KafkaTopics.ORDER_EVENTS, String.valueOf(record.aggregateId()), record.payload())
-                    .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return sendAndMark(record);
+        } finally {
+            MDC.remove(RequestContext.CORRELATION_ID_MDC_KEY);
+        }
+    }
+
+    private boolean sendAndMark(OutboxRecord record) {
+        try {
+            kafkaTemplate.send(toProducerRecord(record)).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             outboxRepository.markPublished(record.id());
 
@@ -99,5 +115,31 @@ public class OutboxPublisher {
 
             return false;
         }
+    }
+
+    /**
+     * Ключ — идентификатор заказа. Только он гарантирует, что события одного заказа попадут
+     * в одну партицию и придут потребителю по порядку. Без ключа Kafka раскидает их
+     * по партициям, и «доставлен» может обогнать «оплачен».
+     *
+     * <p>Партиция не задаётся: её выбирает продюсер по ключу. Метка запроса едет заголовком,
+     * а не в теле — тело является контрактом для потребителей, и служебным данным
+     * там не место. Заголовок же читается, не разбирая сообщение.
+     */
+    private ProducerRecord<String, String> toProducerRecord(OutboxRecord record) {
+        ProducerRecord<String, String> producerRecord = new ProducerRecord<>(
+                KafkaTopics.ORDER_EVENTS,
+                String.valueOf(record.aggregateId()),
+                record.payload()
+        );
+
+        if (record.correlationId() != null) {
+            producerRecord.headers().add(
+                    RequestContext.CORRELATION_ID_HEADER,
+                    record.correlationId().getBytes(StandardCharsets.UTF_8)
+            );
+        }
+
+        return producerRecord;
     }
 }
