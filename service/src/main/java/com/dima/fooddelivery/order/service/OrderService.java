@@ -6,6 +6,7 @@ import com.dima.fooddelivery.cart.service.CartService;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.api.PageRequestParams;
+import com.dima.fooddelivery.common.metrics.BusinessMetrics;
 import com.dima.fooddelivery.common.api.PageResponse;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.order.api.OrderEventResponse;
@@ -20,6 +21,7 @@ import com.dima.fooddelivery.order.domain.OrderSummary;
 import com.dima.fooddelivery.order.persistence.OrderEventRepository;
 import com.dima.fooddelivery.order.persistence.OrderRepository;
 import com.dima.fooddelivery.payment.service.PaymentService;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -45,6 +47,7 @@ public class OrderService {
     private final OrderStatusService orderStatusService;
     private final CartService cartService;
     private final PaymentService paymentService;
+    private final BusinessMetrics metrics;
 
     /**
      * Создаёт заказ из активной корзины клиента.
@@ -55,6 +58,8 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse createOrderFromActiveCart(Long customerId, Long restaurantId) {
+        Timer.Sample checkout = metrics.startCheckout();
+
         Cart cart = cartService.requireActiveCart(customerId, restaurantId);
 
         if (cart.isEmpty()) {
@@ -86,6 +91,9 @@ public class OrderService {
                 OrderEventType.ORDER_CREATED,
                 "Заказ создан из активной корзины"
         );
+
+        metrics.orderCreated(totalAmount);
+        metrics.finishCheckout(checkout);
 
         log.info(
                 "Заказ создан: orderId={}, customerId={}, itemsCount={}, totalAmount={}",

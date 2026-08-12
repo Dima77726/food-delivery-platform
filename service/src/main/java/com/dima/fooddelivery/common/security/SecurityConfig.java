@@ -4,8 +4,10 @@ import com.dima.fooddelivery.user.domain.UserRole;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -53,7 +55,34 @@ public class SecurityConfig {
 
     private final SecurityProperties securityProperties;
 
+    /**
+     * Цепочка для служебных эндпоинтов.
+     *
+     * <p>{@code @Order(1)} ставит её перед основной: иначе запросы к actuator дошли бы
+     * до {@code anyRequest().authenticated()} и Prometheus получал бы 401.
+     *
+     * <p>Доступ открыт, и это безопасно ровно потому, что actuator слушает отдельный порт,
+     * который в docker-compose не публикуется наружу. Защита здесь сетевая, а не прикладная —
+     * у скрейпера всё равно нет способа обновлять JWT.
+     *
+     * <p>Если однажды порт придётся выставить наружу, эту цепочку нужно закрыть:
+     * открытый {@code /actuator/metrics} рассказывает о нагрузке, версиях и внутренних
+     * именах эндпоинтов больше, чем стоит показывать посторонним.
+     */
     @Bean
+    @Order(1)
+    SecurityFilterChain actuatorFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher(EndpointRequest.toAnyEndpoint())
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())

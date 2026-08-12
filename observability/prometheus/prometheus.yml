@@ -1,0 +1,25 @@
+# Конфигурация Prometheus для локального стека.
+
+global:
+  # Раз в 15 секунд. Чаще — лишняя нагрузка и рост объёма хранилища,
+  # реже — короткие всплески теряются между снимками.
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: food-delivery
+    # Actuator отдаёт метрики не по корню, а по своему пути.
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # Обращение по имени сервиса внутри сети compose и на служебный порт,
+      # который наружу не публикуется. Именно поэтому эндпоинт открыт без пароля:
+      # достучаться до него можно только изнутри.
+      - targets: ['app:8081']
+        labels:
+          service: food-delivery-platform
+
+  # Prometheus снимает метрики и с самого себя — полезно, когда непонятно,
+  # кто именно тормозит: приложение или сборщик метрик.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

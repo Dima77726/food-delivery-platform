@@ -36,6 +36,43 @@ app:
       issuer: ${JWT_ISSUER:food-delivery-platform}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
 
+management:
+  server:
+    # Отдельный порт для служебных эндпоинтов — не косметика.
+    # В docker-compose он не публикуется наружу, поэтому метрики и health доступны
+    # только внутри сети, где живёт Prometheus. На одном порту с публичным API пришлось бы
+    # либо открывать /actuator/prometheus всему интернету, либо городить аутентификацию
+    # для скрейпера, у которого нет способа обновлять JWT.
+    port: ${MANAGEMENT_PORT:8081}
+
+  endpoints:
+    web:
+      exposure:
+        # Перечислены поимённо. Значение * открыло бы и heapdump с threaddump —
+        # дамп кучи содержит всё, что было в памяти, включая пароли из запросов.
+        include: health,info,prometheus,metrics
+
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        # Разделяет liveness и readiness: первый отвечает «процесс жив»,
+        # второй — «готов принимать трафик». Перезапускать под из-за недоступной
+        # базы не нужно, а вот убрать его из балансировки — нужно.
+        enabled: true
+
+  metrics:
+    tags:
+      # Общий тег на все метрики: без него метрики нескольких приложений
+      # в одном Prometheus невозможно различить.
+      application: ${spring.application.name}
+    distribution:
+      # Гистограммы по длительности HTTP-запросов, чтобы считались перцентили.
+      # Без них доступен только средний отклик, а он скрывает как раз то,
+      # что интересно: медленный хвост.
+      percentiles-histogram:
+        http.server.requests: true
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html

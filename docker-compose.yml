@@ -55,7 +55,46 @@ services:
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
     ports:
+      # Публикуется только прикладной порт. Служебный 8081 остаётся внутри сети compose:
+      # снимать метрики может Prometheus, а снаружи их не видно.
       - "${APP_PORT:-8080}:8080"
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: food-delivery-prometheus
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - food_delivery_prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 15 дней истории: локальному стеку больше незачем, а диск не резиновый.
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: food-delivery-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      # Логин/пароль по умолчанию admin/admin. Это локальный стек, наружу он не смотрит;
+      # в любом другом окружении пароль обязан приходить из переменной окружения.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # Дашборд и источник данных приезжают провижинингом, поэтому мастер первого запуска
+      # только мешает.
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - food_delivery_grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
 
 volumes:
   food_delivery_postgres_data:
+  food_delivery_prometheus_data:
+  food_delivery_grafana_data:
