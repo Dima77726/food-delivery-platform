@@ -86,6 +86,13 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: food-delivery-prometheus
     restart: unless-stopped
+    # depends_on: app убран намеренно. Compose отказывается стартовать, если зависимость
+    # выключена профилем, а Prometheus в приложении и не нуждается: недоступный таргет
+    # он показывает как DOWN и продолжает работать.
+    extra_hosts:
+      # На Docker Desktop host.docker.internal резолвится сам, на Linux — нет.
+      # Эта строка делает конфигурацию одинаковой на всех машинах.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - food_delivery_prometheus_data:/prometheus
