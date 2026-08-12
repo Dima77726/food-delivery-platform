@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 @RequiredArgsConstructor
@@ -93,7 +94,28 @@ public class NotificationRepository {
             String body,
             Long orderId
     ) {
+        return insert(null, recipientId, channel, type, subject, body, orderId);
+    }
+
+    /**
+     * Вставка с идентификатором события.
+     *
+     * <p>Уникальный индекс по {@code event_id} превращает повторную обработку одного и того же
+     * сообщения в нарушение констрейнта — на этом и держится идемпотентность потребителя.
+     * Проверять существование заранее бессмысленно: два экземпляра приложения могут
+     * обрабатывать дубликат одновременно, и SELECT перед INSERT их не разведёт.
+     */
+    public Long insert(
+            UUID eventId,
+            Long recipientId,
+            NotificationChannel channel,
+            String type,
+            String subject,
+            String body,
+            Long orderId
+    ) {
         SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("eventId", eventId)
                 .addValue("recipientId", recipientId)
                 .addValue("channel", channel.name())
                 .addValue("type", type)
@@ -104,8 +126,13 @@ public class NotificationRepository {
 
         return jdbc.queryForObject(
                 """
-                        INSERT INTO notification (recipient_id, channel, type, subject, body, order_id, status)
-                        VALUES (:recipientId, :channel, :type, :subject, :body, :orderId, :status)
+                        INSERT INTO notification (
+                            event_id, recipient_id, channel, type, subject, body, order_id, status
+                        )
+                        VALUES (
+                            CAST(:eventId AS UUID), :recipientId, :channel, :type, :subject,
+                            :body, :orderId, :status
+                        )
                         RETURNING id
                         """,
                 params,

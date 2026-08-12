@@ -96,7 +96,8 @@ public class OrderStatusService {
                 access.restaurantId(),
                 expected,
                 next,
-                eventType
+                eventType,
+                access.totalAmount()
         ));
 
         log.info(

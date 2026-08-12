@@ -68,3 +68,9 @@ databaseChangeLog:
   - include:
       file: migrations/023-add-menu-archiving.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/024-create-order-event-outbox.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/025-index-order-event-outbox-failed.yml
+      relativeToChangelogFile: true
