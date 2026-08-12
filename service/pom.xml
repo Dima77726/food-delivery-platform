@@ -67,6 +67,11 @@
         </dependency>
 
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-kafka</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
@@ -132,6 +137,12 @@
         <dependency>
             <groupId>com.redis</groupId>
             <artifactId>testcontainers-redis</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
 

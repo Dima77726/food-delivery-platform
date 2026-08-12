@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Модуль Notification.
@@ -31,6 +32,25 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final NotificationSender notificationSender;
+
+    /**
+     * Постановка уведомления по событию из Kafka.
+     *
+     * <p>Отдельная транзакция и никакого перехвата DuplicateKeyException: его должен увидеть
+     * консьюмер, чтобы отличить повторную доставку от настоящей ошибки.
+     */
+    @Transactional
+    public Long enqueueFromEvent(
+            UUID eventId,
+            Long recipientId,
+            NotificationChannel channel,
+            String type,
+            String subject,
+            String body,
+            Long orderId
+    ) {
+        return notificationRepository.insert(eventId, recipientId, channel, type, subject, body, orderId);
+    }
 
     @Transactional
     public Long enqueue(

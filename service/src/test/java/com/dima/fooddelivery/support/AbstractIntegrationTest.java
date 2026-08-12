@@ -25,6 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
         // Фоновая рассылка уведомлений в тестах не нужна: она лезет в базу посреди чужого
         // теста и шумит в логах ошибками отката.
         "app.notification.dispatch-enabled=false",
+        // Публикацию outbox тесты запускают сами, когда им нужно: с работающим таймером
+        // момент отправки был бы неизвестен, и проверки состояния очереди стали бы гонкой.
+        "app.outbox.publish-enabled=false",
         "logging.level.liquibase=WARN",
         "logging.level.net.lbruun.springboot.preliquibase=WARN",
         "logging.level.org.testcontainers=WARN",

@@ -1,0 +1,20 @@
+package com.dima.fooddelivery.order.persistence;
+
+import java.util.UUID;
+
+/**
+ * Строка outbox в том виде, в каком её забирает публикатор.
+ *
+ * <p>Тело события остаётся строкой JSON и здесь не разбирается: публикатору всё равно,
+ * что внутри — его дело доставить байты в Kafka. Разбор — забота потребителя.
+ */
+public record OutboxRecord(
+        Long id,
+        UUID eventId,
+        String aggregateType,
+        Long aggregateId,
+        String eventType,
+        String payload,
+        int attempts
+) {
+}

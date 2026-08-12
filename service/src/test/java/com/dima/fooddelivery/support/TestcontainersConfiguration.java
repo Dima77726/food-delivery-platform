@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.support;
 
 import com.redis.testcontainers.RedisContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -43,6 +44,27 @@ public class TestcontainersConfiguration {
     @ServiceConnection
     RedisContainer redisContainer() {
         return new RedisContainer("redis:7-alpine");
+    }
+
+    /**
+     * Настоящий брокер, а не заглушка.
+     *
+     * <p>Здесь это принципиальнее, чем в случае с Redis: почти всё, что ломается в работе
+     * с Kafka, — это поведение брокера, а не код. Порядок внутри партиции, ребалансировка,
+     * фиксация офсетов, повторная доставка — ничего из этого мок не воспроизведёт.
+     *
+     * <p>Образ тот же, что в compose, и версия та же. Это не педантизм: у брокеров разных
+     * сборок расходятся значения по умолчанию, и расхождение проявляется ровно там, где
+     * его никто не ждёт — тест зелёный, а локальный стек ведёт себя иначе. Проверять
+     * имеет смысл то, что запускается.
+     *
+     * <p>{@code KafkaContainer} из Testcontainers поднимает apache/kafka в режиме KRaft,
+     * без ZooKeeper — как и compose.
+     */
+    @Bean
+    @ServiceConnection
+    KafkaContainer kafkaContainer() {
+        return new KafkaContainer("apache/kafka:3.9.0");
     }
 
     @Bean
