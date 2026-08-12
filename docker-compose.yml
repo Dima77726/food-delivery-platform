@@ -21,6 +21,24 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: food-delivery-redis
+    restart: unless-stopped
+    # appendonly включён, чтобы кэш переживал перезапуск контейнера. Для чистого кэша это
+    # не обязательно — данные восстановимы из базы, — но холодный старт после каждого
+    # docker compose restart бьёт по той самой базе, ради разгрузки которой кэш и ставили.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - food_delivery_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
   app:
     build:
       context: .
@@ -28,6 +46,8 @@ services:
     container_name: food-delivery-app
     restart: unless-stopped
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         # Именно service_healthy, а не service_started: контейнер с Postgres поднимается
         # за долю секунды, а принимать соединения начинает позже. Со service_started
@@ -48,6 +68,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - TZ=${TZ}
       # Не заданы — приложение возьмёт dev-значение и предупредит в логе.
       # В .env их держать можно, в репозитории — нет.
@@ -96,5 +118,6 @@ services:
 
 volumes:
   food_delivery_postgres_data:
+  food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:

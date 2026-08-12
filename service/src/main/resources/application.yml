@@ -13,6 +13,19 @@ spring:
     password: ${POSTGRES_PASSWORD:food_password}
     driver-class-name: org.postgresql.Driver
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Небольшой таймаут намеренно. Кэш обязан быть быстрее базы; если Redis отвечает
+      # дольше, ждать его бессмысленно — быстрее сходить в PostgreSQL. Значение по умолчанию
+      # в Lettuce — минута, и при недоступном Redis каждый запрос витрины висел бы минуту.
+      timeout: 500ms
+      connect-timeout: 500ms
+
+  cache:
+    type: redis
+
   liquibase:
     enabled: true
     change-log: classpath:/db/changelog/changelog.yml
