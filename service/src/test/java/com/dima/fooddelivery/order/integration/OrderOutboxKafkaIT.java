@@ -20,7 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -79,7 +79,7 @@ class OrderOutboxKafkaIT extends AbstractIntegrationTest {
      * и молча ничего не дождался.
      */
     @Autowired
-    private KafkaContainer kafkaContainer;
+    private ConfluentKafkaContainer kafkaContainer;
 
     private void awaitTrue(BooleanSupplier condition, String description) {
         Instant deadline = Instant.now().plus(DELIVERY_TIMEOUT);

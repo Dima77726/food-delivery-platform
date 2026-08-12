@@ -1,7 +1,7 @@
 package com.dima.fooddelivery.support;
 
 import com.redis.testcontainers.RedisContainer;
-import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -53,18 +53,22 @@ public class TestcontainersConfiguration {
      * с Kafka, — это поведение брокера, а не код. Порядок внутри партиции, ребалансировка,
      * фиксация офсетов, повторная доставка — ничего из этого мок не воспроизведёт.
      *
-     * <p>Образ тот же, что в compose, и версия та же. Это не педантизм: у брокеров разных
-     * сборок расходятся значения по умолчанию, и расхождение проявляется ровно там, где
-     * его никто не ждёт — тест зелёный, а локальный стек ведёт себя иначе. Проверять
-     * имеет смысл то, что запускается.
+     * <p>Образ намеренно не тот, что в compose, — и на это есть причина, а не недосмотр.
+     * Напрашивающийся {@code KafkaContainer("apache/kafka:3.9.0")} с брокером из compose
+     * не стартует: Testcontainers задаёт контейнеру {@code KAFKA_LISTENERS} с адресом
+     * {@code 0.0.0.0}, а {@code KAFKA_ADVERTISED_LISTENERS} экспортирует позже стартовым
+     * скриптом — реальный порт известен только после запуска. Обёртка образа apache/kafka
+     * успевает раньше: она вызывает {@code StorageTool}, тот не находит advertised-адресов,
+     * берёт их из {@code listeners} и падает на «cannot use the nonroutable meta-address».
      *
-     * <p>{@code KafkaContainer} из Testcontainers поднимает apache/kafka в режиме KRaft,
-     * без ZooKeeper — как и compose.
+     * <p>У образа Confluent другой entrypoint, этой гонки в нём нет, поэтому здесь пара
+     * {@code ConfluentKafkaContainer} + cp-kafka. Оба брокера — та же Kafka в режиме KRaft,
+     * различаются только обвязкой запуска, а она в тестах и не проверяется.
      */
     @Bean
     @ServiceConnection
-    KafkaContainer kafkaContainer() {
-        return new KafkaContainer("apache/kafka:3.9.0");
+    ConfluentKafkaContainer kafkaContainer() {
+        return new ConfluentKafkaContainer("confluentinc/cp-kafka:7.8.0");
     }
 
     @Bean

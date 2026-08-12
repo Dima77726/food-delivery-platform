@@ -5,7 +5,6 @@ import com.dima.fooddelivery.cart.service.CartService;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.delivery.api.DeliveryResponse;
 import com.dima.fooddelivery.delivery.service.DeliveryService;
-import com.dima.fooddelivery.notification.service.NotificationService;
 import com.dima.fooddelivery.order.api.OrderResponse;
 import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.payment.api.PayOrderRequest;
@@ -14,14 +13,15 @@ import com.dima.fooddelivery.payment.service.PaymentService;
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Полный путь заказа через публичные методы сервисов — от корзины до доставки.
@@ -45,7 +45,7 @@ class OrderLifecycleIT extends AbstractIntegrationTest {
     private DeliveryService deliveryService;
 
     @Autowired
-    private NotificationService notificationService;
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void shouldCarryOrderFromCartToDelivered() {
@@ -89,9 +89,23 @@ class OrderLifecycleIT extends AbstractIntegrationTest {
                         orderService.getOrderEventsForCustomer(customerId, orderId).size(),
                         "в истории должны быть создание, оплата и пять переходов"
                 ),
-                () -> assertFalse(
-                        notificationService.getNotificationsForUser(customerId).isEmpty(),
-                        "клиент должен получить уведомления о ходе заказа"
+                // Уведомления проверяются не здесь. С переездом на Kafka они рождаются
+                // у потребителя топика — после коммита и после публикации, а этот тест
+                // работает в откатываемой транзакции с выключенным публикатором, поэтому
+                // ни одного уведомления тут не появится по построению. Сквозной путь
+                // до уведомления закрывает OrderOutboxKafkaIT.
+                //
+                // Что действительно обязано быть видно отсюда — след в outbox: он пишется
+                // в той же транзакции, что и смена статуса, и это ровно та гарантия,
+                // которая раньше держалась на внутрипроцессном слушателе.
+                () -> assertTrue(
+                        outboxEventCount(orderId) > 0,
+                        "переходы заказа обязаны оставить события в outbox"
+                ),
+                () -> assertEquals(
+                        "DELIVERED",
+                        lastOutboxStatus(orderId),
+                        "последним в outbox должен лежать перевод в DELIVERED"
                 )
         );
     }
@@ -153,5 +167,33 @@ class OrderLifecycleIT extends AbstractIntegrationTest {
 
     private PayOrderRequest cardPayment() {
         return new PayOrderRequest(PaymentMethod.CARD, UUID.randomUUID().toString());
+    }
+
+    private int outboxEventCount(Long orderId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM order_event_outbox WHERE aggregate_id = ?",
+                Integer.class,
+                orderId
+        );
+
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Тело события лежит в TEXT, поэтому приведение к JSONB — самый дешёвый способ
+     * достать поле, не разбирая строку вручную и не завися от порядка ключей.
+     */
+    private String lastOutboxStatus(Long orderId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT CAST(payload AS JSONB) ->> 'newStatus'
+                        FROM order_event_outbox
+                        WHERE aggregate_id = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                String.class,
+                orderId
+        );
     }
 }

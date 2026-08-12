@@ -2,6 +2,7 @@ package com.dima.fooddelivery.common.kafka;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
@@ -60,7 +61,23 @@ public class KafkaConfig {
      */
     @Bean
     DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate);
+        // Адрес топика ошибок задан явно, и полагаться на значение по умолчанию здесь нельзя
+        // по двум причинам сразу.
+        //
+        // Во-первых, имя. DeadLetterPublishingRecoverer приписывает к топику суффикс "-dlt",
+        // а не ".DLT" — последний относится к @RetryableTopic. Сообщения уходили бы
+        // в food-delivery.order-events-dlt, создаваемый автоматически, тогда как объявленный
+        // здесь топик и слушатель разбора смотрели бы в пустоту. Отказы копились бы там,
+        // где их никто не ищет.
+        //
+        // Во-вторых, партиция. По умолчанию сохраняется номер партиции исходного сообщения,
+        // а у основного топика их три против одной у топика ошибок: всё, что пришло
+        // не из нулевой партиции, опубликовать не удалось бы. Значение -1 отдаёт выбор
+        // партиции продюсеру, и число партиций у топиков перестаёт быть связанным.
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                kafkaTemplate,
+                (record, exception) -> new TopicPartition(KafkaTopics.ORDER_EVENTS_DLT, -1)
+        );
 
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(1_000L, 3L));
 
