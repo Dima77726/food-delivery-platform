@@ -16,11 +16,11 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.testcontainers.kafka.KafkaContainer;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -69,8 +69,17 @@ class OrderOutboxKafkaIT extends AbstractIntegrationTest {
     @Autowired
     private KafkaTemplate<String, String> kafkaTemplate;
 
-    @Value("${spring.kafka.bootstrap-servers}")
-    private String bootstrapServers;
+    /**
+     * Адрес брокера берётся у контейнера, а не из {@code spring.kafka.bootstrap-servers}.
+     *
+     * <p>{@code @ServiceConnection} не переписывает свойства окружения: он отдаёт
+     * автоконфигурации бин {@code KafkaConnectionDetails}, а в {@code application.yml}
+     * остаётся значение по умолчанию — {@code localhost:9094}. Бины Spring подключаются
+     * куда надо, а вот собранный вручную потребитель по этому свойству ушёл бы в пустоту
+     * и молча ничего не дождался.
+     */
+    @Autowired
+    private KafkaContainer kafkaContainer;
 
     private void awaitTrue(BooleanSupplier condition, String description) {
         Instant deadline = Instant.now().plus(DELIVERY_TIMEOUT);
@@ -257,7 +266,7 @@ class OrderOutboxKafkaIT extends AbstractIntegrationTest {
     private KafkaConsumer<String, String> createDltConsumer() {
         Properties props = new Properties();
 
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaContainer.getBootstrapServers());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "dlt-assertions-" + UUID.randomUUID());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
