@@ -32,7 +32,9 @@ RUN addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
-COPY --from=build --chown=app:app /build/service/target/*.jar app.jar
+# Именно -exec.jar: обычный jar модуля — это библиотека без встроенного запуска.
+# Классификатор появился, чтобы модуль client мог подключить service зависимостью.
+COPY --from=build --chown=app:app /build/service/target/*-exec.jar app.jar
 
 USER app
 

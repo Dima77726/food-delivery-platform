@@ -14,10 +14,13 @@
     <description>Типизированный Java-клиент к API платформы, целиком генерируемый из спецификации</description>
 
     <!--
-        Собственного кода в модуле нет ни строки: каталога src/ не существует намеренно.
-        Всё содержимое появляется на этапе generate-sources из openapi/food-delivery-api.yaml.
-        Как только сюда попадёт рукописный класс, клиент перестанет быть производным
-        от контракта и начнёт от него отставать.
+        Рукописного основного кода в модуле нет ни строки: каталога src/main не существует
+        намеренно. Всё содержимое артефакта появляется на этапе generate-sources
+        из openapi/food-delivery-api.yaml. Как только сюда попадёт рукописный класс, клиент
+        перестанет быть производным от контракта и начнёт от него отставать.
+
+        src/test при этом есть: там живёт контрактный тест, который поднимает приложение
+        и ходит в него сгенерированным клиентом.
 
         Модуль не зависит от service: потребителю клиента незачем тянуть Liquibase,
         Security и драйвер базы. Общее у них ровно одно — спецификация.
@@ -56,6 +59,40 @@
         <dependency>
             <groupId>jakarta.annotation</groupId>
             <artifactId>jakarta.annotation-api</artifactId>
+        </dependency>
+
+        <!--
+            Только для тестов. Контрактный тест поднимает настоящее приложение и ходит в него
+            сгенерированным клиентом: это единственный способ убедиться, что обе стороны
+            понимают спеку одинаково. Компиляции клиента для этого мало — она не заметит,
+            что сервер отдаёт поле под другим именем.
+
+            Scope test означает, что потребителю артефакта эта зависимость не достаётся:
+            SDK остаётся лёгким, тяжесть живёт только в сборке.
+        -->
+        <dependency>
+            <groupId>com.dima</groupId>
+            <artifactId>food-delivery-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -96,6 +133,20 @@
                                 <documentationProvider>none</documentationProvider>
                             </configOptions>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Контрактные тесты — интеграционные, поэтому тот же failsafe, что и в service. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>

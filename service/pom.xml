@@ -36,6 +36,26 @@
             <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
         </dependency>
 
+        <!--
+            Actuator даёт health и метрики, micrometer-metrics — сбор,
+            registry-prometheus — эндпоинт в формате, который умеет читать Prometheus.
+            Версия реестра управляется micrometer-bom, импортированным Spring Boot.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-micrometer-metrics</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
@@ -165,10 +185,22 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--
+                classifier=exec принципиально важен с тех пор, как появился модуль client.
+
+                По умолчанию плагин подменяет обычный jar исполняемым, и классы в нём лежат
+                в BOOT-INF/classes. Такой артефакт нельзя подключить зависимостью: компилятор
+                просто не увидит классы. Контрактный тест в client именно об это и споткнулся.
+
+                С классификатором главным артефактом остаётся обычная библиотека, а бутовый
+                jar publishes рядом как food-delivery-service-<version>-exec.jar. Docker-образ
+                собирается из него — см. Dockerfile.
+            -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <classifier>exec</classifier>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

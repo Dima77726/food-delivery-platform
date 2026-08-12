@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.payment.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
+import com.dima.fooddelivery.common.metrics.BusinessMetrics;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.order.domain.OrderAccess;
@@ -40,6 +41,7 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final OrderStatusService orderStatusService;
     private final PaymentGateway paymentGateway;
+    private final BusinessMetrics metrics;
 
     /**
      * Оплачивает заказ.
@@ -118,6 +120,8 @@ public class PaymentService {
                     "Оплата не прошла: " + result.failureReason()
             );
 
+            metrics.paymentFailed(request.method().name());
+
             log.warn("Оплата не прошла: orderId={}, reason={}", orderId, result.failureReason());
 
             // 409, а не 500: отказ банка — штатный исход, а не сбой приложения.
@@ -127,6 +131,8 @@ public class PaymentService {
         paymentRepository.compareAndSetStatus(paymentId, PaymentStatus.PENDING, PaymentStatus.SUCCEEDED, null);
 
         orderStatusService.markPaid(orderId);
+
+        metrics.paymentSucceeded(request.method().name());
 
         log.info("Заказ оплачен: orderId={}, paymentId={}, amount={}", orderId, paymentId, amount);
 
@@ -171,6 +177,8 @@ public class PaymentService {
                 OrderEventType.ORDER_REFUNDED,
                 "Возврат средств за отменённый заказ: " + payment.amount()
         );
+
+        metrics.paymentRefunded(payment.method().name());
 
         log.info("Оформлен возврат: orderId={}, paymentId={}, amount={}", orderId, payment.id(), payment.amount());
     }

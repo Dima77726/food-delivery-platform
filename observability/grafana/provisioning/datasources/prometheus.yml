@@ -1,0 +1,16 @@
+# Провижининг источника данных.
+#
+# Настройка файлом, а не руками в интерфейсе: иначе после каждого docker compose down -v
+# пришлось бы заново подключать Prometheus, а новый разработчик получал бы пустую Grafana
+# и инструкцию из десяти шагов в README.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    # Позволяет перезаписывать настройку при перезапуске, не создавая дубликатов.
+    editable: false
