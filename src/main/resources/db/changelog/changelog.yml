@@ -65,3 +65,6 @@ databaseChangeLog:
   - include:
       file: migrations/022-add-payment-order-event-types.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/023-add-menu-archiving.yml
+      relativeToChangelogFile: true

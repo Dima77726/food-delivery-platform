@@ -2,10 +2,14 @@ package com.dima.fooddelivery.restaurant.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.common.security.CurrentUser;
+import com.dima.fooddelivery.restaurant.api.CreateRestaurantRequest;
 import com.dima.fooddelivery.restaurant.api.RestaurantResponse;
 import com.dima.fooddelivery.restaurant.api.RestaurantResponseMapper;
+import com.dima.fooddelivery.restaurant.api.UpdateRestaurantRequest;
 import com.dima.fooddelivery.restaurant.domain.Restaurant;
 import com.dima.fooddelivery.restaurant.persistence.RestaurantRepository;
+import com.dima.fooddelivery.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,26 +30,81 @@ import java.util.List;
 public class RestaurantService {
 
     private final RestaurantRepository restaurantRepository;
+    private final UserService userService;
+    private final CurrentUser currentUser;
 
     @Transactional(readOnly = true)
     public List<RestaurantResponse> getAllRestaurants() {
-        List<Restaurant> restaurants = restaurantRepository.findAll();
-
-        log.debug("Список ресторанов загружен: restaurantsCount={}", restaurants.size());
-
-        return RestaurantResponseMapper.toResponses(restaurants);
+        return RestaurantResponseMapper.toResponses(restaurantRepository.findAll());
     }
 
     @Transactional(readOnly = true)
     public RestaurantResponse getRestaurantById(Long restaurantId) {
-        Restaurant restaurant = requireRestaurant(restaurantId);
-
-        return RestaurantResponseMapper.toResponse(restaurant);
+        return RestaurantResponseMapper.toResponse(requireRestaurant(restaurantId));
     }
 
     /**
-     * Возвращает ресторан или бросает 404.
+     * Создаёт ресторан и сразу назначает создателя управляющим.
      *
+     * <p>Два действия слиты в одно намеренно. Если бы назначение было отдельным вызовом,
+     * между созданием и назначением существовал бы ресторан без хозяина — и добраться до него
+     * мог бы только администратор.
+     */
+    @Transactional
+    public RestaurantResponse createRestaurant(CreateRestaurantRequest request) {
+        Long restaurantId = restaurantRepository.insert(
+                request.name().trim(),
+                request.description(),
+                request.city().trim()
+        );
+
+        Long creatorId = currentUser.requireId();
+        userService.assignRestaurantManager(creatorId, restaurantId);
+
+        log.info("Создан ресторан: restaurantId={}, ownerId={}", restaurantId, creatorId);
+
+        return RestaurantResponseMapper.toResponse(requireRestaurant(restaurantId));
+    }
+
+    @Transactional
+    public RestaurantResponse updateRestaurant(Long restaurantId, UpdateRestaurantRequest request) {
+        requireRestaurant(restaurantId);
+
+        int updated = restaurantRepository.update(
+                restaurantId,
+                trimOrNull(request.name()),
+                request.description(),
+                trimOrNull(request.city())
+        );
+
+        if (updated == 0) {
+            throw new ResourceNotFoundException("Ресторан с id=" + restaurantId + " не найден");
+        }
+
+        log.info("Обновлён ресторан: restaurantId={}", restaurantId);
+
+        return RestaurantResponseMapper.toResponse(requireRestaurant(restaurantId));
+    }
+
+    /**
+     * Открывает или закрывает приём заказов.
+     *
+     * <p>Уже оформленные заказы закрытие не трогает: ресторан обязан довести до конца то,
+     * что взял. Перестаёт работать только добавление в корзину и создание новых заказов —
+     * за этим следит {@link #requireActiveRestaurant(Long)}.
+     */
+    @Transactional
+    public RestaurantResponse setActive(Long restaurantId, boolean active) {
+        requireRestaurant(restaurantId);
+
+        restaurantRepository.setActive(restaurantId, active);
+
+        log.info("Изменён приём заказов: restaurantId={}, active={}", restaurantId, active);
+
+        return RestaurantResponseMapper.toResponse(requireRestaurant(restaurantId));
+    }
+
+    /**
      * @throws ResourceNotFoundException если ресторана нет
      */
     @Transactional(readOnly = true)
@@ -58,10 +117,8 @@ public class RestaurantService {
     }
 
     /**
-     * Проверяет, что ресторан существует и принимает заказы.
-     *
      * @throws ResourceNotFoundException      если ресторана нет
-     * @throws BusinessRuleViolationException если ресторан отключён
+     * @throws BusinessRuleViolationException если ресторан не принимает заказы
      */
     @Transactional(readOnly = true)
     public Restaurant requireActiveRestaurant(Long restaurantId) {
@@ -76,5 +133,9 @@ public class RestaurantService {
         }
 
         return restaurant;
+    }
+
+    private String trimOrNull(String value) {
+        return value == null ? null : value.trim();
     }
 }

@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 023-add-menu-archiving
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/023-add-menu-archiving.sql
+            relativeToChangelogFile: true
+            splitStatements: true
