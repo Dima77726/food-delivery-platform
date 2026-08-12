@@ -63,7 +63,7 @@ management:
       exposure:
         # Перечислены поимённо. Значение * открыло бы и heapdump с threaddump —
         # дамп кучи содержит всё, что было в памяти, включая пароли из запросов.
-        include: health,info,prometheus,metrics
+        include: health,info,prometheus
 
   endpoint:
     health:
