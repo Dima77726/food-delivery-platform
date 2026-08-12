@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: food-delivery-platform
+
+  datasource:
+    # currentSchema задаёт search_path сразу после установки соединения, поэтому SQL в коде
+    # пишется без префикса схемы. public оставлен вторым: там по умолчанию живут расширения
+    # PostgreSQL (uuid-ossp, pgcrypto), и без него они перестали бы резолвиться.
+    # Хост вынесен в переменную: локально это localhost, внутри docker-compose — имя сервиса
+    # postgres. Без этого приложение в контейнере искало бы базу внутри самого себя.
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:food_delivery}?currentSchema=${APP_SCHEMA:food_app},public
+    username: ${POSTGRES_USER:food_user}
+    password: ${POSTGRES_PASSWORD:food_password}
+    driver-class-name: org.postgresql.Driver
+
+  liquibase:
+    enabled: true
+    change-log: classpath:/db/changelog/changelog.yml
+    # Liquibase намеренно не полагается на search_path: миграции обязаны быть явными.
+    default-schema: ${APP_SCHEMA:food_app}
+    liquibase-schema: ${LIQUIBASE_SCHEMA:liquibase_meta}
+    parameters:
+      appSchema: ${APP_SCHEMA:food_app}
+
+app:
+  security:
+    # Первый администратор. Пустые значения по умолчанию — намеренно: без переменных окружения
+    # учётка не создаётся вовсе, и в репозитории не оказывается ни одного пароля.
+    bootstrap-admin:
+      email: ${APP_ADMIN_EMAIL:}
+      password: ${APP_ADMIN_PASSWORD:}
+    jwt:
+      # ВНИМАНИЕ: значение по умолчанию — только для локальной разработки.
+      # JwtSecretValidator не даст приложению стартовать с ним под любым профилем, кроме dev/test.
+      secret: ${JWT_SECRET:dev-only-insecure-secret-change-me-in-any-real-environment}
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG
+    liquibase: INFO
+    net.lbruun.springboot.preliquibase: TRACE
