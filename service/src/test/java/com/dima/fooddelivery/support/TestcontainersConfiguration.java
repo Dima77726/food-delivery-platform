@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.support;
 
+import com.redis.testcontainers.RedisContainer;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +30,19 @@ public class TestcontainersConfiguration {
     PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer("postgres:16")
                 .withUrlParam("currentSchema", APP_SCHEMA + ",public");
+    }
+
+    /**
+     * Настоящий Redis, а не подмена кэша на in-memory.
+     *
+     * <p>Замена {@code spring.cache.type=simple} в тестах прошла бы мимо всего, что в кэше
+     * может сломаться: сериализации доменных типов в JSON, TTL, поведения при недоступном
+     * сервере. Проверялись бы только аннотации, а они и так очевидны.
+     */
+    @Bean
+    @ServiceConnection
+    RedisContainer redisContainer() {
+        return new RedisContainer("redis:7-alpine");
     }
 
     @Bean

@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.menu.service;
 
+import com.dima.fooddelivery.common.cache.CacheNames;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.menu.domain.MenuCategory;
@@ -10,6 +11,8 @@ import com.dima.fooddelivery.menu.persistence.MenuRepository;
 import com.dima.fooddelivery.restaurant.service.RestaurantService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +41,11 @@ public class MenuService {
 
     // --- Витрина ------------------------------------------------------------------------------
 
+    /**
+     * Публичное меню — то, ради чего кэш и заводился: анонимных чтений здесь на порядки
+     * больше, чем всех остальных запросов вместе.
+     */
+    @Cacheable(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional(readOnly = true)
     public RestaurantMenu getRestaurantMenu(Long restaurantId) {
         // Меню закрытого ресторана показать можно — нельзя только заказать.
@@ -47,6 +55,11 @@ public class MenuService {
         return menuRepository.findMenu(restaurantId, false);
     }
 
+    /**
+     * Меню владельца не кэшируется намеренно. Он только что нажал «сохранить» и обязан
+     * увидеть результат немедленно, а не через десять минут. Кэшируется чтение массовое
+     * и терпимое к задержке, а не то, что человек проверяет сразу после своего действия.
+     */
     @Transactional(readOnly = true)
     public RestaurantMenu getManagedMenu(Long restaurantId) {
         restaurantService.requireRestaurant(restaurantId);
@@ -84,6 +97,7 @@ public class MenuService {
 
     // --- Категории ----------------------------------------------------------------------------
 
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public MenuCategory createCategory(Long restaurantId, String name, Integer sortOrder) {
         restaurantService.requireRestaurant(restaurantId);
@@ -100,6 +114,7 @@ public class MenuService {
         return requireCategory(categoryId);
     }
 
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public MenuCategory updateCategory(Long restaurantId, Long categoryId, String name, Integer sortOrder) {
         requireCategoryInRestaurant(restaurantId, categoryId);
@@ -125,6 +140,7 @@ public class MenuService {
      * с ON DELETE RESTRICT, поэтому удалить категорию, из которой хоть раз что-то заказали,
      * база просто не даст. И это правильно: заказ обязан помнить, что купил клиент.
      */
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public void archiveCategory(Long restaurantId, Long categoryId) {
         requireCategoryInRestaurant(restaurantId, categoryId);
@@ -138,6 +154,7 @@ public class MenuService {
 
     // --- Позиции ------------------------------------------------------------------------------
 
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public MenuItem createItem(
             Long restaurantId,
@@ -174,6 +191,7 @@ public class MenuService {
      * и {@code customer_order_item} хранят собственную копию цены на момент добавления.
      * Клиент заплатит ту цену, которую видел.
      */
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public MenuItem updateItem(
             Long restaurantId,
@@ -204,6 +222,7 @@ public class MenuService {
     /**
      * Временное скрытие: блюдо закончилось и вернётся. В отличие от архивирования обратимо.
      */
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public MenuItem setItemAvailability(Long restaurantId, Long itemId, boolean available) {
         requireItemInRestaurant(restaurantId, itemId);
@@ -217,6 +236,7 @@ public class MenuService {
         return requireItem(itemId);
     }
 
+    @CacheEvict(cacheNames = CacheNames.RESTAURANT_MENU, key = "#restaurantId")
     @Transactional
     public void archiveItem(Long restaurantId, Long itemId) {
         requireItemInRestaurant(restaurantId, itemId);

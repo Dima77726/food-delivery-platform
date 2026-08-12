@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.restaurant.service;
 
+import com.dima.fooddelivery.common.cache.CacheNames;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.CurrentUser;
@@ -8,6 +9,8 @@ import com.dima.fooddelivery.restaurant.persistence.RestaurantRepository;
 import com.dima.fooddelivery.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +36,14 @@ public class RestaurantService {
     private final UserService userService;
     private final CurrentUser currentUser;
 
+    /**
+     * Витрина: самое частое чтение и единственный метод ресторана, который кэшируется.
+     *
+     * <p>Ключ константный, потому что список один на всех: параметров у метода нет,
+     * а ключ по умолчанию для метода без аргументов и так был бы SimpleKey.EMPTY.
+     * Явная константа читается понятнее в @CacheEvict.
+     */
+    @Cacheable(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional(readOnly = true)
     public List<Restaurant> getAllRestaurants() {
         return restaurantRepository.findAll();
@@ -45,6 +56,7 @@ public class RestaurantService {
      * между созданием и назначением существовал бы ресторан без хозяина — и добраться до него
      * мог бы только администратор.
      */
+    @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant createRestaurant(String name, String description, String city) {
         Long restaurantId = restaurantRepository.insert(name.trim(), description, city.trim());
@@ -57,6 +69,7 @@ public class RestaurantService {
         return requireRestaurant(restaurantId);
     }
 
+    @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant updateRestaurant(Long restaurantId, String name, String description, String city) {
         requireRestaurant(restaurantId);
@@ -75,6 +88,7 @@ public class RestaurantService {
      * что взял. Перестаёт работать только добавление в корзину и создание новых заказов —
      * за этим следит {@link #requireActiveRestaurant(Long)}.
      */
+    @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant setActive(Long restaurantId, boolean active) {
         requireRestaurant(restaurantId);
@@ -99,6 +113,13 @@ public class RestaurantService {
     }
 
     /**
+     * Намеренно не кэшируется, в отличие от витрины.
+     *
+     * <p>Этот метод решает, можно ли класть блюдо в корзину и создавать заказ. Устаревший
+     * здесь признак active означает приём заказа закрытым рестораном — то есть еду, которую
+     * никто не приготовит. Устаревшая витрина в худшем случае показывает лишнюю строчку
+     * в списке; цена ошибки несопоставима.
+     *
      * @throws ResourceNotFoundException      если ресторана нет
      * @throws BusinessRuleViolationException если ресторан не принимает заказы
      */
