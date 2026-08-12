@@ -29,12 +29,13 @@ public class AuditLogRepository {
             rs.getString("resource_id"),
             AuditOutcome.fromDbValue(rs.getString("outcome")),
             rs.getString("details"),
-            rs.getObject("created_at", OffsetDateTime.class)
+            rs.getObject("created_at", OffsetDateTime.class),
+            rs.getString("correlation_id")
     );
 
     private static final String SELECT_ENTRY = """
             SELECT a.id, a.actor_id, a.actor_email, a.action, a.resource_type,
-                   a.resource_id, a.outcome, a.details, a.created_at
+                   a.resource_id, a.outcome, a.details, a.created_at, a.correlation_id
             FROM audit_log a
             """;
 
@@ -47,7 +48,8 @@ public class AuditLogRepository {
             String resourceType,
             String resourceId,
             AuditOutcome outcome,
-            String details
+            String details,
+            String correlationId
     ) {
         SqlParameterSource params = new MapSqlParameterSource()
                 .addValue("actorId", actorId)
@@ -56,14 +58,19 @@ public class AuditLogRepository {
                 .addValue("resourceType", resourceType)
                 .addValue("resourceId", resourceId)
                 .addValue("outcome", outcome.name())
-                .addValue("details", details);
+                .addValue("details", details)
+                .addValue("correlationId", correlationId);
 
         return jdbc.queryForObject(
                 """
                         INSERT INTO audit_log (
-                            actor_id, actor_email, action, resource_type, resource_id, outcome, details
+                            actor_id, actor_email, action, resource_type, resource_id,
+                            outcome, details, correlation_id
                         )
-                        VALUES (:actorId, :actorEmail, :action, :resourceType, :resourceId, :outcome, :details)
+                        VALUES (
+                            :actorId, :actorEmail, :action, :resourceType, :resourceId,
+                            :outcome, :details, :correlationId
+                        )
                         RETURNING id
                         """,
                 params,

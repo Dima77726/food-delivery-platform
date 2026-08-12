@@ -74,3 +74,6 @@ databaseChangeLog:
   - include:
       file: migrations/025-index-order-event-outbox-failed.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/026-add-correlation-id.yml
+      relativeToChangelogFile: true

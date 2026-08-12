@@ -94,7 +94,7 @@ public class NotificationRepository {
             String body,
             Long orderId
     ) {
-        return insert(null, recipientId, channel, type, subject, body, orderId);
+        return insert(null, recipientId, channel, type, subject, body, orderId, null);
     }
 
     /**
@@ -112,7 +112,8 @@ public class NotificationRepository {
             String type,
             String subject,
             String body,
-            Long orderId
+            Long orderId,
+            String correlationId
     ) {
         SqlParameterSource params = new MapSqlParameterSource()
                 .addValue("eventId", eventId)
@@ -122,16 +123,18 @@ public class NotificationRepository {
                 .addValue("subject", subject)
                 .addValue("body", body)
                 .addValue("orderId", orderId)
-                .addValue("status", NotificationStatus.PENDING.name());
+                .addValue("status", NotificationStatus.PENDING.name())
+                .addValue("correlationId", correlationId);
 
         return jdbc.queryForObject(
                 """
                         INSERT INTO notification (
-                            event_id, recipient_id, channel, type, subject, body, order_id, status
+                            event_id, recipient_id, channel, type, subject, body, order_id,
+                            status, correlation_id
                         )
                         VALUES (
                             CAST(:eventId AS UUID), :recipientId, :channel, :type, :subject,
-                            :body, :orderId, :status
+                            :body, :orderId, :status, :correlationId
                         )
                         RETURNING id
                         """,

@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.order.integration;
 
 import com.dima.fooddelivery.common.kafka.KafkaTopics;
+import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.notification.domain.Notification;
 import com.dima.fooddelivery.notification.service.NotificationService;
 import com.dima.fooddelivery.order.domain.OrderStatus;
@@ -15,6 +16,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -218,6 +220,59 @@ class OrderOutboxKafkaIT extends AbstractIntegrationTest {
                 1,
                 notificationService.getNotificationsForUser(customerId).size(),
                 "повторная доставка события не должна порождать второе уведомление"
+        );
+    }
+
+    /**
+     * Метка запроса обязана пережить асинхронную границу.
+     *
+     * <p>Это и есть смысл всей затеи: уведомление создаётся в другом потоке и через
+     * несколько секунд после запроса, а связать его с этим запросом всё равно возможно.
+     * Проверяется вся цепочка переноса — MDC потока запроса, колонка в outbox, заголовок
+     * сообщения Kafka и, наконец, колонка в уведомлении.
+     */
+    @Test
+    void shouldCarryCorrelationIdFromRequestThreadToNotification() {
+        Long customerId = testData.insertCustomer();
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.CREATED);
+
+        String correlationId = "trace-" + UUID.randomUUID();
+
+        // Смена статуса выполняется так, будто её вызвал HTTP-запрос: именно из MDC
+        // слушатель outbox и берёт метку.
+        MDC.put(RequestContext.CORRELATION_ID_MDC_KEY, correlationId);
+        try {
+            orderStatusService.markPaid(order.orderId());
+        } finally {
+            MDC.remove(RequestContext.CORRELATION_ID_MDC_KEY);
+        }
+
+        String inOutbox = jdbcTemplate.queryForObject(
+                "SELECT correlation_id FROM order_event_outbox WHERE aggregate_id = ? ORDER BY id LIMIT 1",
+                String.class,
+                order.orderId()
+        );
+
+        outboxPublisher.publishBatch();
+
+        awaitTrue(
+                () -> !notificationService.getNotificationsForUser(customerId).isEmpty(),
+                "уведомление так и не появилось"
+        );
+
+        String inNotification = jdbcTemplate.queryForObject(
+                "SELECT correlation_id FROM notification WHERE recipient_id = ? ORDER BY id DESC LIMIT 1",
+                String.class,
+                customerId
+        );
+
+        assertAll(
+                () -> assertEquals(correlationId, inOutbox, "метка обязана лечь в outbox вместе с событием"),
+                () -> assertEquals(
+                        correlationId,
+                        inNotification,
+                        "метка обязана доехать до уведомления через заголовок сообщения Kafka"
+                )
         );
     }
 

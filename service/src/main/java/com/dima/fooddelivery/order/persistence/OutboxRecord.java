@@ -15,6 +15,13 @@ public record OutboxRecord(
         Long aggregateId,
         String eventType,
         String payload,
-        int attempts
+        int attempts,
+
+        /**
+         * Метка запроса, в котором произошло событие. Едет отдельным полем, а не внутри
+         * тела: тело — это контракт для потребителей, а метка относится к доставке
+         * и в Kafka уходит заголовком, как и положено служебным данным.
+         */
+        String correlationId
 ) {
 }

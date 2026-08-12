@@ -47,9 +47,12 @@ public class NotificationService {
             String type,
             String subject,
             String body,
-            Long orderId
+            Long orderId,
+            String correlationId
     ) {
-        return notificationRepository.insert(eventId, recipientId, channel, type, subject, body, orderId);
+        return notificationRepository.insert(
+                eventId, recipientId, channel, type, subject, body, orderId, correlationId
+        );
     }
 
     @Transactional

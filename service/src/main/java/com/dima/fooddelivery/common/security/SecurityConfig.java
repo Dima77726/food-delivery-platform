@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.common.security;
 
+import com.dima.fooddelivery.common.web.UserIdMdcFilter;
 import com.dima.fooddelivery.user.domain.UserRole;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 import javax.crypto.spec.SecretKeySpec;
@@ -54,6 +56,7 @@ public class SecurityConfig {
     };
 
     private final SecurityProperties securityProperties;
+    private final CurrentUser currentUser;
 
     /**
      * Цепочка для служебных эндпоинтов.
@@ -100,7 +103,12 @@ public class SecurityConfig {
                 // Иначе Boot поднял бы вход по логину user и паролю из лога при старте.
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
-                );
+                )
+                // Строго после разбора токена: до него контекст безопасности пуст, и фильтр
+                // получал бы анонима на каждом запросе. Метка запроса при этом проставляется
+                // раньше — отдельным фильтром вне этой цепочки, чтобы её видели и логи
+                // о неудачной аутентификации.
+                .addFilterAfter(new UserIdMdcFilter(currentUser), BearerTokenAuthenticationFilter.class);
 
         return http.build();
     }

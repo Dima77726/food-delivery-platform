@@ -16,7 +16,8 @@ public final class AuditResponseMapper {
                 entry.resourceId(),
                 entry.outcome(),
                 entry.details(),
-                entry.createdAt()
+                entry.createdAt(),
+                entry.correlationId()
         );
     }
 

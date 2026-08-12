@@ -1,15 +1,20 @@
 package com.dima.fooddelivery.notification.service;
 
 import com.dima.fooddelivery.common.kafka.KafkaTopics;
+import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.notification.domain.NotificationChannel;
 import com.dima.fooddelivery.order.integration.OrderIntegrationEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -53,7 +58,25 @@ public class OrderEventsConsumer {
             topics = KafkaTopics.ORDER_EVENTS,
             groupId = "${spring.kafka.consumer.group-id}"
     )
-    public void onOrderEvent(String payload) {
+    public void onOrderEvent(ConsumerRecord<String, String> record) {
+        String correlationId = correlationIdOf(record);
+
+        // Восстановление метки — обязательная часть пересечения границы потоков. Здесь
+        // начинается новый поток, у которого своего MDC нет, и без этой строки вся работа
+        // потребителя выпала бы из цепочки: уведомление невозможно было бы связать
+        // с запросом, который его в конечном счёте породил.
+        if (correlationId != null) {
+            MDC.put(RequestContext.CORRELATION_ID_MDC_KEY, correlationId);
+        }
+
+        try {
+            handle(record.value(), correlationId);
+        } finally {
+            MDC.remove(RequestContext.CORRELATION_ID_MDC_KEY);
+        }
+    }
+
+    private void handle(String payload, String correlationId) {
         OrderIntegrationEvent event = parse(payload);
 
         String message = CUSTOMER_MESSAGES.get(event.newStatus());
@@ -70,7 +93,8 @@ public class OrderEventsConsumer {
                     event.eventType(),
                     "Заказ №" + event.orderId(),
                     message,
-                    event.orderId()
+                    event.orderId(),
+                    correlationId
             );
         } catch (DuplicateKeyException duplicate) {
             // Повторная доставка того же события. Штатный исход при гарантии «хотя бы один
@@ -78,6 +102,20 @@ public class OrderEventsConsumer {
             // в DLT и заставить человека разбираться с нормальным поведением системы.
             log.debug("Событие уже обработано, пропускаем: eventId={}", event.eventId());
         }
+    }
+
+    /**
+     * Метки может не быть: событие могло родиться в фоновой задаче, где никакого
+     * HTTP-запроса не было. Это штатный случай, а не потеря данных.
+     */
+    private String correlationIdOf(ConsumerRecord<String, String> record) {
+        Header header = record.headers().lastHeader(RequestContext.CORRELATION_ID_HEADER);
+
+        if (header == null || header.value() == null) {
+            return null;
+        }
+
+        return new String(header.value(), StandardCharsets.UTF_8);
     }
 
     /**

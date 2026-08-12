@@ -11,6 +11,9 @@ public record AuditEntry(
         String resourceId,
         AuditOutcome outcome,
         String details,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+
+        /** Метка запроса, породившего запись; NULL для действий вне HTTP-запроса. */
+        String correlationId
 ) {
 }

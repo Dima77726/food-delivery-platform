@@ -4,6 +4,7 @@ import com.dima.fooddelivery.audit.domain.AuditEntry;
 import com.dima.fooddelivery.audit.domain.AuditOutcome;
 import com.dima.fooddelivery.audit.persistence.AuditLogRepository;
 import com.dima.fooddelivery.common.security.CurrentUser;
+import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.user.persistence.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,7 +45,13 @@ public class AuditService {
                 ? null
                 : appUserRepository.findById(actorId).map(user -> user.email()).orElse(null);
 
-        auditLogRepository.append(actorId, actorEmail, action, resourceType, resourceId, outcome, details);
+        // Метка берётся из контекста, а не из аргументов — по той же причине, что и актор:
+        // переданная вручную, она рано или поздно окажется не от того запроса.
+        String correlationId = RequestContext.correlationId().orElse(null);
+
+        auditLogRepository.append(
+                actorId, actorEmail, action, resourceType, resourceId, outcome, details, correlationId
+        );
     }
 
     public void recordSuccess(String action, String resourceType, String resourceId, String details) {
