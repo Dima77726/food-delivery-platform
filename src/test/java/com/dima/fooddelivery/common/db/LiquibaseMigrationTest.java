@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 class LiquibaseMigrationTest extends AbstractIntegrationTest {
 
-    private static final String LATEST_CHANGESET_ID = "022-add-payment-order-event-types";
+    private static final String LATEST_CHANGESET_ID = "023-add-menu-archiving";
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
