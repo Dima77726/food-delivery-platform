@@ -1,10 +1,13 @@
 package com.dima.fooddelivery.order.api;
 
+import com.dima.fooddelivery.common.api.PageRequestParams;
+import com.dima.fooddelivery.common.api.PageResponse;
 import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.order.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -70,12 +73,14 @@ public class OrderController {
 
     @GetMapping("/api/v1/customers/{customerId}/orders")
     @PreAuthorize("hasRole('CUSTOMER') and @access.isSelf(#customerId)")
-    @Operation(summary = "Список заказов клиента")
-    public List<OrderSummaryResponse> getOrdersByCustomer(
+    @Operation(summary = "Список заказов клиента, постранично")
+    public PageResponse<OrderSummaryResponse> getOrdersByCustomer(
             @Positive(message = "customerId должен быть положительным числом")
-            @PathVariable Long customerId
+            @PathVariable Long customerId,
+
+            @Valid PageRequestParams page
     ) {
-        return orderService.getOrdersByCustomer(customerId);
+        return orderService.getOrdersByCustomer(customerId, page);
     }
 
     @GetMapping("/api/v1/customers/{customerId}/orders/{orderId}/events")
@@ -110,14 +115,16 @@ public class OrderController {
 
     @GetMapping("/api/v1/restaurants/{restaurantId}/orders")
     @PreAuthorize("@access.managesRestaurant(#restaurantId)")
-    @Operation(summary = "Заказы ресторана, при необходимости отфильтрованные по статусу")
-    public List<OrderSummaryResponse> getRestaurantOrders(
+    @Operation(summary = "Заказы ресторана постранично, при необходимости отфильтрованные по статусу")
+    public PageResponse<OrderSummaryResponse> getRestaurantOrders(
             @Positive(message = "restaurantId должен быть положительным числом")
             @PathVariable Long restaurantId,
 
-            @RequestParam(required = false) OrderStatus status
+            @RequestParam(required = false) OrderStatus status,
+
+            @Valid PageRequestParams page
     ) {
-        return orderService.getOrdersForRestaurant(restaurantId, status);
+        return orderService.getOrdersForRestaurant(restaurantId, status, page);
     }
 
     @PostMapping("/api/v1/restaurants/{restaurantId}/orders/{orderId}/accept")

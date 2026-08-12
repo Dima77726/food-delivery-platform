@@ -6,6 +6,7 @@ import com.dima.fooddelivery.order.domain.OrderItem;
 import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.order.domain.OrderSummary;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
@@ -112,75 +113,98 @@ public class OrderRepository {
         return found.stream().findFirst();
     }
 
-    public List<OrderSummary> findSummariesByCustomerId(Long customerId) {
-        return jdbc.query(
-                """
-                        SELECT
-                            co.id AS order_id,
-                            co.cart_id,
-                            co.customer_id,
-                            co.restaurant_id,
-                            co.status AS order_status,
-                            co.total_amount,
-                            co.created_at,
-                            COUNT(coi.id) AS items_count
-                        FROM customer_order co
-                        LEFT JOIN customer_order_item coi ON coi.order_id = co.id
-                        WHERE co.customer_id = :customerId
-                        GROUP BY co.id, co.cart_id, co.customer_id, co.restaurant_id,
-                                 co.status, co.total_amount, co.created_at
-                        ORDER BY co.created_at DESC, co.id DESC
-                        """,
-                new MapSqlParameterSource("customerId", customerId),
-                (rs, rowNum) -> new OrderSummary(
-                        rs.getLong("order_id"),
-                        rs.getLong("cart_id"),
-                        rs.getLong("customer_id"),
-                        rs.getLong("restaurant_id"),
-                        OrderStatus.fromDbValue(rs.getString("order_status")),
-                        rs.getBigDecimal("total_amount"),
-                        rs.getLong("items_count"),
-                        rs.getObject("created_at", OffsetDateTime.class)
-                )
-        );
+    /**
+     * Общая проекция списка заказов. Постраничная выборка обязана иметь строгий порядок:
+     * без ORDER BY по уникальному ключу база вправе вернуть одну и ту же строку на двух
+     * соседних страницах, и клиент увидит дубли. Поэтому id вторым критерием — created_at
+     * у двух заказов может совпасть до микросекунды.
+     */
+    private static final String SELECT_SUMMARIES = """
+            SELECT
+                co.id AS order_id,
+                co.cart_id,
+                co.customer_id,
+                co.restaurant_id,
+                co.status AS order_status,
+                co.total_amount,
+                co.created_at,
+                COUNT(coi.id) AS items_count
+            FROM customer_order co
+            LEFT JOIN customer_order_item coi ON coi.order_id = co.id
+            WHERE %s
+            GROUP BY co.id, co.cart_id, co.customer_id, co.restaurant_id,
+                     co.status, co.total_amount, co.created_at
+            ORDER BY co.created_at DESC, co.id DESC
+            LIMIT :limit OFFSET :offset
+            """;
+
+    private static final RowMapper<OrderSummary> ORDER_SUMMARY = (rs, rowNum) -> new OrderSummary(
+            rs.getLong("order_id"),
+            rs.getLong("cart_id"),
+            rs.getLong("customer_id"),
+            rs.getLong("restaurant_id"),
+            OrderStatus.fromDbValue(rs.getString("order_status")),
+            rs.getBigDecimal("total_amount"),
+            rs.getLong("items_count"),
+            rs.getObject("created_at", OffsetDateTime.class)
+    );
+
+    public List<OrderSummary> findSummariesByCustomerId(Long customerId, int limit, int offset) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("customerId", customerId)
+                .addValue("limit", limit)
+                .addValue("offset", offset);
+
+        return jdbc.query(SELECT_SUMMARIES.formatted("co.customer_id = :customerId"), params, ORDER_SUMMARY);
     }
 
-    public List<OrderSummary> findSummariesByRestaurantId(Long restaurantId, OrderStatus status) {
+    public long countByCustomerId(Long customerId) {
+        Long total = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM customer_order WHERE customer_id = :customerId",
+                new MapSqlParameterSource("customerId", customerId),
+                Long.class
+        );
+
+        return total == null ? 0L : total;
+    }
+
+    public List<OrderSummary> findSummariesByRestaurantId(
+            Long restaurantId,
+            OrderStatus status,
+            int limit,
+            int offset
+    ) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("restaurantId", restaurantId)
+                .addValue("status", status == null ? null : status.getDbValue())
+                .addValue("limit", limit)
+                .addValue("offset", offset);
+
+        // CAST нужен, потому что для NULL-параметра PostgreSQL не может вывести тип
+        // и отказывается сравнивать его с колонкой.
+        String condition = "co.restaurant_id = :restaurantId "
+                + "AND (CAST(:status AS VARCHAR) IS NULL OR co.status = :status)";
+
+        return jdbc.query(SELECT_SUMMARIES.formatted(condition), params, ORDER_SUMMARY);
+    }
+
+    public long countByRestaurantId(Long restaurantId, OrderStatus status) {
         SqlParameterSource params = new MapSqlParameterSource()
                 .addValue("restaurantId", restaurantId)
                 .addValue("status", status == null ? null : status.getDbValue());
 
-        return jdbc.query(
+        Long total = jdbc.queryForObject(
                 """
-                        SELECT
-                            co.id AS order_id,
-                            co.cart_id,
-                            co.customer_id,
-                            co.restaurant_id,
-                            co.status AS order_status,
-                            co.total_amount,
-                            co.created_at,
-                            COUNT(coi.id) AS items_count
-                        FROM customer_order co
-                        LEFT JOIN customer_order_item coi ON coi.order_id = co.id
-                        WHERE co.restaurant_id = :restaurantId
-                          AND (CAST(:status AS VARCHAR) IS NULL OR co.status = :status)
-                        GROUP BY co.id, co.cart_id, co.customer_id, co.restaurant_id,
-                                 co.status, co.total_amount, co.created_at
-                        ORDER BY co.created_at DESC, co.id DESC
+                        SELECT COUNT(*)
+                        FROM customer_order
+                        WHERE restaurant_id = :restaurantId
+                          AND (CAST(:status AS VARCHAR) IS NULL OR status = :status)
                         """,
                 params,
-                (rs, rowNum) -> new OrderSummary(
-                        rs.getLong("order_id"),
-                        rs.getLong("cart_id"),
-                        rs.getLong("customer_id"),
-                        rs.getLong("restaurant_id"),
-                        OrderStatus.fromDbValue(rs.getString("order_status")),
-                        rs.getBigDecimal("total_amount"),
-                        rs.getLong("items_count"),
-                        rs.getObject("created_at", OffsetDateTime.class)
-                )
+                Long.class
         );
+
+        return total == null ? 0L : total;
     }
 
     public boolean existsForCustomer(Long orderId, Long customerId) {

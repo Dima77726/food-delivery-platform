@@ -5,6 +5,8 @@ import com.dima.fooddelivery.cart.domain.CartItem;
 import com.dima.fooddelivery.cart.service.CartService;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.common.api.PageRequestParams;
+import com.dima.fooddelivery.common.api.PageResponse;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.order.api.OrderEventResponse;
 import com.dima.fooddelivery.order.api.OrderResponse;
@@ -14,6 +16,7 @@ import com.dima.fooddelivery.order.domain.Order;
 import com.dima.fooddelivery.order.domain.OrderAccess;
 import com.dima.fooddelivery.order.domain.OrderEventType;
 import com.dima.fooddelivery.order.domain.OrderStatus;
+import com.dima.fooddelivery.order.domain.OrderSummary;
 import com.dima.fooddelivery.order.persistence.OrderEventRepository;
 import com.dima.fooddelivery.order.persistence.OrderRepository;
 import com.dima.fooddelivery.payment.service.PaymentService;
@@ -109,17 +112,40 @@ public class OrderService {
         return OrderResponseMapper.toResponse(order);
     }
 
+    /**
+     * Оба списка постраничные. Раньше они возвращали всё, что есть: у клиента с сотней заказов
+     * это ещё работало, у ресторана с историей за год — уже нет.
+     *
+     * <p>COUNT выполняется вторым запросом в той же транзакции, поэтому итог согласован
+     * с содержимым страницы.
+     */
     @Transactional(readOnly = true)
-    public List<OrderSummaryResponse> getOrdersByCustomer(Long customerId) {
-        return OrderResponseMapper.toSummaryResponses(
-                orderRepository.findSummariesByCustomerId(customerId)
+    public PageResponse<OrderSummaryResponse> getOrdersByCustomer(Long customerId, PageRequestParams page) {
+        List<OrderSummary> summaries =
+                orderRepository.findSummariesByCustomerId(customerId, page.size(), page.offset());
+
+        return PageResponse.of(
+                OrderResponseMapper.toSummaryResponses(summaries),
+                page.page(),
+                page.size(),
+                orderRepository.countByCustomerId(customerId)
         );
     }
 
     @Transactional(readOnly = true)
-    public List<OrderSummaryResponse> getOrdersForRestaurant(Long restaurantId, OrderStatus status) {
-        return OrderResponseMapper.toSummaryResponses(
-                orderRepository.findSummariesByRestaurantId(restaurantId, status)
+    public PageResponse<OrderSummaryResponse> getOrdersForRestaurant(
+            Long restaurantId,
+            OrderStatus status,
+            PageRequestParams page
+    ) {
+        List<OrderSummary> summaries =
+                orderRepository.findSummariesByRestaurantId(restaurantId, status, page.size(), page.offset());
+
+        return PageResponse.of(
+                OrderResponseMapper.toSummaryResponses(summaries),
+                page.page(),
+                page.size(),
+                orderRepository.countByRestaurantId(restaurantId, status)
         );
     }
 

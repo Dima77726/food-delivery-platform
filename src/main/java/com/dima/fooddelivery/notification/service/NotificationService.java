@@ -24,7 +24,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NotificationService {
 
-    private static final int SEND_BATCH_SIZE = 100;
+    /**
+     * Размер пачки. Чем он больше, тем дольше держатся блокировки строк, поэтому не сотни.
+     */
+    private static final int SEND_BATCH_SIZE = 50;
 
     private final NotificationRepository notificationRepository;
     private final NotificationSender notificationSender;
@@ -48,11 +51,23 @@ public class NotificationService {
     /**
      * Отправляет накопившиеся уведомления.
      *
-     * <p>Каждое в своей транзакции: одно упавшее не должно откатывать остальные.
-     * Вызывается планировщиком {@link NotificationDispatchJob}.
+     * <p>Вся пачка обрабатывается в одной транзакции, и это обязательное условие: блокировка
+     * из {@code FOR UPDATE SKIP LOCKED} живёт ровно до её конца. Отпусти транзакцию раньше —
+     * и соседний экземпляр приложения подхватит те же строки.
+     *
+     * <p>Падение отправки одного уведомления не откатывает остальные: исключение
+     * перехватывается и превращается в статус FAILED, то есть транзакция остаётся успешной.
+     *
+     * <p>Ограничение, которое надо знать: транзакция держится открытой всё время отправки.
+     * С записью в лог это доли миллисекунды, с реальным SMTP — секунды на каждое письмо,
+     * и такую транзакцию держать нельзя. Правильное решение для настоящего отправителя —
+     * разделить на два шага: короткая транзакция помечает пачку как взятую в работу
+     * (нужен отдельный статус PROCESSING), отправка идёт уже вне транзакции. Пока
+     * отправитель пишет в лог, усложнять незачем.
      */
+    @Transactional
     public int dispatchPending() {
-        List<Notification> pending = notificationRepository.findPending(SEND_BATCH_SIZE);
+        List<Notification> pending = notificationRepository.lockPending(SEND_BATCH_SIZE);
 
         int sent = 0;
         for (Notification notification : pending) {
@@ -64,8 +79,7 @@ public class NotificationService {
         return sent;
     }
 
-    @Transactional
-    public boolean dispatchOne(Notification notification) {
+    private boolean dispatchOne(Notification notification) {
         try {
             notificationSender.send(notification);
             notificationRepository.markSent(notification.id());

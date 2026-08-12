@@ -56,12 +56,27 @@ public class NotificationRepository {
         );
     }
 
-    public List<Notification> findPending(int limit) {
+    /**
+     * Забирает пачку неотправленных уведомлений, блокируя их за собой.
+     *
+     * <p>{@code FOR UPDATE SKIP LOCKED} — способ раздать очередь нескольким экземплярам
+     * приложения без внешнего координатора. Первый процесс блокирует выбранные строки,
+     * второй их молча пропускает и берёт следующие. Без этого оба прочитали бы одни и те же
+     * PENDING-строки и отправили каждое уведомление дважды.
+     *
+     * <p>Без {@code SKIP LOCKED} второй процесс не продублировал бы отправку, но встал бы
+     * в ожидание блокировки — очередь разбиралась бы строго последовательно.
+     *
+     * <p>Обязательное условие: вызывать внутри транзакции. Блокировка живёт до её конца,
+     * то есть до момента, когда статус уже переписан на SENT.
+     */
+    public List<Notification> lockPending(int limit) {
         return jdbc.query(
                 SELECT_NOTIFICATION + """
                          WHERE n.status = :status
                          ORDER BY n.created_at, n.id
                          LIMIT :limit
+                         FOR UPDATE SKIP LOCKED
                         """,
                 new MapSqlParameterSource()
                         .addValue("status", NotificationStatus.PENDING.name())
