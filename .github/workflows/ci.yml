@@ -48,13 +48,21 @@ jobs:
 
       # Отчёты нужны именно когда упало: в логе видно только строчку с ошибкой,
       # а в отчёте — стектрейс и вывод конкретного теста.
+      #
+      # Пути со звёздочками, потому что сборка многомодульная: отчёты лежат
+      # в service/target и client/target, а корневого target у reactor-модуля
+      # нет вовсе. С путём target/surefire-reports этот шаг молча выгружал
+      # пустой архив — ровно в тот момент, когда он и был нужен.
+      #
+      # if-no-files-found оставлен на значении по умолчанию (warn): при пустом
+      # результате в логе появится предупреждение. Со значением ignore следующая
+      # такая же ошибка в путях снова осталась бы незамеченной.
       - name: Отчёты о тестах
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
           path: |
-            target/surefire-reports/
-            target/failsafe-reports/
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
           retention-days: 7
-          if-no-files-found: ignore
