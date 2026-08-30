@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * контейнера в Spring, весь SQL без префикса схемы перестанет работать, и упадут все остальные
  * интеграционные тесты сразу. Пусть тогда падает этот, с понятным сообщением.
  */
-class TestInfrastructureSmokeTest extends AbstractIntegrationTest {
+class InfrastructureSmokeIT extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
