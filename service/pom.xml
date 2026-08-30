@@ -151,6 +151,22 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
+        <!--
+            Spring Data JPA тянет за собой Hibernate, spring-orm и JpaTransactionManager.
+            Стоит он здесь не вместо starter-jdbc, а рядом с ним: часть модулей осталась
+            на голом SQL, и обе технологии работают поверх одного DataSource.
+
+            Практическое следствие — менеджер транзакций в приложении остаётся один,
+            JpaTransactionManager. Он умеет и то и другое: JdbcTemplate берёт соединение через
+            DataSourceUtils и попадает в ту же транзакцию, что и EntityManager. Объявлять рядом
+            DataSourceTransactionManager не нужно, и это была бы ошибка — на один запрос
+            получилось бы две независимые транзакции, которые коммитятся порознь.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
