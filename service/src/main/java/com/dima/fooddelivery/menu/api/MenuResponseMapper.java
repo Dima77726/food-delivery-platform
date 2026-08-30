@@ -37,7 +37,7 @@ public final class MenuResponseMapper {
         return response;
     }
 
-    public static ManagedMenuItem toManagedResponse(com.dima.fooddelivery.menu.domain.MenuItem item) {
+    public static ManagedMenuItem toManagedResponse(com.dima.fooddelivery.menu.domain.MenuItemView item) {
         return new ManagedMenuItem()
                 .id(item.id())
                 .categoryId(item.categoryId())
@@ -49,7 +49,7 @@ public final class MenuResponseMapper {
                 .archived(item.archived());
     }
 
-    public static ManagedMenuCategory toManagedResponse(com.dima.fooddelivery.menu.domain.MenuCategory category) {
+    public static ManagedMenuCategory toManagedResponse(com.dima.fooddelivery.menu.domain.MenuCategoryView category) {
         ManagedMenuCategory response = new ManagedMenuCategory()
                 .id(category.id())
                 .name(category.name())
@@ -61,7 +61,7 @@ public final class MenuResponseMapper {
         return response;
     }
 
-    private static MenuCategory toPublicResponse(com.dima.fooddelivery.menu.domain.MenuCategory category) {
+    private static MenuCategory toPublicResponse(com.dima.fooddelivery.menu.domain.MenuCategoryView category) {
         MenuCategory response = new MenuCategory()
                 .id(category.id())
                 .name(category.name());
@@ -71,7 +71,7 @@ public final class MenuResponseMapper {
         return response;
     }
 
-    private static MenuItem toPublicResponse(com.dima.fooddelivery.menu.domain.MenuItem item) {
+    private static MenuItem toPublicResponse(com.dima.fooddelivery.menu.domain.MenuItemView item) {
         return new MenuItem()
                 .id(item.id())
                 .name(item.name())

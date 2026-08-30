@@ -5,8 +5,8 @@ import com.dima.fooddelivery.cart.api.CartResponse;
 import com.dima.fooddelivery.cart.service.CartService;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
-import com.dima.fooddelivery.menu.domain.MenuCategory;
-import com.dima.fooddelivery.menu.domain.MenuItem;
+import com.dima.fooddelivery.menu.domain.MenuCategoryView;
+import com.dima.fooddelivery.menu.domain.MenuItemView;
 import com.dima.fooddelivery.menu.domain.RestaurantMenu;
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
@@ -32,8 +32,8 @@ class MenuManagementIT extends AbstractIntegrationTest {
     void shouldCreateCategoryWithItemAndShowItInPublicMenu() {
         Long restaurantId = testData.insertRestaurant();
 
-        MenuCategory category = menuService.createCategory(restaurantId, "Пицца", 1);
-        MenuItem item = menuService.createItem(
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Пицца", 1);
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Маргарита", "Классика", new BigDecimal("450.00"), 1
         );
 
@@ -67,15 +67,15 @@ class MenuManagementIT extends AbstractIntegrationTest {
     @Test
     void shouldAllowReusingNameAfterArchiving() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Пицца", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Пицца", 1);
 
-        MenuItem first = menuService.createItem(
+        MenuItemView first = menuService.createItem(
                 restaurantId, category.id(), "Пепперони", null, new BigDecimal("520.00"), 1
         );
 
         menuService.archiveItem(restaurantId, first.id());
 
-        MenuItem second = menuService.createItem(
+        MenuItemView second = menuService.createItem(
                 restaurantId, category.id(), "Пепперони", "Новый рецепт", new BigDecimal("560.00"), 1
         );
 
@@ -88,9 +88,9 @@ class MenuManagementIT extends AbstractIntegrationTest {
     @Test
     void shouldHideArchivedItemFromPublicMenuButKeepItForOwner() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Десерты", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Десерты", 1);
 
-        MenuItem item = menuService.createItem(
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Тирамису", null, new BigDecimal("260.00"), 1
         );
 
@@ -117,9 +117,9 @@ class MenuManagementIT extends AbstractIntegrationTest {
     void shouldNotAllowOrderingArchivedItem() {
         Long customerId = testData.insertCustomer();
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Супы", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Супы", 1);
 
-        MenuItem item = menuService.createItem(
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Борщ", null, new BigDecimal("300.00"), 1
         );
 
@@ -135,9 +135,9 @@ class MenuManagementIT extends AbstractIntegrationTest {
     void shouldNotAllowOrderingOutOfStockItem() {
         Long customerId = testData.insertCustomer();
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Салаты", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Салаты", 1);
 
-        MenuItem item = menuService.createItem(
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Цезарь", null, new BigDecimal("380.00"), 1
         );
 
@@ -159,9 +159,9 @@ class MenuManagementIT extends AbstractIntegrationTest {
     void shouldNotChangePriceInExistingCartWhenMenuPriceChanges() {
         Long customerId = testData.insertCustomer();
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Паста", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Паста", 1);
 
-        MenuItem item = menuService.createItem(
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Карбонара", null, new BigDecimal("500.00"), 1
         );
 
@@ -180,7 +180,7 @@ class MenuManagementIT extends AbstractIntegrationTest {
     @Test
     void shouldArchiveCategoryTogetherWithItsItems() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Закуски", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Закуски", 1);
 
         menuService.createItem(restaurantId, category.id(), "Брускетта", null, new BigDecimal("240.00"), 1);
         menuService.createItem(restaurantId, category.id(), "Оливки", null, new BigDecimal("180.00"), 2);
@@ -194,7 +194,7 @@ class MenuManagementIT extends AbstractIntegrationTest {
                 () -> assertTrue(publicMenu.categories().isEmpty(), "категория пропала из витрины"),
                 () -> assertTrue(managedMenu.categories().get(0).archived()),
                 () -> assertTrue(
-                        managedMenu.categories().get(0).items().stream().allMatch(MenuItem::archived),
+                        managedMenu.categories().get(0).items().stream().allMatch(MenuItemView::archived),
                         "блюда должны уйти в архив вместе с категорией"
                 )
         );
@@ -203,7 +203,7 @@ class MenuManagementIT extends AbstractIntegrationTest {
     @Test
     void shouldNotAddItemToArchivedCategory() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Гриль", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Гриль", 1);
 
         menuService.archiveCategory(restaurantId, category.id());
 
@@ -224,7 +224,7 @@ class MenuManagementIT extends AbstractIntegrationTest {
         Long ownRestaurantId = testData.insertRestaurant();
         Long foreignRestaurantId = testData.insertRestaurant();
 
-        MenuCategory foreignCategory = menuService.createCategory(foreignRestaurantId, "Чужая категория", 1);
+        MenuCategoryView foreignCategory = menuService.createCategory(foreignRestaurantId, "Чужая категория", 1);
 
         assertThrows(
                 ResourceNotFoundException.class,
@@ -237,9 +237,9 @@ class MenuManagementIT extends AbstractIntegrationTest {
     @Test
     void shouldRejectDoubleArchiving() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Роллы", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Роллы", 1);
 
-        MenuItem item = menuService.createItem(
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Филадельфия", null, new BigDecimal("430.00"), 1
         );
 
