@@ -1,6 +1,7 @@
 package com.dima.fooddelivery.payment.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
+import com.dima.fooddelivery.common.persistence.DataAccessErrors;
 import com.dima.fooddelivery.common.metrics.BusinessMetrics;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
@@ -16,7 +17,7 @@ import com.dima.fooddelivery.payment.domain.PaymentStatus;
 import com.dima.fooddelivery.payment.persistence.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,13 +65,13 @@ public class PaymentService {
         if (existing.isPresent()) {
             Payment payment = existing.get();
 
-            if (!payment.orderId().equals(orderId)) {
+            if (!payment.getOrderId().equals(orderId)) {
                 throw new BusinessRuleViolationException(
                         "Ключ идемпотентности уже использован для другого заказа"
                 );
             }
 
-            log.info("Повторный запрос оплаты по тому же ключу: paymentId={}", payment.id());
+            log.info("Повторный запрос оплаты по тому же ключу: paymentId={}", payment.getId());
 
             return PaymentResponseMapper.toResponse(payment);
         }
@@ -86,23 +87,41 @@ public class PaymentService {
         // и платил столько, сколько захочет.
         BigDecimal amount = order.totalAmount();
 
-        Long paymentId;
+        Payment payment = new Payment(orderId, customerId, amount, request.method(), request.idempotencyKey());
+
         try {
-            paymentId = paymentRepository.insert(
-                    orderId,
-                    customerId,
-                    amount,
-                    PaymentStatus.PENDING,
-                    request.method(),
-                    request.idempotencyKey()
+            paymentRepository.save(payment);
+
+            // Без сброса нарушение уникального ключа идемпотентности всплыло бы только
+            // на коммите, то есть за пределами этого try.
+            paymentRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            if (!DataAccessErrors.isUniqueViolation(exception)) {
+                throw exception;
+            }
+
+            // Сюда попадает только гонка: первый из двух одинаковых запросов успел вставить
+            // строку между нашей проверкой ключа выше и этой вставкой.
+            //
+            // JDBC-версия в этом месте дочитывала результат победителя и возвращала его.
+            // На JPA так сделать нельзя, и это не выбор, а ограничение: после исключения
+            // при flush персистентный контекст остаётся в неопределённом состоянии, а
+            // транзакция уже помечена rollback-only. Любой следующий запрос через тот же
+            // EntityManager либо упадёт, либо вернёт мусор, а прочитать в отдельной
+            // транзакции бессмысленно — эта всё равно откатится, и ответ клиенту
+            // не пережил бы коммит.
+            //
+            // Поэтому проигравший получает 409. Клиент повторяет запрос с тем же ключом
+            // идемпотентности, попадает на проверку в начале метода и получает результат
+            // победителя — то есть исход тот же, но на один заход позже.
+            log.info("Гонка запросов оплаты по одному ключу идемпотентности: orderId={}", orderId);
+
+            throw new BusinessRuleViolationException(
+                    "Оплата по этому ключу идемпотентности уже выполняется. Повторите запрос"
             );
-        } catch (DuplicateKeyException exception) {
-            // Гонка двух одинаковых запросов: первый успел вставить строку между нашей
-            // проверкой ключа и вставкой. Отдаём результат победителя.
-            return paymentRepository.findByIdempotencyKey(request.idempotencyKey())
-                    .map(PaymentResponseMapper::toResponse)
-                    .orElseThrow(() -> exception);
         }
+
+        Long paymentId = payment.getId();
 
         PaymentGateway.ChargeResult result = paymentGateway.charge(amount, request.method(), orderId);
 
@@ -156,18 +175,18 @@ public class PaymentService {
 
         Payment payment = succeeded.get();
 
-        paymentGateway.refund(payment.amount(), orderId);
+        paymentGateway.refund(payment.getAmount(), orderId);
 
-        int updated = paymentRepository.compareAndSetStatus(
-                payment.id(),
+        boolean refunded = paymentRepository.compareAndSetStatus(
+                payment.getId(),
                 PaymentStatus.SUCCEEDED,
                 PaymentStatus.REFUNDED,
                 null
         );
 
-        if (updated == 0) {
+        if (!refunded) {
             throw new BusinessRuleViolationException(
-                    "Не удалось оформить возврат по платежу с id=" + payment.id()
+                    "Не удалось оформить возврат по платежу с id=" + payment.getId()
                             + ". Возможно, возврат уже выполнен"
             );
         }
@@ -175,12 +194,12 @@ public class PaymentService {
         orderStatusService.recordEvent(
                 orderId,
                 OrderEventType.ORDER_REFUNDED,
-                "Возврат средств за отменённый заказ: " + payment.amount()
+                "Возврат средств за отменённый заказ: " + payment.getAmount()
         );
 
-        metrics.paymentRefunded(payment.method().name());
+        metrics.paymentRefunded(payment.getMethod().name());
 
-        log.info("Оформлен возврат: orderId={}, paymentId={}, amount={}", orderId, payment.id(), payment.amount());
+        log.info("Оформлен возврат: orderId={}, paymentId={}, amount={}", orderId, payment.getId(), payment.getAmount());
     }
 
     @Transactional(readOnly = true)

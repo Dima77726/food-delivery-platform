@@ -8,13 +8,13 @@ public final class UserResponseMapper {
 
     public static UserResponse toResponse(AppUser user) {
         return new UserResponse(
-                user.id(),
-                user.email(),
-                user.fullName(),
-                user.phone(),
-                user.enabled(),
-                user.roles(),
-                user.createdAt()
+                user.getId(),
+                user.getEmail(),
+                user.getFullName(),
+                user.getPhone(),
+                user.isEnabled(),
+                user.getRoles(),
+                user.getCreatedAt()
         );
     }
 

@@ -5,6 +5,7 @@ import com.dima.fooddelivery.audit.domain.AuditOutcome;
 import com.dima.fooddelivery.audit.persistence.AuditLogRepository;
 import com.dima.fooddelivery.common.security.CurrentUser;
 import com.dima.fooddelivery.common.web.RequestContext;
+import com.dima.fooddelivery.user.domain.AppUser;
 import com.dima.fooddelivery.user.persistence.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +44,7 @@ public class AuditService {
         // пользователя могут удалить, а запись обязана остаться читаемой.
         String actorEmail = actorId == null
                 ? null
-                : appUserRepository.findById(actorId).map(user -> user.email()).orElse(null);
+                : appUserRepository.findById(actorId).map(AppUser::getEmail).orElse(null);
 
         // Метка берётся из контекста, а не из аргументов — по той же причине, что и актор:
         // переданная вручную, она рано или поздно окажется не от того запроса.
