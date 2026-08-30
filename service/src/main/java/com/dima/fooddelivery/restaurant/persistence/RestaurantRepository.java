@@ -1,114 +1,40 @@
 package com.dima.fooddelivery.restaurant.persistence;
 
 import com.dima.fooddelivery.restaurant.domain.Restaurant;
-import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.core.namedparam.SqlParameterSource;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
-import java.util.Optional;
 
-@Repository
-@RequiredArgsConstructor
-public class RestaurantRepository {
-
-    private static final RowMapper<Restaurant> RESTAURANT = (rs, rowNum) -> new Restaurant(
-            rs.getLong("id"),
-            rs.getString("name"),
-            rs.getString("description"),
-            rs.getString("city"),
-            rs.getBoolean("is_active")
-    );
-
-    private static final String SELECT_RESTAURANT = """
-            SELECT id, name, description, city, is_active
-            FROM restaurant
-            """;
-
-    private final NamedParameterJdbcTemplate jdbc;
-
-    public List<Restaurant> findAll() {
-        return jdbc.query(SELECT_RESTAURANT + " ORDER BY id", RESTAURANT);
-    }
-
-    public Optional<Restaurant> findById(Long restaurantId) {
-        return jdbc.query(
-                SELECT_RESTAURANT + " WHERE id = :restaurantId",
-                new MapSqlParameterSource("restaurantId", restaurantId),
-                RESTAURANT
-        ).stream().findFirst();
-    }
-
-    public boolean existsById(Long restaurantId) {
-        Boolean exists = jdbc.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM restaurant WHERE id = :restaurantId)",
-                new MapSqlParameterSource("restaurantId", restaurantId),
-                Boolean.class
-        );
-
-        return Boolean.TRUE.equals(exists);
-    }
-
-    public Long insert(String name, String description, String city) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("name", name)
-                .addValue("description", description)
-                .addValue("city", city);
-
-        return jdbc.queryForObject(
-                """
-                        INSERT INTO restaurant (name, description, city, is_active)
-                        VALUES (:name, :description, :city, TRUE)
-                        RETURNING id
-                        """,
-                params,
-                Long.class
-        );
-    }
+/**
+ * Репозиторий ресторанов на Spring Data JPA.
+ *
+ * <p>Реализации нет и не будет: Spring Data создаёт её сама в виде прокси на старте
+ * приложения. {@link JpaRepository} приносит готовыми {@code findById}, {@code existsById},
+ * {@code save}, {@code delete} и постраничные чтения — ровно то, что в JDBC-версии
+ * этого репозитория занимало сотню строк рукописного SQL и RowMapper'ов.
+ *
+ * <p>Аннотация {@code @Repository} здесь не нужна: интерфейс находит сканер репозиториев
+ * Spring Data, а не сканер компонентов. Перевод исключений драйвера в
+ * {@code DataAccessException} тоже включён по умолчанию.
+ *
+ * <p>Сравнение с соседями по проекту:
+ * {@code OrderRepository} — Spring JDBC, весь SQL написан руками;
+ * {@code AuditLogRepository} — голый JDBC, руками написано ещё и получение соединения.
+ *
+ * @see com.dima.fooddelivery.restaurant.domain.Restaurant
+ */
+public interface RestaurantRepository extends JpaRepository<Restaurant, Long> {
 
     /**
-     * Частичное обновление: NULL в параметре означает «не менять».
+     * Запрос выводится из имени метода: {@code findAll} + {@code OrderByIdAsc}.
      *
-     * <p>COALESCE вместо сборки SQL из непустых полей — запрос остаётся одной константой,
-     * которую видно целиком. Ценой того, что стереть описание в NULL этим методом нельзя;
-     * для «очистить» клиент присылает пустую строку.
+     * <p>Отдельный метод понадобился ради предсказуемого порядка. Унаследованный
+     * {@code findAll()} не обещает никакого: в PostgreSQL строки без ORDER BY возвращаются
+     * в порядке физического размещения, и после первого же UPDATE витрина перетасовалась бы.
+     *
+     * <p>Ошибка в имени метода — не опечатка в строке, а падение на старте контекста:
+     * Spring Data не сможет разобрать имя и не создаст бин. В рукописном SQL такая же ошибка
+     * дожила бы до первого вызова в проде.
      */
-    public int update(Long restaurantId, String name, String description, String city) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("restaurantId", restaurantId)
-                .addValue("name", name)
-                .addValue("description", description)
-                .addValue("city", city);
-
-        return jdbc.update(
-                """
-                        UPDATE restaurant
-                        SET name = COALESCE(:name, name),
-                            description = COALESCE(:description, description),
-                            city = COALESCE(:city, city),
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = :restaurantId
-                        """,
-                params
-        );
-    }
-
-    public int setActive(Long restaurantId, boolean active) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("restaurantId", restaurantId)
-                .addValue("active", active);
-
-        return jdbc.update(
-                """
-                        UPDATE restaurant
-                        SET is_active = :active,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = :restaurantId
-                        """,
-                params
-        );
-    }
+    List<Restaurant> findAllByOrderByIdAsc();
 }
