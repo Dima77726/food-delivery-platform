@@ -349,13 +349,25 @@ public class GlobalExceptionHandler {
                 exception
         );
 
-        ApiErrorResponse response = new ApiErrorResponse(
-                HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(),
+        return response(
+                HttpStatus.INTERNAL_SERVER_ERROR,
                 exception.getMessage(),
+                request
+        );
+    }
+
+    private ResponseEntity<ApiErrorResponse> response(
+            HttpStatus status,
+            String message,
+            HttpServletRequest request
+            ) {
+        ApiErrorResponse body = new ApiErrorResponse(
+                status.value(),
+                status.getReasonPhrase(),
+                message,
                 request.getRequestURI()
         );
 
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        return ResponseEntity.status(status).body(body);
     }
 }
