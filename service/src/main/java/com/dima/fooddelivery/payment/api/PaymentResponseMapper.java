@@ -8,14 +8,14 @@ public final class PaymentResponseMapper {
 
     public static PaymentResponse toResponse(Payment payment) {
         return new PaymentResponse(
-                payment.id(),
-                payment.orderId(),
-                payment.customerId(),
-                payment.amount(),
-                payment.status(),
-                payment.method(),
-                payment.failureReason(),
-                payment.createdAt()
+                payment.getId(),
+                payment.getOrderId(),
+                payment.getCustomerId(),
+                payment.getAmount(),
+                payment.getStatus(),
+                payment.getMethod(),
+                payment.getFailureReason(),
+                payment.getCreatedAt()
         );
     }
 

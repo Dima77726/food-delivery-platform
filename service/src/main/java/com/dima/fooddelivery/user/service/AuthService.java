@@ -54,7 +54,7 @@ public class AuthService {
     public AuthTokenResponse login(LoginRequest request) {
         AppUser user = appUserRepository.findByEmail(request.email()).orElse(null);
 
-        String hashToCheck = user == null ? DUMMY_HASH : user.passwordHash();
+        String hashToCheck = user == null ? DUMMY_HASH : user.getPasswordHash();
         boolean passwordMatches = passwordEncoder.matches(request.password(), hashToCheck);
 
         if (user == null || !passwordMatches) {
@@ -65,13 +65,13 @@ public class AuthService {
             throw new BadCredentialsException("Неверный e-mail или пароль");
         }
 
-        if (!user.enabled()) {
-            log.warn("Попытка входа заблокированного пользователя: userId={}", user.id());
+        if (!user.isEnabled()) {
+            log.warn("Попытка входа заблокированного пользователя: userId={}", user.getId());
 
             throw new DisabledException("Учётная запись заблокирована");
         }
 
-        log.info("Успешный вход: userId={}", user.id());
+        log.info("Успешный вход: userId={}", user.getId());
 
         return issueToken(user);
     }

@@ -20,6 +20,11 @@ import org.springframework.boot.test.context.SpringBootTest;
         "preliquibase.enabled=false",
         "spring.sql.init.mode=never",
         "app.notification.dispatch-enabled=false",
+        // Единственное исключение из правила выше, и оно осознанное: проверка схемы
+        // Hibernate по определению требует соединения — сверить сущности с таблицами,
+        // не прочитав таблиц, невозможно. Здесь Liquibase выключен и схемы нет вовсе,
+        // так что валидировать всё равно нечего. В приложении ddl-auto остаётся validate.
+        "spring.jpa.hibernate.ddl-auto=none",
         "spring.datasource.url=jdbc:postgresql://localhost:1/unreachable-on-purpose"
 })
 class FoodDeliveryPlatformApplicationTests {

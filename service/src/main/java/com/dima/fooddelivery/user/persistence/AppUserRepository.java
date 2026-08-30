@@ -1,214 +1,146 @@
 package com.dima.fooddelivery.user.persistence;
 
 import com.dima.fooddelivery.user.domain.AppUser;
-import com.dima.fooddelivery.user.domain.UserRole;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.stereotype.Repository;
 
-import java.time.OffsetDateTime;
-import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
+/**
+ * Репозиторий пользователей на голом Hibernate: {@link EntityManager} и JPQL, без Spring Data.
+ *
+ * <p>Это третий из четырёх подходов, сосуществующих в проекте. Соседи для сравнения:
+ * {@code RestaurantRepository} и {@code MenuCategoryRepository} — интерфейсы Spring Data,
+ * реализацию которых генерирует фреймворк; {@code OrderRepository} — Spring JDBC с рукописным
+ * SQL; {@code AuditLogRepository} — голый JDBC.
+ *
+ * <p>Отличие от Spring Data ровно одно, и оно хорошо видно ниже: методы приходится писать
+ * самому. Всё остальное — те же сущности, тот же персистентный контекст, та же грязная
+ * проверка, те же транзакции. Spring Data не добавляет к JPA новой семантики, она пишет
+ * за вас вот этот класс.
+ *
+ * <p>{@code EntityManager} внедряется конструктором как обычная зависимость. Настоящий
+ * менеджер сюда не попадает: Spring подставляет прокси, который на каждый вызов находит
+ * экземпляр, привязанный к текущей транзакции. Без этого два метода одного сервиса работали бы
+ * с разными персистентными контекстами.
+ */
 @Repository
 @RequiredArgsConstructor
 public class AppUserRepository {
 
     /**
-     * Пользователь с ролями одним запросом. LEFT JOIN, а не отдельный запрос за ролями:
-     * пользователей читают на каждом запросе с токеном, и второй round-trip тут лишний.
+     * Пользователь вместе с ролями, одним запросом.
+     *
+     * <p>{@code LEFT JOIN FETCH} здесь — не оптимизация, а условие работоспособности.
+     * Коллекция ролей ленивая, а пользователь уезжает за границу транзакции: в JWT, в ответ
+     * API, в журнал аудита. При {@code open-in-view: false} обращение к незагруженным ролям
+     * там дало бы LazyInitializationException. Загруженная в транзакции коллекция остаётся
+     * доступной и после отсоединения сущности.
+     *
+     * <p>{@code LEFT}, а не {@code INNER}: пользователь без ролей — законное состояние,
+     * и он обязан находиться. Ровно тот же LEFT JOIN стоял в рукописном SQL до перехода.
      */
     private static final String SELECT_USER = """
-            SELECT
-                u.id, u.email, u.password_hash, u.full_name, u.phone,
-                u.is_enabled, u.created_at,
-                r.role
-            FROM app_user u
-            LEFT JOIN app_user_role r ON r.user_id = u.id
+            SELECT u FROM AppUser u
+            LEFT JOIN FETCH u.roles
             """;
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final EntityManager entityManager;
 
     public Optional<AppUser> findById(Long userId) {
-        return assembleSingle(jdbc.query(
-                SELECT_USER + " WHERE u.id = :userId",
-                new MapSqlParameterSource("userId", userId),
-                UserRowMappers.USER_ROW
-        ));
+        return single(entityManager
+                .createQuery(SELECT_USER + " WHERE u.id = :userId", AppUser.class)
+                .setParameter("userId", userId));
     }
 
     /** Поиск по e-mail без учёта регистра — так же, как работает уникальный индекс. */
     public Optional<AppUser> findByEmail(String email) {
-        return assembleSingle(jdbc.query(
-                SELECT_USER + " WHERE LOWER(u.email) = LOWER(:email)",
-                new MapSqlParameterSource("email", email),
-                UserRowMappers.USER_ROW
-        ));
+        return single(entityManager
+                .createQuery(SELECT_USER + " WHERE LOWER(u.email) = LOWER(:email)", AppUser.class)
+                .setParameter("email", email));
     }
 
     public boolean existsByEmail(String email) {
-        Boolean exists = jdbc.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM app_user WHERE LOWER(email) = LOWER(:email))",
-                new MapSqlParameterSource("email", email),
-                Boolean.class
-        );
+        Long count = entityManager
+                .createQuery("SELECT COUNT(u) FROM AppUser u WHERE LOWER(u.email) = LOWER(:email)", Long.class)
+                .setParameter("email", email)
+                .getSingleResult();
 
-        return Boolean.TRUE.equals(exists);
+        return count > 0;
     }
 
     public List<AppUser> findAll() {
-        return assembleAll(jdbc.query(SELECT_USER + " ORDER BY u.id", UserRowMappers.USER_ROW));
+        return entityManager
+                .createQuery(SELECT_USER + " ORDER BY u.id", AppUser.class)
+                .getResultList();
     }
 
-    public Long insert(String email, String passwordHash, String fullName, String phone) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("email", email)
-                .addValue("passwordHash", passwordHash)
-                .addValue("fullName", fullName)
-                .addValue("phone", phone);
+    /**
+     * Новый пользователь.
+     *
+     * <p>{@code persist}, а не {@code merge}: сущность заведомо новая, и merge выполнил бы
+     * лишний SELECT, проверяя, нет ли её уже в базе. Идентификатор проставляется сразу —
+     * стратегия IDENTITY вынуждает Hibernate выполнить INSERT немедленно.
+     */
+    public AppUser save(AppUser user) {
+        entityManager.persist(user);
 
-        return jdbc.queryForObject(
-                """
-                        INSERT INTO app_user (email, password_hash, full_name, phone)
-                        VALUES (:email, :passwordHash, :fullName, :phone)
-                        RETURNING id
-                        """,
-                params,
-                Long.class
-        );
+        return user;
     }
 
-    public int addRole(Long userId, UserRole role) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("userId", userId)
-                .addValue("role", role.name());
-
-        return jdbc.update(
-                """
-                        INSERT INTO app_user_role (user_id, role)
-                        VALUES (:userId, :role)
-                        ON CONFLICT (user_id, role) DO NOTHING
-                        """,
-                params
-        );
-    }
-
-    public int setEnabled(Long userId, boolean enabled) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("userId", userId)
-                .addValue("enabled", enabled);
-
-        return jdbc.update(
-                """
-                        UPDATE app_user
-                        SET is_enabled = :enabled,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = :userId
-                        """,
-                params
-        );
-    }
-
+    /**
+     * Управляет ли пользователь этим рестораном.
+     *
+     * <p>Запрос, а не обход коллекции {@code managedRestaurantIds}, и причина не в скорости.
+     * Метод вызывается из {@code @PreAuthorize}, то есть до того, как сервис откроет
+     * транзакцию: ленивая коллекция в этот момент недоступна в принципе. Запрос же
+     * выполняется и вне транзакции — Spring откроет для него отдельный EntityManager.
+     */
     public boolean managesRestaurant(Long userId, Long restaurantId) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("userId", userId)
-                .addValue("restaurantId", restaurantId);
+        Long count = entityManager
+                .createQuery("""
+                        SELECT COUNT(u) FROM AppUser u
+                        JOIN u.managedRestaurantIds managedId
+                        WHERE u.id = :userId AND managedId = :restaurantId
+                        """, Long.class)
+                .setParameter("userId", userId)
+                .setParameter("restaurantId", restaurantId)
+                .getSingleResult();
 
-        Boolean exists = jdbc.queryForObject(
-                """
-                        SELECT EXISTS (
-                            SELECT 1 FROM restaurant_manager
-                            WHERE user_id = :userId AND restaurant_id = :restaurantId
-                        )
-                        """,
-                params,
-                Boolean.class
-        );
-
-        return Boolean.TRUE.equals(exists);
+        return count > 0;
     }
 
     public List<Long> findManagedRestaurantIds(Long userId) {
-        return jdbc.query(
-                "SELECT restaurant_id FROM restaurant_manager WHERE user_id = :userId ORDER BY restaurant_id",
-                new MapSqlParameterSource("userId", userId),
-                (rs, rowNum) -> rs.getLong("restaurant_id")
-        );
+        return entityManager
+                .createQuery("""
+                        SELECT managedId FROM AppUser u
+                        JOIN u.managedRestaurantIds managedId
+                        WHERE u.id = :userId
+                        ORDER BY managedId
+                        """, Long.class)
+                .setParameter("userId", userId)
+                .getResultList();
     }
 
-    public int addRestaurantManager(Long userId, Long restaurantId) {
-        SqlParameterSource params = new MapSqlParameterSource()
-                .addValue("userId", userId)
-                .addValue("restaurantId", restaurantId);
-
-        return jdbc.update(
-                """
-                        INSERT INTO restaurant_manager (user_id, restaurant_id)
-                        VALUES (:userId, :restaurantId)
-                        ON CONFLICT (user_id, restaurant_id) DO NOTHING
-                        """,
-                params
-        );
+    /**
+     * Немедленно отправляет накопленные изменения в базу.
+     *
+     * <p>Нужен там, где на ответ базы опирается бизнес-логика: уникальность e-mail проверяет
+     * индекс {@code uq_app_user_email_lower}, и без сброса нарушение всплыло бы только
+     * на коммите — то есть за пределами метода, который умеет его объяснить.
+     */
+    public void flush() {
+        entityManager.flush();
     }
 
-    private Optional<AppUser> assembleSingle(List<UserRow> rows) {
-        return assembleAll(rows).stream().findFirst();
-    }
-
-    private List<AppUser> assembleAll(List<UserRow> rows) {
-        Map<Long, UserAccumulator> byId = new LinkedHashMap<>();
-
-        for (UserRow row : rows) {
-            UserAccumulator accumulator = byId.computeIfAbsent(row.id(), id -> new UserAccumulator(row));
-
-            if (row.role() != null) {
-                accumulator.roles.add(UserRole.fromDbValue(row.role()));
-            }
-        }
-
-        return byId.values().stream().map(UserAccumulator::toUser).toList();
-    }
-
-    record UserRow(
-            Long id,
-            String email,
-            String passwordHash,
-            String fullName,
-            String phone,
-            boolean enabled,
-            OffsetDateTime createdAt,
-            String role
-    ) {
-    }
-
-    private static final class UserAccumulator {
-
-        private final UserRow first;
-        private final Set<UserRole> roles = EnumSet.noneOf(UserRole.class);
-
-        private UserAccumulator(UserRow first) {
-            this.first = first;
-        }
-
-        private AppUser toUser() {
-            return new AppUser(
-                    first.id(),
-                    first.email(),
-                    first.passwordHash(),
-                    first.fullName(),
-                    first.phone(),
-                    first.enabled(),
-                    // Set.copyOf, а не EnumSet.copyOf: последний бросает исключение на пустом
-                    // множестве, а пользователь без ролей — законное состояние.
-                    Set.copyOf(roles),
-                    first.createdAt()
-            );
-        }
+    /**
+     * {@code getSingleResult} здесь не годится: он бросает исключение, когда ничего
+     * не найдено, а «пользователя нет» — обычный ответ, а не сбой.
+     */
+    private Optional<AppUser> single(TypedQuery<AppUser> query) {
+        return query.getResultList().stream().findFirst();
     }
 }

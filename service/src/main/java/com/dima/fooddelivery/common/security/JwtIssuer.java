@@ -37,13 +37,13 @@ public class JwtIssuer {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(securityProperties.accessTokenTtl());
 
-        List<String> roles = user.roles().stream().map(UserRole::name).toList();
+        List<String> roles = user.getRoles().stream().map(UserRole::name).toList();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(securityProperties.issuer())
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
-                .subject(String.valueOf(user.id()))
+                .subject(String.valueOf(user.getId()))
                 .claim(ROLES_CLAIM, roles)
                 .build();
 

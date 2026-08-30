@@ -2,14 +2,17 @@ package com.dima.fooddelivery.restaurant.api;
 
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
 import com.jayway.jsonpath.JsonPath;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -28,6 +31,12 @@ class RestaurantManagementApiIT extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void shouldCreateRestaurantAndMakeCreatorItsManager() throws Exception {
@@ -113,6 +122,19 @@ class RestaurantManagementApiIT extends AbstractIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    /**
+     * Проверка ответа здесь недостаточна, и это следствие перехода модуля на JPA.
+     *
+     * <p>Закрытие ресторана больше не выполняет UPDATE само: сервис лишь вызывает сеттер
+     * на управляемой сущности, а SQL Hibernate отправит при сбросе контекста. Тест
+     * откатывается и до коммита не доходит, так что проверка одного лишь JSON прошла бы
+     * и в том случае, если бы правка навсегда осталась в памяти. С прежней JDBC-реализацией
+     * такой дыры не было — там UPDATE уходил в базу сразу.
+     *
+     * <p>Поэтому контекст сбрасывается явно, а результат читается в обход Hibernate, голым
+     * SQL. Заодно это показывает, что JPA и JDBC работают в одной транзакции: JdbcTemplate
+     * видит запись, сделанную EntityManager, но только после flush.
+     */
     @Test
     void shouldCloseAndReopenRestaurant() throws Exception {
         String ownerToken = registerAndGetToken("RESTAURANT_OWNER");
@@ -123,10 +145,26 @@ class RestaurantManagementApiIT extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.active").value(false));
 
+        assertEquals(Boolean.FALSE, readActiveFlagBypassingHibernate(restaurantId),
+                "закрытие обязано доехать до базы, а не остаться в контексте персистентности");
+
         mockMvc.perform(post("/api/v1/restaurants/{id}/open", restaurantId)
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.active").value(true));
+
+        assertEquals(Boolean.TRUE, readActiveFlagBypassingHibernate(restaurantId),
+                "открытие обязано доехать до базы");
+    }
+
+    private Boolean readActiveFlagBypassingHibernate(long restaurantId) {
+        entityManager.flush();
+
+        return jdbcTemplate.queryForObject(
+                "SELECT is_active FROM restaurant WHERE id = ?",
+                Boolean.class,
+                restaurantId
+        );
     }
 
     @Test

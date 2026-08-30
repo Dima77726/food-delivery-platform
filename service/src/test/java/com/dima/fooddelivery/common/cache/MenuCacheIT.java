@@ -2,9 +2,10 @@ package com.dima.fooddelivery.common.cache;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.menu.domain.MenuCategory;
-import com.dima.fooddelivery.menu.domain.MenuItem;
+import com.dima.fooddelivery.menu.domain.MenuCategoryView;
+import com.dima.fooddelivery.menu.domain.MenuItemView;
 import com.dima.fooddelivery.menu.domain.RestaurantMenu;
-import com.dima.fooddelivery.menu.persistence.MenuRepository;
+import com.dima.fooddelivery.menu.persistence.MenuCategoryRepository;
 import com.dima.fooddelivery.menu.service.MenuService;
 import com.dima.fooddelivery.restaurant.service.RestaurantService;
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
@@ -53,7 +54,7 @@ class MenuCacheIT extends AbstractIntegrationTest {
     private RestaurantService restaurantService;
 
     @Autowired
-    private MenuRepository menuRepository;
+    private MenuCategoryRepository menuCategoryRepository;
 
     @Autowired
     private CacheManager cacheManager;
@@ -115,13 +116,16 @@ class MenuCacheIT extends AbstractIntegrationTest {
     @Test
     void shouldServeSecondMenuReadFromCache() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Пицца", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Пицца", 1);
         menuService.createItem(restaurantId, category.id(), "Маргарита", null, new BigDecimal("450.00"), 1);
 
         awaitMenuCached(restaurantId);
 
-        // В обход сервиса: кэш об этом изменении не узнает.
-        menuRepository.insertItem(category.id(), "Пепперони", null, new BigDecimal("520.00"), 2);
+        // В обход сервиса: кэш об этом изменении не узнает. Работа идёт через репозиторий,
+        // то есть блюдо добавляется в сам агрегат и уезжает в базу каскадом от категории.
+        MenuCategory managedCategory = menuCategoryRepository.findById(category.id()).orElseThrow();
+        managedCategory.addItem("Пепперони", null, new BigDecimal("520.00"), 2);
+        menuCategoryRepository.saveAndFlush(managedCategory);
 
         assertEquals(
                 1,
@@ -133,7 +137,7 @@ class MenuCacheIT extends AbstractIntegrationTest {
     @Test
     void shouldEvictMenuCacheWhenItemAdded() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Пицца", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Пицца", 1);
         menuService.createItem(restaurantId, category.id(), "Маргарита", null, new BigDecimal("450.00"), 1);
 
         awaitMenuCached(restaurantId);
@@ -150,8 +154,8 @@ class MenuCacheIT extends AbstractIntegrationTest {
     @Test
     void shouldEvictMenuCacheWhenItemArchived() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Десерты", 1);
-        MenuItem item = menuService.createItem(
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Десерты", 1);
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Тирамису", null, new BigDecimal("260.00"), 1
         );
 
@@ -169,8 +173,8 @@ class MenuCacheIT extends AbstractIntegrationTest {
     @Test
     void shouldEvictMenuCacheWhenPriceChanged() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Паста", 1);
-        MenuItem item = menuService.createItem(
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Паста", 1);
+        MenuItemView item = menuService.createItem(
                 restaurantId, category.id(), "Карбонара", null, new BigDecimal("500.00"), 1
         );
 
@@ -237,13 +241,13 @@ class MenuCacheIT extends AbstractIntegrationTest {
     @Test
     void shouldRoundTripDomainTypesThroughRedisWithoutLosingPrecision() {
         Long restaurantId = testData.insertRestaurant();
-        MenuCategory category = menuService.createCategory(restaurantId, "Паста", 1);
+        MenuCategoryView category = menuService.createCategory(restaurantId, "Паста", 1);
         menuService.createItem(restaurantId, category.id(), "Карбонара", "Описание", new BigDecimal("499.99"), 1);
 
         awaitMenuCached(restaurantId);
 
         RestaurantMenu fromCache = menuService.getRestaurantMenu(restaurantId);
-        MenuItem item = fromCache.categories().get(0).items().get(0);
+        MenuItemView item = fromCache.categories().get(0).items().get(0);
 
         assertAll(
                 () -> assertEquals(0, new BigDecimal("499.99").compareTo(item.price())),

@@ -26,6 +26,12 @@ import java.util.List;
  * <p>Публичный вход для других модулей — {@link #requireActiveRestaurant(Long)}. Модуль Cart
  * обращается сюда, а не в таблицу {@code restaurant} напрямую: правило «в закрытом ресторане
  * нельзя заказывать» принадлежит этому модулю и должно меняться в одном месте.
+ *
+ * <p>Доступ к данным здесь идёт через Spring Data JPA, и главное отличие от соседних модулей
+ * видно в методах изменения: ни одного UPDATE. Загруженная в транзакции сущность управляемая,
+ * Hibernate помнит её исходное состояние и на коммите сам сравнивает его с текущим — это
+ * называется грязной проверкой (dirty checking). Достаточно вызвать сеттер. Для сравнения,
+ * в {@code OrderService} рядом каждый UPDATE написан руками и виден целиком.
  */
 @Slf4j
 @Service
@@ -42,11 +48,16 @@ public class RestaurantService {
      * <p>Ключ константный, потому что список один на всех: параметров у метода нет,
      * а ключ по умолчанию для метода без аргументов и так был бы SimpleKey.EMPTY.
      * Явная константа читается понятнее в @CacheEvict.
+     *
+     * <p>В Redis уезжают отсоединённые (detached) сущности: транзакция к моменту сериализации
+     * уже закрыта. Для ресторана это безопасно, потому что связей у него нет. Класть в кэш
+     * сущность с ленивой коллекцией было бы миной — сериализатор дёрнул бы её за пределами
+     * транзакции и получил LazyInitializationException.
      */
     @Cacheable(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional(readOnly = true)
     public List<Restaurant> getAllRestaurants() {
-        return restaurantRepository.findAll();
+        return restaurantRepository.findAllByOrderByIdAsc();
     }
 
     /**
@@ -55,30 +66,62 @@ public class RestaurantService {
      * <p>Два действия слиты в одно намеренно. Если бы назначение было отдельным вызовом,
      * между созданием и назначением существовал бы ресторан без хозяина — и добраться до него
      * мог бы только администратор.
+     *
+     * <p>Перечитывать созданное из базы, как делала JDBC-версия этого метода, больше не нужно:
+     * {@code save} возвращает ту же сущность с проставленным идентификатором и отметками
+     * времени из {@code @PrePersist}.
      */
     @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant createRestaurant(String name, String description, String city) {
-        Long restaurantId = restaurantRepository.insert(name.trim(), description, city.trim());
+        Restaurant restaurant = restaurantRepository.save(
+                new Restaurant(name.trim(), description, city.trim())
+        );
 
         Long creatorId = currentUser.requireId();
-        userService.assignRestaurantManager(creatorId, restaurantId);
+        userService.assignRestaurantManager(creatorId, restaurant.getId());
 
-        log.info("Создан ресторан: restaurantId={}, ownerId={}", restaurantId, creatorId);
+        log.info("Создан ресторан: restaurantId={}, ownerId={}", restaurant.getId(), creatorId);
 
-        return requireRestaurant(restaurantId);
+        return restaurant;
     }
 
+    /**
+     * Частичное обновление: null в параметре означает «не менять».
+     *
+     * <p>В JDBC-версии это же правило выражал COALESCE внутри UPDATE. Здесь оно стало
+     * обычными условиями на языке, и разница не только в синтаксисе: правило видно там же,
+     * где живёт остальная логика, а не внутри строки с SQL. Ограничение осталось прежним —
+     * стереть описание в null через этот метод нельзя, для очистки клиент шлёт пустую строку.
+     *
+     * <p>{@code save} в конце не вызывается, и это не забывчивость. Сущность управляемая,
+     * Hibernate заметит изменения сам и отправит UPDATE при сбросе контекста — на коммите
+     * или перед ближайшим запросом к той же таблице.
+     */
     @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant updateRestaurant(Long restaurantId, String name, String description, String city) {
-        requireRestaurant(restaurantId);
+        // Вызов соседнего метода этого же класса идёт напрямую, минуя прокси Spring,
+        // поэтому его readOnly = true здесь не применяется и сущность остаётся изменяемой.
+        // Если бы readOnly сработал, Hibernate перевёл бы контекст в FlushMode.MANUAL
+        // и правки молча не доехали бы до базы: ни ошибки, ни UPDATE.
+        Restaurant restaurant = requireRestaurant(restaurantId);
 
-        restaurantRepository.update(restaurantId, trimOrNull(name), description, trimOrNull(city));
+        if (name != null) {
+            restaurant.setName(name.trim());
+        }
+
+        if (description != null) {
+            restaurant.setDescription(description);
+        }
+
+        if (city != null) {
+            restaurant.setCity(city.trim());
+        }
 
         log.info("Обновлён ресторан: restaurantId={}", restaurantId);
 
-        return requireRestaurant(restaurantId);
+        return restaurant;
     }
 
     /**
@@ -91,13 +134,13 @@ public class RestaurantService {
     @CacheEvict(cacheNames = CacheNames.RESTAURANTS, key = "'all'")
     @Transactional
     public Restaurant setActive(Long restaurantId, boolean active) {
-        requireRestaurant(restaurantId);
+        Restaurant restaurant = requireRestaurant(restaurantId);
 
-        restaurantRepository.setActive(restaurantId, active);
+        restaurant.setActive(active);
 
         log.info("Изменён приём заказов: restaurantId={}, active={}", restaurantId, active);
 
-        return requireRestaurant(restaurantId);
+        return restaurant;
     }
 
     /**
@@ -127,7 +170,7 @@ public class RestaurantService {
     public Restaurant requireActiveRestaurant(Long restaurantId) {
         Restaurant restaurant = requireRestaurant(restaurantId);
 
-        if (!restaurant.active()) {
+        if (!restaurant.isActive()) {
             log.warn("Ресторан недоступен для заказов: restaurantId={}", restaurantId);
 
             throw new BusinessRuleViolationException(
@@ -136,9 +179,5 @@ public class RestaurantService {
         }
 
         return restaurant;
-    }
-
-    private String trimOrNull(String value) {
-        return value == null ? null : value.trim();
     }
 }

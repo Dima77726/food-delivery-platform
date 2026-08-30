@@ -2,12 +2,13 @@ package com.dima.fooddelivery.user.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
+import com.dima.fooddelivery.common.persistence.DataAccessErrors;
 import com.dima.fooddelivery.user.domain.AppUser;
 import com.dima.fooddelivery.user.domain.UserRole;
 import com.dima.fooddelivery.user.persistence.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,10 @@ import java.util.List;
 
 /**
  * Модуль User: создание пользователей, роли, привязка управляющих к ресторанам.
+ *
+ * <p>Работает поверх Hibernate, но без Spring Data — репозиторий написан руками, см.
+ * {@link AppUserRepository}. Изменения здесь, как и в остальных JPA-модулях, идут грязной
+ * проверкой: вызов сеттера, а не UPDATE.
  */
 @Slf4j
 @Service
@@ -45,15 +50,26 @@ public class UserService {
             throw new BusinessRuleViolationException("Роль ADMIN не может быть получена при регистрации");
         }
 
-        Long userId;
+        AppUser user = new AppUser(
+                email.trim(),
+                passwordEncoder.encode(rawPassword),
+                fullName.trim(),
+                phone
+        );
+
+        user.grantRole(role);
+
         try {
-            userId = appUserRepository.insert(
-                    email.trim(),
-                    passwordEncoder.encode(rawPassword),
-                    fullName.trim(),
-                    phone
-            );
-        } catch (DuplicateKeyException exception) {
+            appUserRepository.save(user);
+
+            // Сброс обязателен: без него нарушение уникальности всплыло бы только при коммите,
+            // за пределами этого try, и пользователь получил бы 500 вместо понятного ответа.
+            appUserRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            if (!DataAccessErrors.isUniqueViolation(exception)) {
+                throw exception;
+            }
+
             // Уникальность e-mail проверяет база: предварительный SELECT не спасал бы
             // от двух одновременных регистраций с одним адресом.
             log.warn("Регистрация с уже занятым e-mail: email={}", email);
@@ -61,11 +77,9 @@ public class UserService {
             throw new BusinessRuleViolationException("Пользователь с e-mail " + email + " уже зарегистрирован");
         }
 
-        appUserRepository.addRole(userId, role);
+        log.info("Зарегистрирован пользователь: userId={}, role={}", user.getId(), role);
 
-        log.info("Зарегистрирован пользователь: userId={}, role={}", userId, role);
-
-        return requireUser(userId);
+        return user;
     }
 
     @Transactional(readOnly = true)
@@ -81,22 +95,26 @@ public class UserService {
 
     @Transactional
     public AppUser grantRole(Long userId, UserRole role) {
-        requireUser(userId);
-        appUserRepository.addRole(userId, role);
+        AppUser user = requireUser(userId);
+
+        user.grantRole(role);
+        appUserRepository.flush();
 
         log.info("Пользователю выдана роль: userId={}, role={}", userId, role);
 
-        return requireUser(userId);
+        return user;
     }
 
     @Transactional
     public AppUser setEnabled(Long userId, boolean enabled) {
-        requireUser(userId);
-        appUserRepository.setEnabled(userId, enabled);
+        AppUser user = requireUser(userId);
+
+        user.setEnabled(enabled);
+        appUserRepository.flush();
 
         log.info("Изменён доступ пользователя: userId={}, enabled={}", userId, enabled);
 
-        return requireUser(userId);
+        return user;
     }
 
     /**
@@ -107,10 +125,11 @@ public class UserService {
      */
     @Transactional
     public void assignRestaurantManager(Long userId, Long restaurantId) {
-        requireUser(userId);
+        AppUser user = requireUser(userId);
 
-        appUserRepository.addRole(userId, UserRole.RESTAURANT_OWNER);
-        appUserRepository.addRestaurantManager(userId, restaurantId);
+        user.grantRole(UserRole.RESTAURANT_OWNER);
+        user.addManagedRestaurant(restaurantId);
+        appUserRepository.flush();
 
         log.info("Пользователь назначен управляющим рестораном: userId={}, restaurantId={}", userId, restaurantId);
     }
