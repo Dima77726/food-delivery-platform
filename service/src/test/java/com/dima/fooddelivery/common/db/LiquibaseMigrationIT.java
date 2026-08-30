@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Проверяет, что миграции доезжают до последнего changeset и что денежные констрейнты реально
  * работают на уровне базы, а не только в коде.
  */
-class LiquibaseMigrationTest extends AbstractIntegrationTest {
+class LiquibaseMigrationIT extends AbstractIntegrationTest {
 
     private static final String LATEST_CHANGESET_ID = "023-add-menu-archiving";
 

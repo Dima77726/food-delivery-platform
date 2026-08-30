@@ -126,6 +126,11 @@ services:
       dockerfile: Dockerfile
     container_name: food-delivery-app
     restart: unless-stopped
+    # По умолчанию Docker добивает контейнер через 10 секунд после SIGTERM. Приложение
+    # завершается штатно и ждёт текущую работу до 20 секунд (spring.lifecycle
+    # .timeout-per-shutdown-phase), поэтому запас здесь больше — иначе штатное завершение
+    # обрывалось бы ровно так же, как без него, только незаметнее.
+    stop_grace_period: 30s
     depends_on:
       kafka:
         condition: service_healthy
