@@ -67,6 +67,33 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Курсор, который приложение не выдавало: обрезанный, переписанный руками или оставшийся
+     * от предыдущей версии формата. Ответ 400 и без подробностей о внутреннем устройстве —
+     * клиенту здесь нечего чинить, кроме собственного кода: правильный курсор он получает
+     * в поле {@code nextCursor} предыдущего ответа.
+     */
+    @ExceptionHandler(InvalidCursorException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidCursor(
+            InvalidCursorException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Некорректный курсор: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                "Некорректный курсор: используйте значение nextCursor из предыдущего ответа",
+                request.getRequestURI()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    /**
      * Неверные учётные данные. Формулировка ответа намеренно не различает «нет пользователя»
      * и «неверный пароль»: иначе форма входа превращается в способ проверить,
      * зарегистрирован ли адрес.
