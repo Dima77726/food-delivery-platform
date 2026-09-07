@@ -78,6 +78,30 @@ public class DeliveryService {
         return DeliveryResponseMapper.toResponse(requireCourierDelivery(courierId, deliveryId));
     }
 
+    /**
+     * Доставка по идентификатору заказа.
+     *
+     * <p>Публичный вход для модуля Tracking: чтобы показать клиенту, где едет его заказ, нужно
+     * превратить orderId в deliveryId, а таблица доставок принадлежит этому модулю. Проверку,
+     * что заказ действительно клиента, делает вызывающий — здесь о правах ничего не известно,
+     * и решать за него было бы неверно.
+     *
+     * @throws ResourceNotFoundException если доставки для заказа ещё нет
+     */
+    @Transactional(readOnly = true)
+    public DeliveryResponse getDeliveryForOrder(Long orderId) {
+        return DeliveryResponseMapper.toResponse(
+                deliveryRepository.findByOrderId(orderId)
+                        .orElseThrow(() -> {
+                            log.warn("Доставка для заказа не найдена: orderId={}", orderId);
+
+                            return new ResourceNotFoundException(
+                                    "Доставка для заказа с id=" + orderId + " ещё не создана"
+                            );
+                        })
+        );
+    }
+
     @Transactional
     public DeliveryResponse assignCourierToDelivery(Long courierId, Long deliveryId) {
         Delivery delivery = requireDelivery(deliveryId);

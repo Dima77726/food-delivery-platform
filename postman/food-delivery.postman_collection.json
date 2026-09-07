@@ -2,7 +2,7 @@
   "info": {
     "name": "Food Delivery Platform API",
     "_postman_id": "8f3c1a52-4d6b-4a19-9c7e-2b5e1f0a7d34",
-    "description": "Полный REST API платформы доставки еды: 12 папок, 50 запросов.\n\n## Как пользоваться\n\n1. Поднимите окружение: `docker compose up -d` (или запустите приложение из IDE — тогда база, Redis и Kafka всё равно нужны из compose).\n2. Импортируйте окружение `food-delivery.postman_environment.json` и выберите его.\n3. Выполните папку **01. Аутентификация** — регистрации и входы сохранят токены и идентификаторы в переменные коллекции.\n4. Дальше папки идут в том же порядке, что и жизненный цикл заказа: создать ресторан → наполнить меню → корзина → заказ → оплата → готовка → доставка.\n\n## Что заполняется само\n\nТесты запросов сохраняют в переменные коллекции: `customerToken`, `ownerToken`, `courierToken`, `adminToken`, `customerId`, `ownerId`, `courierId`, `restaurantId`, `categoryId`, `menuItemId`, `cartItemId`, `orderId`, `paymentId`, `deliveryId`.\n\nРуками задавать нужно только пароли и адрес сервера.\n\n## Токены по ролям\n\nАутентификация задана на уровне папок, а не коллекции: у платформы четыре роли, и один общий токен заставлял бы переключать его вручную перед каждым запросом. Папка «Корзина» всегда ходит под `customerToken`, «Управление меню» — под `ownerToken`, «Доставка» — под `courierToken`, «Администрирование» — под `adminToken`.\n\nТокен живёт час. Когда начнёт прилетать 401 — повторите нужный вход из папки 01.\n\n## Администратор\n\nЧерез регистрацию роль ADMIN не выдаётся. Первая учётка создаётся при старте приложения из переменных окружения `APP_ADMIN_EMAIL` и `APP_ADMIN_PASSWORD`; если они не заданы, администратора нет вовсе. Те же значения впишите в переменные `adminEmail` и `adminPassword`.\n\n## Сквозная метка запроса\n\nКаждый запрос отправляет заголовок `X-Correlation-Id` и получает его обратно. По этой метке запрос прослеживается через логи приложения, событие в outbox, сообщение Kafka и работу потребителя. Значение видно во вкладке Headers ответа — его удобно грепать в `docker compose logs`.\n\n## Коды ответов\n\n- `400` — не прошла валидация запроса\n- `401` — нет токена или он истёк\n- `403` — роль есть, но ресурс чужой\n- `404` — ресурс не найден\n- `409` — операция невозможна в текущем статусе (например, принять неоплаченный заказ)\n",
+    "description": "Полный REST API платформы доставки еды: 17 папок, 77 запросов.\n\nПапки 12-16 работают только при включённых дополнительных хранилищах — см. раздел о профиле `stores` в README проекта. При выключенном хранилище маршрута не существует и ответ будет 404.\n\n## Как пользоваться\n\n1. Поднимите окружение: `docker compose up -d` (или запустите приложение из IDE — тогда база, Redis и Kafka всё равно нужны из compose).\n2. Импортируйте окружение `food-delivery.postman_environment.json` и выберите его.\n3. Выполните папку **01. Аутентификация** — регистрации и входы сохранят токены и идентификаторы в переменные коллекции.\n4. Дальше папки идут в том же порядке, что и жизненный цикл заказа: создать ресторан → наполнить меню → корзина → заказ → оплата → готовка → доставка.\n\n## Что заполняется само\n\nТесты запросов сохраняют в переменные коллекции: `customerToken`, `ownerToken`, `courierToken`, `adminToken`, `customerId`, `ownerId`, `courierId`, `restaurantId`, `categoryId`, `menuItemId`, `cartItemId`, `orderId`, `paymentId`, `deliveryId`.\n\nРуками задавать нужно только пароли и адрес сервера.\n\n## Токены по ролям\n\nАутентификация задана на уровне папок, а не коллекции: у платформы четыре роли, и один общий токен заставлял бы переключать его вручную перед каждым запросом. Папка «Корзина» всегда ходит под `customerToken`, «Управление меню» — под `ownerToken`, «Доставка» — под `courierToken`, «Администрирование» — под `adminToken`.\n\nТокен живёт час. Когда начнёт прилетать 401 — повторите нужный вход из папки 01.\n\n## Администратор\n\nЧерез регистрацию роль ADMIN не выдаётся. Первая учётка создаётся при старте приложения из переменных окружения `APP_ADMIN_EMAIL` и `APP_ADMIN_PASSWORD`; если они не заданы, администратора нет вовсе. Те же значения впишите в переменные `adminEmail` и `adminPassword`.\n\n## Сквозная метка запроса\n\nКаждый запрос отправляет заголовок `X-Correlation-Id` и получает его обратно. По этой метке запрос прослеживается через логи приложения, событие в outbox, сообщение Kafka и работу потребителя. Значение видно во вкладке Headers ответа — его удобно грепать в `docker compose logs`.\n\n## Коды ответов\n\n- `400` — не прошла валидация запроса\n- `401` — нет токена или он истёк\n- `403` — роль есть, но ресурс чужой\n- `404` — ресурс не найден\n- `409` — операция невозможна в текущем статусе (например, принять неоплаченный заказ)\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -195,6 +195,11 @@
     },
     {
       "key": "resourceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reviewId",
       "value": "",
       "type": "string"
     }
@@ -2861,6 +2866,148 @@
               }
             }
           ]
+        },
+        {
+          "name": "Продажи всей платформы",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/analytics/sales?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Тот же отчёт, что у ресторана, но без фильтра по нему. Читает больше данных, поэтому и лежит под админским префиксом."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Переиндексировать витрину",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/search/reindex",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "search",
+                "reindex"
+              ]
+            },
+            "description": "Перестраивает поисковый индекс из PostgreSQL, не дожидаясь расписания. Заодно убирает из индекса документы исчезнувших ресторанов и блюд."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Догнать граф рекомендаций",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/recommendations/project",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "recommendations",
+                "project"
+              ]
+            },
+            "description": "Одна пачка заказов из PostgreSQL в граф. Возвращает, сколько заказов прочитано; ноль означает, что граф уже в актуальном состоянии."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Перестроить граф рекомендаций",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/recommendations/rebuild",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "recommendations",
+                "rebuild"
+              ]
+            },
+            "description": "Стирает граф и строит его заново по всем заказам. Операция для случая, когда поменялась сама модель графа: догонять проекцией старые узлы бессмысленно."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ],
       "description": "Путь /api/v1/admin/** закрыт ролью ADMIN дважды: в цепочке фильтров и аннотацией на контроллере.",
@@ -2874,6 +3021,604 @@
           }
         ]
       }
+    },
+    {
+      "name": "12. Отзывы (MongoDB)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nОтзыв можно оставить только о своём доставленном заказе, и ровно один раз: второй упрётся в уникальный индекс по заказу и вернёт 409.\n\nЧтение отзывов и сводки открыто без токена — это часть витрины.",
+      "item": [
+        {
+          "name": "Оставить отзыв",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "review"
+              ]
+            },
+            "description": "Заказ должен быть в статусе DELIVERED. Оценки блюд и метки необязательны: схема документа гибкая, и всё, кроме общей оценки, можно не присылать.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Привезли горячим, курьер вежливый\",\n  \"dishes\": [\n    {\n      \"menuItemId\": \"{{menuItemId}}\",\n      \"menuItemName\": \"Пицца\",\n      \"rating\": 5\n    }\n  ],\n  \"tags\": [\n    \"быстро\",\n    \"вкусно\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('reviewId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Отзывы о ресторане",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/reviews?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Свежие сверху. Листание постраничное, а не курсорное: отзывы читают глазами, зато общее число нужно показать всегда."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Сводка по отзывам",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/reviews/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "reviews",
+                "summary"
+              ]
+            },
+            "description": "Среднее, гистограмма оценок и самые частые метки — один aggregation pipeline со стадией $facet, то есть один поход в базу и один момент времени."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "13. Поиск (Elasticsearch)",
+      "auth": {
+        "type": "noauth"
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nИндекс наполняется переиндексацией по расписанию (по умолчанию раз в пять минут) и при старте приложения. Сразу после правки меню поиск ещё показывает старое — чтобы не ждать, есть «Переиндексировать витрину» в папке 11.",
+      "item": [
+        {
+          "name": "Поиск по витрине",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search?q=пицца&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "пицца"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Ищет по названиям и описаниям ресторанов и блюд сразу. Опечатка в одну-две буквы поиску не мешает — за это отвечает нечёткое совпадение."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const found = pm.response.json();",
+                  "pm.test('есть оба раздела', () => {",
+                  "    pm.expect(found).to.have.property('restaurants');",
+                  "    pm.expect(found).to.have.property('items');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Поиск с фильтром по городу",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search?q=&city=Москва&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "key": "city",
+                  "value": "Москва"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Город — фильтр, а не часть текстового запроса: он совпадает точно и не влияет на релевантность. Пустой q означает «покажи всё, что есть в городе»."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14. Трек курьера (Cassandra)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{courierToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nТочки пишутся только пока доставка в статусе PICKED_UP: до того курьер её ещё не забрал, после — везти уже нечего.\n\nПоследний запрос папки ходит под токеном клиента: он смотрит свой заказ, а не чужую доставку, и номера доставки не знает.",
+      "item": [
+        {
+          "name": "Отправить координату",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/positions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "positions"
+              ]
+            },
+            "description": "Отвечает 202: точка трека — телеметрия, а не созданный ресурс, ссылки на неё нет. Скорость можно не присылать.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 55.751244,\n  \"longitude\": 37.618423,\n  \"speedKmh\": 24.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Трек своей доставки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/track?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "track"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Точки идут от свежей к старой. Порядок задан не сортировкой в запросе, а порядком хранения строк в Cassandra."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Где мой заказ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/track?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "track"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Тот же трек глазами клиента. Номер доставки он не знает и знать не должен — превращение orderId в deliveryId делает модуль Delivery.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "15. Рекомендации (Neo4j)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nГраф строится проекцией из PostgreSQL по расписанию, поэтому на свежей базе рекомендации сначала будут пустыми. Заполнить их сразу помогают «Догнать граф» и «Перестроить граф» в папке 11.\n\nОтменённые заказы в граф не попадают: они ничего не говорят о вкусах.",
+      "item": [
+        {
+          "name": "Рекомендации клиенту",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/recommendations?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Обход графа на два шага: мои блюда → другие клиенты, бравшие их же → их блюда. Поле score — сколько человек подтвердили связь."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказывают вместе с блюдом",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/menu-items/{{menuItemId}}/ordered-together?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "menu-items",
+                "{{menuItemId}}",
+                "ordered-together"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Совместная встречаемость внутри одного заказа. Именно внутри одного: иначе ответ выродился бы в список самого популярного."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "16. Аналитика (ClickHouse)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{ownerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nВитрина наполняется отдельным потребителем того же топика заказов, что читают уведомления. Пока по заказам не прошло ни одного события, отчёты пусты.\n\nПериод задаётся датами включительно; больше года за раз запросить нельзя.",
+      "item": [
+        {
+          "name": "Продажи ресторана по дням",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/sales?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Выручка признаётся в момент оплаты, а не доставки: отменённый после оплаты заказ обязан попадать в отчёт наравне с доставленным."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Воронка статусов",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/funnel?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "funnel"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Сколько разных заказов побывало в каждом статусе за период. Разрыв между соседними ступенями и показывает, где заказы теряются."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

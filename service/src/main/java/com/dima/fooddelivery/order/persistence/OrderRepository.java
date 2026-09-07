@@ -363,11 +363,89 @@ public class OrderRepository {
         );
     }
 
+    /**
+     * Пачка заказов с позициями, идущих после указанного идентификатора.
+     *
+     * <p>Читают этим методом строители производных моделей — сейчас проекция графа
+     * рекомендаций в Neo4j. Отсюда и форма: идентификатор как метка прочитанного, порядок
+     * по возрастанию и никакого фильтра по владельцу. Обычному API такой метод не нужен
+     * и не предлагается — наружу его не выпускает {@code OrderService}.
+     *
+     * <p><b>Почему LIMIT стоит во вложенном запросе.</b> После LEFT JOIN на позиции одна
+     * строка результата — это позиция, а не заказ. LIMIT снаружи обрезал бы выборку посреди
+     * заказа, и построитель получил бы заказ с половиной позиций, приняв его за целый.
+     * Ограничение обязано применяться к заказам, то есть до соединения.
+     */
+    public List<Order> findAllAfterId(long afterOrderId, int limit) {
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("afterOrderId", afterOrderId)
+                .addValue("limit", limit);
+
+        List<OrderRow> rows = jdbc.query(
+                """
+                        SELECT
+                            co.id            AS order_id,
+                            co.cart_id,
+                            co.customer_id,
+                            co.restaurant_id,
+                            co.status        AS order_status,
+                            co.total_amount,
+                            co.created_at,
+                            co.updated_at,
+
+                            coi.id           AS order_item_id,
+                            coi.menu_item_id,
+                            coi.menu_item_name,
+                            coi.quantity,
+                            coi.price,
+                            coi.line_total
+                        FROM (
+                            SELECT *
+                            FROM customer_order
+                            WHERE id > :afterOrderId
+                            ORDER BY id
+                            LIMIT :limit
+                        ) co
+                        LEFT JOIN customer_order_item coi ON coi.order_id = co.id
+                        ORDER BY co.id, coi.id
+                        """,
+                params,
+                OrderRowMappers.ORDER_WITH_ITEMS
+        );
+
+        return assembleAll(rows);
+    }
+
     private static MapSqlParameterSource cursorParams(OffsetDateTime afterCreatedAt, Long afterId, int limit) {
         return new MapSqlParameterSource()
                 .addValue("cursorCreatedAt", afterCreatedAt)
                 .addValue("cursorId", afterId)
                 .addValue("limit", limit);
+    }
+
+    /**
+     * Схлопывает плоские строки в список заказов.
+     *
+     * <p>Работает за один проход и полагается на порядок строк: все строки одного заказа
+     * идут подряд, потому что запрос сортирует по {@code co.id}. Без этой сортировки пришлось
+     * бы держать в памяти карту всех заказов пачки — здесь достаточно помнить текущий.
+     */
+    private List<Order> assembleAll(List<OrderRow> rows) {
+        List<Order> orders = new ArrayList<>();
+        List<OrderRow> current = new ArrayList<>();
+
+        for (OrderRow row : rows) {
+            if (!current.isEmpty() && !current.get(0).orderId().equals(row.orderId())) {
+                assemble(current).ifPresent(orders::add);
+                current = new ArrayList<>();
+            }
+
+            current.add(row);
+        }
+
+        assemble(current).ifPresent(orders::add);
+
+        return orders;
     }
 
     private Optional<Order> assemble(List<OrderRow> rows) {

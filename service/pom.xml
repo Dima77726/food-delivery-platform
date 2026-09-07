@@ -183,6 +183,91 @@
             <artifactId>preliquibase-spring-boot-starter</artifactId>
             <version>2.0.0</version>
         </dependency>
+
+        <!--
+            ================================ Пять новых хранилищ ================================
+
+            Каждое взято под ту задачу, для которой оно и придумано, а не «чтобы было».
+            Общее правило: PostgreSQL остаётся системой записи. Всё, что живёт в этих пяти,
+            — либо производная проекция (её можно потерять и построить заново), либо данные,
+            которым реляционная модель не нужна вовсе.
+
+            Способ доступа у каждого свой, и это продолжение того же осознанного разнобоя,
+            что уже есть между модулями на JPA, Spring JDBC и голом JDBC:
+
+              mongo         — Spring Data MongoDB: репозитории и aggregation pipeline;
+              elasticsearch — Spring Data Elasticsearch: ElasticsearchOperations и Query DSL;
+              cassandra     — голый драйвер DataStax, CQL и подготовленные запросы;
+              neo4j         — голый драйвер Neo4j, Cypher руками;
+              clickhouse    — JdbcTemplate поверх собственного пула, SQL руками.
+
+            Почему у Cassandra и Neo4j взяты драйверы, а не стартеры Spring Boot, — написано
+            в CassandraConfig и Neo4jConfig соответственно. Если коротко: стартер поднимает
+            соединение на старте контекста (Cassandra) и добавляет второй менеджер транзакций
+            рядом с JpaTransactionManager (Neo4j). Ни то, ни другое нам не нужно.
+        -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-mongodb</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+
+        <!-- Версией управляет spring-boot-dependencies (cassandra-driver.version). -->
+        <dependency>
+            <groupId>org.apache.cassandra</groupId>
+            <artifactId>java-driver-core</artifactId>
+        </dependency>
+
+        <!-- Версией управляет spring-boot-dependencies (neo4j-java-driver.version). -->
+        <dependency>
+            <groupId>org.neo4j.driver</groupId>
+            <artifactId>neo4j-java-driver</artifactId>
+        </dependency>
+
+        <!--
+            ClickHouse Spring Boot не знает, поэтому версия задана явно в родительском pom.
+            Драйвер обычный JDBC, поэтому работает и Hikari, и JdbcTemplate.
+        -->
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>${clickhouse-jdbc.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-mongodb</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-elasticsearch</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-cassandra</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-neo4j</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-clickhouse</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

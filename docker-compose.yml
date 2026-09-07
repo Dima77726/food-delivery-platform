@@ -166,10 +166,183 @@ services:
       - JWT_SECRET
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
+
+      # Адреса пяти дополнительных хранилищ. Проставлены всегда, а работают только вместе
+      # с соответствующим STORE_*_ENABLED — сами по себе они ничего не включают.
+      #
+      # depends_on на эти сервисы намеренно нет: Compose отказывается стартовать, если
+      # зависимость выключена профилем, и приложение перестало бы подниматься без профиля
+      # stores. Порядок старта здесь обеспечивается иначе — сначала поднимают
+      # инфраструктуру, потом приложение.
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - ELASTIC_HOST=elasticsearch
+      - ELASTIC_PORT=9200
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+      - NEO4J_URI=bolt://neo4j:7687
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+
+      # Выключатели и секреты хранилищ пробрасываются без значений: не заданы в .env —
+      # применится значение по умолчанию из application.yml, то есть выключено.
+      - STORE_MONGO_ENABLED
+      - STORE_CASSANDRA_ENABLED
+      - STORE_NEO4J_ENABLED
+      - STORE_CLICKHOUSE_ENABLED
+      - STORE_ELASTICSEARCH_ENABLED
+      - NEO4J_PASSWORD
+      - CLICKHOUSE_DB
     ports:
       # Публикуется только прикладной порт. Служебный 8081 остаётся внутри сети compose:
       # снимать метрики может Prometheus, а снаружи их не видно.
       - "${APP_PORT:-8080}:8080"
+
+  # --- Пять дополнительных хранилищ ---------------------------------------------------------
+  #
+  # Все под профилем stores: обычный `docker compose up -d` их не поднимает. Вместе они
+  # занимают около пяти гигабайт памяти, а нужны только тем модулям, которые с ними работают.
+  #
+  #   docker compose --profile stores up -d          — инфраструктура плюс эти пять
+  #   docker compose --profile stores --profile full up -d --build   — вообще всё
+  #
+  # Одного профиля мало: в .env нужно ещё выставить STORE_*_ENABLED=true, иначе приложение
+  # поднимется без этих модулей. Разделение намеренное — контейнер можно держать поднятым,
+  # а модуль выключенным, и наоборот нельзя: включённый модуль требует доступного сервера.
+  #
+  # Ограничения памяти у Java-сервисов (Elasticsearch, Cassandra, Neo4j) выставлены явно.
+  # По умолчанию каждый из них берёт долю от памяти хоста и на машине с 32 ГБ забирает
+  # несколько гигабайт под кучу, которую локальному стеку девать некуда.
+
+  mongo:
+    profiles: ["stores"]
+    image: mongo:8.0
+    container_name: food-delivery-mongo
+    restart: unless-stopped
+    # Аутентификация не включена намеренно: это локальный стек, наружу он не смотрит,
+    # а строка подключения в application.yml остаётся без пароля и не просит секрета
+    # в репозитории. В любом другом окружении MONGO_INITDB_ROOT_* обязательны.
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1})"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+
+  cassandra:
+    profiles: ["stores"]
+    image: cassandra:5.0
+    container_name: food-delivery-cassandra
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: food-delivery
+      # Имя дата-центра должно совпадать с app.stores.cassandra.local-datacenter.
+      # Драйвер 4.x требует его явно и при расхождении не находит ни одного узла:
+      # ошибка выглядит как "no node was available", хотя узел работает.
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_cassandra_data:/var/lib/cassandra
+    # Cassandra поднимается заметно дольше остальных: старт занимает около минуты,
+    # поэтому и start_period большой. Проверка через nodetool, а не через cqlsh:
+    # cqlsh требует Python в контейнере и отвечает позже, чем узел начинает работать.
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep -q ^UN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+
+  neo4j:
+    profiles: ["stores"]
+    image: neo4j:5.26
+    container_name: food-delivery-neo4j
+    restart: unless-stopped
+    environment:
+      # Пароль обязателен: без NEO4J_AUTH образ требует сменить пароль при первом входе,
+      # и драйвер получает отказ, не объясняющий причины.
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-food_delivery_neo4j}
+      NEO4J_server_memory_heap_max__size: 512M
+      NEO4J_server_memory_pagecache_size: 256M
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    ports:
+      # 7474 — веб-интерфейс с окном запросов Cypher, 7687 — сам протокол bolt.
+      # Интерфейс полезен ровно так же, как Kafka UI: граф удобнее один раз увидеть.
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+
+  clickhouse:
+    profiles: ["stores"]
+    image: clickhouse/clickhouse-server:25.3
+    container_name: food-delivery-clickhouse
+    restart: unless-stopped
+    environment:
+      # Создаёт базу при первом запуске. Пользователь остаётся default без пароля:
+      # задавать CLICKHOUSE_USER=default нельзя, скрипт образа пытается создать
+      # уже существующего пользователя и падает.
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-food_delivery}
+      TZ: ${TZ}
+    # ClickHouse открывает много файлов одновременно и с лимитом по умолчанию
+    # пишет в лог предупреждение на каждом запуске.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - food_delivery_clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      # 8123 — HTTP-интерфейс, по нему и ходит JDBC-драйвер.
+      - "${CLICKHOUSE_PORT:-8123}:8123"
+
+  elasticsearch:
+    profiles: ["stores"]
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.0
+    container_name: food-delivery-elasticsearch
+    restart: unless-stopped
+    environment:
+      # Один узел: кворум мастеров для локального стека не нужен и не соберётся.
+      discovery.type: single-node
+      # Безопасность выключена намеренно. С ней образ поднимается по HTTPS с самоподписанным
+      # сертификатом и требует пароль, то есть в приложение пришлось бы тащить truststore
+      # ради локальной разработки. Вне локального стека так делать нельзя.
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      # Проверяется только то, что кластер отвечает. Ждать статуса green бессмысленно:
+      # на одном узле реплики разместить негде, и он остаётся жёлтым навсегда.
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    ports:
+      - "${ELASTIC_PORT:-9200}:9200"
 
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -217,3 +390,15 @@ volumes:
   food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:
+  # Тома дополнительных хранилищ объявлены безусловно: список томов профилями
+  # не управляется, а неиспользованный том места не занимает.
+  #
+  # Три из этих четырёх содержат производные данные — витрину аналитики, граф рекомендаций
+  # и поисковый индекс. Их можно удалить целиком (docker compose down -v), и они построятся
+  # заново из PostgreSQL и Kafka. Отзывы в MongoDB и трек в Cassandra так не восстановятся:
+  # это единственные данные вне PostgreSQL, у которых нет второго источника.
+  food_delivery_mongo_data:
+  food_delivery_cassandra_data:
+  food_delivery_neo4j_data:
+  food_delivery_clickhouse_data:
+  food_delivery_elasticsearch_data:
