@@ -77,3 +77,6 @@ databaseChangeLog:
   - include:
       file: migrations/026-add-correlation-id.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/027-index-customer-order-keyset.yml
+      relativeToChangelogFile: true

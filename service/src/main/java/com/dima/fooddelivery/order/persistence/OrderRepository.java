@@ -118,6 +118,9 @@ public class OrderRepository {
      * без ORDER BY по уникальному ключу база вправе вернуть одну и ту же строку на двух
      * соседних страницах, и клиент увидит дубли. Поэтому id вторым критерием — created_at
      * у двух заказов может совпасть до микросекунды.
+     *
+     * <p>Эта же пара {@code (created_at, id)} служит курсором: раз она однозначно задаёт
+     * место в списке, по ней можно продолжить чтение без OFFSET.
      */
     private static final String SELECT_SUMMARIES = """
             SELECT
@@ -135,8 +138,37 @@ public class OrderRepository {
             GROUP BY co.id, co.cart_id, co.customer_id, co.restaurant_id,
                      co.status, co.total_amount, co.created_at
             ORDER BY co.created_at DESC, co.id DESC
-            LIMIT :limit OFFSET :offset
             """;
+
+    private static final String SELECT_SUMMARIES_PAGE = SELECT_SUMMARIES + "LIMIT :limit OFFSET :offset";
+
+    private static final String SELECT_SUMMARIES_AFTER_CURSOR = SELECT_SUMMARIES + "LIMIT :limit";
+
+    /**
+     * Условие «строго дальше курсора» в терминах той же сортировки, что и ORDER BY.
+     *
+     * <p>Сравнение записано кортежем, а не как {@code created_at < ? OR (created_at = ? AND id < ?)}:
+     * это не только короче, но и понятно планировщику PostgreSQL — он умеет искать по составному
+     * индексу сразу по паре колонок, тогда как развёрнутый вариант с OR ему приходится
+     * разбирать на два обхода.
+     *
+     * <p>CAST обязателен: для параметра без значения PostgreSQL не выводит тип и отказывается
+     * сравнивать его с колонкой. Пустой курсор (первая страница) и делает условие
+     * тождественно истинным — отдельного запроса для начала списка не нужно.
+     */
+    private static final String AFTER_CURSOR = """
+            (CAST(:cursorCreatedAt AS TIMESTAMPTZ) IS NULL
+                 OR (co.created_at, co.id) < (CAST(:cursorCreatedAt AS TIMESTAMPTZ), CAST(:cursorId AS BIGINT)))
+            """;
+
+    private static final String CUSTOMER_CONDITION = "co.customer_id = :customerId";
+
+    /**
+     * CAST нужен, потому что для NULL-параметра PostgreSQL не может вывести тип
+     * и отказывается сравнивать его с колонкой. Пустой статус означает «любой».
+     */
+    private static final String RESTAURANT_CONDITION =
+            "co.restaurant_id = :restaurantId AND (CAST(:status AS VARCHAR) IS NULL OR co.status = :status)";
 
     private static final RowMapper<OrderSummary> ORDER_SUMMARY = (rs, rowNum) -> new OrderSummary(
             rs.getLong("order_id"),
@@ -155,7 +187,31 @@ public class OrderRepository {
                 .addValue("limit", limit)
                 .addValue("offset", offset);
 
-        return jdbc.query(SELECT_SUMMARIES.formatted("co.customer_id = :customerId"), params, ORDER_SUMMARY);
+        return jdbc.query(SELECT_SUMMARIES_PAGE.formatted(CUSTOMER_CONDITION), params, ORDER_SUMMARY);
+    }
+
+    /**
+     * Заказы клиента, следующие за парой {@code (createdAt, id)} последней показанной строки.
+     * Оба параметра {@code null} — начало списка.
+     *
+     * <p>Курсор сюда приходит разобранным на составляющие, а не типом из пакета {@code api}:
+     * репозиторий не должен знать, что где-то это значение ездит по HTTP в base64.
+     *
+     * <p>Лимит приходит уже увеличенным на единицу: лишняя строка — способ узнать, есть ли
+     * продолжение, не выполняя COUNT. Отрезает её сервис, он же решает, что показать клиенту.
+     */
+    public List<OrderSummary> findSummariesByCustomerIdAfter(
+            Long customerId,
+            OffsetDateTime afterCreatedAt,
+            Long afterId,
+            int limit
+    ) {
+        SqlParameterSource params = cursorParams(afterCreatedAt, afterId, limit)
+                .addValue("customerId", customerId);
+
+        String condition = CUSTOMER_CONDITION + " AND " + AFTER_CURSOR;
+
+        return jdbc.query(SELECT_SUMMARIES_AFTER_CURSOR.formatted(condition), params, ORDER_SUMMARY);
     }
 
     public long countByCustomerId(Long customerId) {
@@ -180,12 +236,23 @@ public class OrderRepository {
                 .addValue("limit", limit)
                 .addValue("offset", offset);
 
-        // CAST нужен, потому что для NULL-параметра PostgreSQL не может вывести тип
-        // и отказывается сравнивать его с колонкой.
-        String condition = "co.restaurant_id = :restaurantId "
-                + "AND (CAST(:status AS VARCHAR) IS NULL OR co.status = :status)";
+        return jdbc.query(SELECT_SUMMARIES_PAGE.formatted(RESTAURANT_CONDITION), params, ORDER_SUMMARY);
+    }
 
-        return jdbc.query(SELECT_SUMMARIES.formatted(condition), params, ORDER_SUMMARY);
+    public List<OrderSummary> findSummariesByRestaurantIdAfter(
+            Long restaurantId,
+            OrderStatus status,
+            OffsetDateTime afterCreatedAt,
+            Long afterId,
+            int limit
+    ) {
+        SqlParameterSource params = cursorParams(afterCreatedAt, afterId, limit)
+                .addValue("restaurantId", restaurantId)
+                .addValue("status", status == null ? null : status.getDbValue());
+
+        String condition = RESTAURANT_CONDITION + " AND " + AFTER_CURSOR;
+
+        return jdbc.query(SELECT_SUMMARIES_AFTER_CURSOR.formatted(condition), params, ORDER_SUMMARY);
     }
 
     public long countByRestaurantId(Long restaurantId, OrderStatus status) {
@@ -294,6 +361,13 @@ public class OrderRepository {
                         """,
                 params
         );
+    }
+
+    private static MapSqlParameterSource cursorParams(OffsetDateTime afterCreatedAt, Long afterId, int limit) {
+        return new MapSqlParameterSource()
+                .addValue("cursorCreatedAt", afterCreatedAt)
+                .addValue("cursorId", afterId)
+                .addValue("limit", limit);
     }
 
     private Optional<Order> assemble(List<OrderRow> rows) {

@@ -1742,6 +1742,56 @@
           ]
         },
         {
+          "name": "Мои заказы (лента по курсору)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/feed?cursor=&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Курсор из nextCursor предыдущего ответа; пусто — сначала"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Сколько записей вернуть, максимум 100"
+                }
+              ]
+            },
+            "description": "Курсорная выборка: подряд, без номеров страниц. Следующая порция запрашивается со значением nextCursor из предыдущего ответа — тест кладёт его в переменную orderCursor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.nextCursor) {",
+                  "    pm.collectionVariables.set('orderCursor', body.nextCursor);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Заказ по id",
           "request": {
             "method": "GET",
@@ -2104,6 +2154,61 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказы ресторана (лента по курсору)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/feed?status=&cursor=&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Фильтр по статусу заказа, необязателен"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Курсор из nextCursor предыдущего ответа; пусто — сначала"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Сколько записей вернуть, максимум 100"
+                }
+              ]
+            },
+            "description": "То же для ресторана. Параметр status можно оставить пустым — тогда вернутся заказы в любом статусе."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.nextCursor) {",
+                  "    pm.collectionVariables.set('orderCursor', body.nextCursor);",
+                  "}"
                 ]
               }
             }

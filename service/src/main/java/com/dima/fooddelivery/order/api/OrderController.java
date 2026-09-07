@@ -1,5 +1,7 @@
 package com.dima.fooddelivery.order.api;
 
+import com.dima.fooddelivery.common.api.CursorPageResponse;
+import com.dima.fooddelivery.common.api.CursorRequestParams;
 import com.dima.fooddelivery.common.api.PageRequestParams;
 import com.dima.fooddelivery.common.api.PageResponse;
 import com.dima.fooddelivery.order.domain.OrderStatus;
@@ -83,6 +85,24 @@ public class OrderController {
         return orderService.getOrdersByCustomer(customerId, page);
     }
 
+    /**
+     * Отдельный путь, а не ещё один режим у {@code /orders}: у курсорного ответа другой набор
+     * полей — нет ни номера страницы, ни общего количества. Слить их в один тип значило бы
+     * отдавать половину полей всегда пустыми и заставлять каждого клиента гадать,
+     * какая половина сейчас заполнена.
+     */
+    @GetMapping("/api/v1/customers/{customerId}/orders/feed")
+    @PreAuthorize("hasRole('CUSTOMER') and @access.isSelf(#customerId)")
+    @Operation(summary = "Лента заказов клиента: курсорная выборка для подгрузки вниз")
+    public CursorPageResponse<OrderSummaryResponse> getOrdersFeedByCustomer(
+            @Positive(message = "customerId должен быть положительным числом")
+            @PathVariable Long customerId,
+
+            @Valid CursorRequestParams cursor
+    ) {
+        return orderService.getOrdersByCustomerAfter(customerId, cursor);
+    }
+
     @GetMapping("/api/v1/customers/{customerId}/orders/{orderId}/events")
     @PreAuthorize("hasRole('CUSTOMER') and @access.isSelf(#customerId)")
     @Operation(summary = "История событий заказа")
@@ -125,6 +145,20 @@ public class OrderController {
             @Valid PageRequestParams page
     ) {
         return orderService.getOrdersForRestaurant(restaurantId, status, page);
+    }
+
+    @GetMapping("/api/v1/restaurants/{restaurantId}/orders/feed")
+    @PreAuthorize("@access.managesRestaurant(#restaurantId)")
+    @Operation(summary = "Лента заказов ресторана: курсорная выборка, при необходимости по статусу")
+    public CursorPageResponse<OrderSummaryResponse> getRestaurantOrdersFeed(
+            @Positive(message = "restaurantId должен быть положительным числом")
+            @PathVariable Long restaurantId,
+
+            @RequestParam(required = false) OrderStatus status,
+
+            @Valid CursorRequestParams cursor
+    ) {
+        return orderService.getOrdersForRestaurantAfter(restaurantId, status, cursor);
     }
 
     @PostMapping("/api/v1/restaurants/{restaurantId}/orders/{orderId}/accept")

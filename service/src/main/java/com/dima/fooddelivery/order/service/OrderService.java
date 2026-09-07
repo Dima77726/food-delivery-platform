@@ -3,6 +3,9 @@ package com.dima.fooddelivery.order.service;
 import com.dima.fooddelivery.cart.domain.Cart;
 import com.dima.fooddelivery.cart.domain.CartItem;
 import com.dima.fooddelivery.cart.service.CartService;
+import com.dima.fooddelivery.common.api.Cursor;
+import com.dima.fooddelivery.common.api.CursorPageResponse;
+import com.dima.fooddelivery.common.api.CursorRequestParams;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.api.PageRequestParams;
@@ -155,6 +158,76 @@ public class OrderService {
                 page.size(),
                 orderRepository.countByRestaurantId(restaurantId, status)
         );
+    }
+
+    /**
+     * Те же два списка, но курсором: клиент листает подряд и не может прыгнуть на страницу N.
+     *
+     * <p>Зачем второй способ рядом с первым. Постраничный нужен интерфейсу с номерами страниц
+     * и счётчиком «всего 137 заказов» — за это платится COUNT на каждый запрос и растущая
+     * с номером страницы цена OFFSET. Курсорный нужен ленте с подгрузкой вниз и любой
+     * машинной выгрузке: он не сбивается, когда во время листания приходят новые заказы,
+     * и стоит одинаково на первой странице и на тысячной.
+     *
+     * <p>Запрашивается на одну строку больше, чем просил клиент. Она не попадает в ответ —
+     * это дешёвая замена вопросу «есть ли ещё»: COUNT по всей выборке ради одного булева
+     * значения был бы несоразмерной платой.
+     */
+    @Transactional(readOnly = true)
+    public CursorPageResponse<OrderSummaryResponse> getOrdersByCustomerAfter(
+            Long customerId,
+            CursorRequestParams request
+    ) {
+        Cursor cursor = request.decoded();
+
+        List<OrderSummary> fetched = orderRepository.findSummariesByCustomerIdAfter(
+                customerId,
+                cursor == null ? null : cursor.createdAt(),
+                cursor == null ? null : cursor.id(),
+                request.size() + 1
+        );
+
+        return toCursorPage(fetched, request.size());
+    }
+
+    @Transactional(readOnly = true)
+    public CursorPageResponse<OrderSummaryResponse> getOrdersForRestaurantAfter(
+            Long restaurantId,
+            OrderStatus status,
+            CursorRequestParams request
+    ) {
+        Cursor cursor = request.decoded();
+
+        List<OrderSummary> fetched = orderRepository.findSummariesByRestaurantIdAfter(
+                restaurantId,
+                status,
+                cursor == null ? null : cursor.createdAt(),
+                cursor == null ? null : cursor.id(),
+                request.size() + 1
+        );
+
+        return toCursorPage(fetched, request.size());
+    }
+
+    /**
+     * Отрезает разведочную строку и собирает курсор на последнюю из оставшихся.
+     *
+     * <p>Курсор выдаётся только когда продолжение действительно есть. Иначе клиент,
+     * дочитавший список до конца, получил бы непустой {@code nextCursor} и сходил бы
+     * за заведомо пустой страницей.
+     */
+    private static CursorPageResponse<OrderSummaryResponse> toCursorPage(List<OrderSummary> fetched, int size) {
+        boolean hasNext = fetched.size() > size;
+        List<OrderSummary> visible = hasNext ? fetched.subList(0, size) : fetched;
+
+        String nextCursor = null;
+        if (hasNext) {
+            OrderSummary last = visible.get(visible.size() - 1);
+
+            nextCursor = new Cursor(last.createdAt(), last.id()).encode();
+        }
+
+        return CursorPageResponse.of(OrderResponseMapper.toSummaryResponses(visible), size, nextCursor);
     }
 
     @Transactional(readOnly = true)
