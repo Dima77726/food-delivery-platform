@@ -51,6 +51,27 @@ spring:
       timeout: 500ms
       connect-timeout: 500ms
 
+    # Отзывы о заказах. Клиент MongoDB соединение при создании не открывает, поэтому эти
+    # настройки безобидны и при выключенном хранилище: бины автоконфигурации существуют,
+    # но в базу никто не ходит — весь модуль отзывов включается отдельно, через
+    # app.stores.mongo.enabled.
+    mongodb:
+      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
+      # Автоматическое создание индексов выключено намеренно: оно срабатывает при первом
+      # разборе доменного типа, то есть на старте приложения и без оглядки на выключатель.
+      # Индексы создаёт ReviewIndexes — см. комментарий там.
+      auto-index-creation: false
+
+  # Поиск по витрине. Клиент так же ленив, как у MongoDB: HTTP-соединение открывается
+  # при первом запросе.
+  elasticsearch:
+    uris: http://${ELASTIC_HOST:localhost}:${ELASTIC_PORT:9200}
+    # Таймауты короткие по той же причине, что и у Redis: поиск обязан быть быстрым.
+    # Значение по умолчанию (минута на сокет) означало бы, что недоступный Elasticsearch
+    # подвешивает поисковый запрос на минуту вместо честной ошибки.
+    connection-timeout: 2s
+    socket-timeout: 5s
+
   cache:
     type: redis
 
@@ -152,6 +173,66 @@ app:
       issuer: ${JWT_ISSUER:food-delivery-platform}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
 
+  # --- Пять дополнительных хранилищ ---------------------------------------------------------
+  #
+  # По умолчанию выключены все пять, и приложение стартует ровно так же, как стартовало
+  # до их появления: одним PostgreSQL, Redis и Kafka. Причина проста — вместе они просят
+  # около пяти гигабайт памяти, и держать их поднятыми ради модуля, который сегодня
+  # не трогают, незачем.
+  #
+  # Включить: docker compose --profile stores up -d и STORE_*_ENABLED=true в .env.
+  # Подробности каждого выключателя — в StoreToggles.
+  #
+  # Важное следствие: включённое хранилище обязано быть доступно. Схему свою модуль
+  # создаёт на старте и при недоступном сервере не даёт приложению подняться.
+  stores:
+    # Отзывы о заказах.
+    mongo:
+      enabled: ${STORE_MONGO_ENABLED:false}
+
+    # Трек курьера. Настройки соединения свои, а не spring.cassandra.*: стартер Spring Boot
+    # здесь не используется, см. CassandraConfig.
+    cassandra:
+      enabled: ${STORE_CASSANDRA_ENABLED:false}
+      contact-points: ${CASSANDRA_CONTACT_POINTS:localhost:9042}
+      local-datacenter: ${CASSANDRA_DATACENTER:datacenter1}
+      keyspace: ${CASSANDRA_KEYSPACE:food_delivery}
+      # Неделя истории трека. Строки исчезают сами, DELETE в Cassandra оставлял бы надгробия.
+      track-ttl: ${CASSANDRA_TRACK_TTL:P7D}
+      request-timeout: ${CASSANDRA_REQUEST_TIMEOUT:PT5S}
+
+    # Рекомендации по графу заказов.
+    neo4j:
+      enabled: ${STORE_NEO4J_ENABLED:false}
+      uri: ${NEO4J_URI:bolt://localhost:7687}
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:food_delivery_neo4j}
+      # Проекция догоняет граф из PostgreSQL пачками. Полминуты — это отставание графа
+      # от базы, и для рекомендаций, которые строятся на истории за месяцы, оно неощутимо.
+      projection-interval: ${NEO4J_PROJECTION_INTERVAL:PT30S}
+      projection-batch: ${NEO4J_PROJECTION_BATCH:200}
+      # Выключает только таймер, но не сам сервис: тесты запускают проекцию вручную,
+      # чтобы точно знать момент, когда она произошла.
+      projection-enabled: ${NEO4J_PROJECTION_ENABLED:true}
+
+    # Витрина аналитики заказов.
+    clickhouse:
+      enabled: ${STORE_CLICKHOUSE_ENABLED:false}
+      url: jdbc:clickhouse://${CLICKHOUSE_HOST:localhost}:${CLICKHOUSE_PORT:8123}/${CLICKHOUSE_DB:food_delivery}
+      username: ${CLICKHOUSE_USER:default}
+      password: ${CLICKHOUSE_PASSWORD:}
+      pool-size: ${CLICKHOUSE_POOL_SIZE:4}
+      query-timeout: ${CLICKHOUSE_QUERY_TIMEOUT:PT10S}
+      # Своя группа потребителей: тот же топик независимо читают уведомления.
+      consumer-group: ${CLICKHOUSE_CONSUMER_GROUP:food-delivery-analytics}
+
+    # Поиск по витрине.
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
+      reindex-interval: ${ELASTIC_REINDEX_INTERVAL:PT5M}
+      reindex-enabled: ${ELASTIC_REINDEX_ENABLED:true}
+      max-results: ${ELASTIC_MAX_RESULTS:50}
+
 management:
   server:
     # Отдельный порт для служебных эндпоинтов — не косметика.
@@ -176,6 +257,23 @@ management:
         # второй — «готов принимать трафик». Перезапускать под из-за недоступной
         # базы не нужно, а вот убрать его из балансировки — нужно.
         enabled: true
+
+  # Индикаторы здоровья MongoDB и Elasticsearch привязаны к тем же переменным окружения,
+  # что и сами модули. Иначе выключенное хранилище утягивало бы общий статус в DOWN:
+  # автоконфигурация создаёт индикатор по факту наличия клиента в classpath, а клиент
+  # там есть всегда. Readiness-проба при этом отвечала бы «не готов» на совершенно
+  # исправное приложение.
+  #
+  # Cassandra, Neo4j и ClickHouse в этом списке отсутствуют не по недосмотру: их клиенты
+  # создаются нашими конфигурациями, и автоматических индикаторов для них не появляется.
+  health:
+    # Ключ именно mongodb, а не mongo: в Spring Boot 4 старое имя объявлено удалённым.
+    # Ошибки при этом не возникает, значение просто игнорируется — индикатор остаётся
+    # включённым, минуту ждёт недоступный MongoDB и роняет общий статус в DOWN.
+    mongodb:
+      enabled: ${STORE_MONGO_ENABLED:false}
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
 
   metrics:
     tags:

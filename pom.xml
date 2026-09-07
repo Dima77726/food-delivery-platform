@@ -41,6 +41,8 @@
         <!-- Ветка 3.x springdoc — единственная, совместимая со Spring Boot 4 / Framework 7. -->
         <springdoc.version>3.1.0</springdoc.version>
         <openapi-generator.version>7.24.0</openapi-generator.version>
+        <!-- ClickHouse не входит в spring-boot-dependencies: версию держим здесь. -->
+        <clickhouse-jdbc.version>0.9.9</clickhouse-jdbc.version>
         <!--
             Путь к спецификации. Оба модуля ссылаются на один файл, иначе контракт сервера
             и контракт клиента разъехались бы уже на второй правке.

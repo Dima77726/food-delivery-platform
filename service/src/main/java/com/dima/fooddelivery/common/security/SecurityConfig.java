@@ -45,10 +45,24 @@ import java.nio.charset.StandardCharsets;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    /**
+     * Витрина: всё, ради чего пользователь приходит до того, как решит завести учётную запись.
+     *
+     * <p>Поиск и отзывы попали сюда по тому же признаку, что список ресторанов и меню:
+     * это чтение публичного каталога. Закрывать их токеном означало бы требовать регистрацию
+     * ради вопроса «а что тут вообще есть и как о нём отзываются».
+     *
+     * <p>Маршруты перечислены даже для тех модулей, которые могут быть выключены. Лишнее
+     * разрешение на несуществующий маршрут безвредно: до контроллера запрос всё равно
+     * не дойдёт и вернётся 404.
+     */
     private static final String[] PUBLIC_GET_PATHS = {
             "/api/v1/restaurants",
             "/api/v1/restaurants/*",
             "/api/v1/restaurants/*/menu",
+            "/api/v1/restaurants/*/reviews",
+            "/api/v1/restaurants/*/reviews/summary",
+            "/api/v1/search",
             "/api/v1/ping",
             "/v3/api-docs/**",
             "/swagger-ui/**",
