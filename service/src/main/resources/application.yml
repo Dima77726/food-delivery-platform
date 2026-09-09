@@ -207,8 +207,8 @@ app:
       uri: ${NEO4J_URI:bolt://localhost:7687}
       username: ${NEO4J_USERNAME:neo4j}
       password: ${NEO4J_PASSWORD:food_delivery_neo4j}
-      # Проекция догоняет граф из PostgreSQL пачками. Полминуты — это отставание графа
-      # от базы, и для рекомендаций, которые строятся на истории за месяцы, оно неощутимо.
+      # Проекция циклически сверяет заказы пачками. Один такт — одна пачка;
+      # изменения старых заказов видны после следующего полного прохода.
       projection-interval: ${NEO4J_PROJECTION_INTERVAL:PT30S}
       projection-batch: ${NEO4J_PROJECTION_BATCH:200}
       # Выключает только таймер, но не сам сервис: тесты запускают проекцию вручную,

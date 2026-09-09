@@ -1,6 +1,8 @@
 package com.dima.fooddelivery.recommendation.service;
 
 import com.dima.fooddelivery.order.domain.OrderStatus;
+import com.dima.fooddelivery.order.service.OrderService;
+import com.dima.fooddelivery.recommendation.persistence.RecommendationGraph;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import com.dima.fooddelivery.support.AbstractStoresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +35,12 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
 
     @Autowired
     private RecommendationService recommendationService;
+
+    @Autowired
+    private OrderService orderService;
+
+    @Autowired
+    private RecommendationGraph graph;
 
     @BeforeEach
     void clearGraph() {
@@ -183,7 +191,7 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
         placeOrder(customerId, restaurantId, OrderStatus.DELIVERED, menuItemIds);
     }
 
-    private void placeOrder(Long customerId, Long restaurantId, OrderStatus status, List<Long> menuItemIds) {
+    private Long placeOrder(Long customerId, Long restaurantId, OrderStatus status, List<Long> menuItemIds) {
         Long cartId = testData.insertCart(customerId, restaurantId, "CHECKED_OUT");
 
         Long orderId = testData.insertOrder(
@@ -195,5 +203,47 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
         );
 
         menuItemIds.forEach(menuItemId -> testData.insertOrderItem(orderId, menuItemId, 1, PRICE));
+        return orderId;
+    }
+
+    @Test
+    void shouldRemoveOrderCanceledAfterProjection() {
+        Long restaurantId = testData.insertRestaurant();
+        Long shared = testData.insertMenuItem(restaurantId, PRICE);
+        Long extra = testData.insertMenuItem(restaurantId, PRICE);
+        Long me = testData.insertCustomer();
+        Long other = testData.insertCustomer();
+        placeOrder(me, restaurantId, List.of(shared));
+        Long orderId = placeOrder(other, restaurantId, OrderStatus.CREATED, List.of(shared, extra));
+
+        // Курсор ещё не сброшен: отмена происходит посреди прохода.
+        assertTrue(recommendationService.projectNextBatch() > 0);
+        assertEquals(1, recommendationService.recommendForCustomer(me, 10).size());
+        orderService.cancelOrder(other, orderId);
+
+        projectEverything();
+        projectEverything();
+
+        assertTrue(recommendationService.recommendForCustomer(me, 10).isEmpty());
+        assertTrue(recommendationService.orderedTogetherWith(shared, 10).isEmpty());
+    }
+
+    @Test
+    void shouldRevisitOrdersBehindTheCursorWithoutDuplicatingScores() {
+        Long restaurantId = testData.insertRestaurant();
+        Long shared = testData.insertMenuItem(restaurantId, PRICE);
+        Long extra = testData.insertMenuItem(restaurantId, PRICE);
+        Long me = testData.insertCustomer();
+        Long other = testData.insertCustomer();
+        placeOrder(me, restaurantId, List.of(shared));
+        Long lateOrder = placeOrder(other, restaurantId, OrderStatus.DELIVERED, List.of(shared, extra));
+        // Как при позднем коммите: данные уже видны, но курсор оказался впереди них.
+        graph.projectOrders(List.of(), lateOrder);
+        assertEquals(0, recommendationService.projectNextBatch());
+
+        projectEverything();
+        assertEquals(1L, recommendationService.recommendForCustomer(me, 10).get(0).score());
+        projectEverything();
+        assertEquals(1L, recommendationService.recommendForCustomer(me, 10).get(0).score());
     }
 }

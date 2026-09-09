@@ -54,6 +54,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "app.notification.dispatch-enabled=false",
+                "app.outbox.publish-enabled=false",
+                "spring.kafka.admin.auto-create=false",
+                "spring.kafka.listener.auto-startup=false",
                 "logging.level.liquibase=WARN",
                 "logging.level.org.testcontainers=WARN"
         }

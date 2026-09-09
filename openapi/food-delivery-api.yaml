@@ -1,6 +1,6 @@
 openapi: 3.0.3
 
-# Источник истины для контракта Restaurant и Menu.
+# Контракт Restaurant, Menu и пяти дополнительных модулей хранилищ.
 #
 # Правило простое: сначала правится этот файл, потом код. Обратный порядок ломает саму
 # идею — сгенерированные интерфейсы перестанут соответствовать спеке, и сборка это заметит.
@@ -12,10 +12,11 @@ info:
   title: Food Delivery Platform API
   version: v1
   description: |
-    Контракт витрины ресторанов и управления меню.
+    Контракт ресторанов, меню, отзывов, трекинга, рекомендаций, аналитики и поиска.
 
     Витрина (`GET /restaurants`, `GET /restaurants/{id}/menu`) открыта без аутентификации.
-    Всё остальное требует токена и прав управляющего конкретным рестораном.
+    Поиск и чтение отзывов также публичны. Остальные операции требуют JWT и указанных прав.
+    Пять дополнительных модулей включаются независимо через STORE_*_ENABLED.
 
 servers:
   - url: http://localhost:8080
@@ -28,6 +29,17 @@ tags:
     description: Меню для посетителя
   - name: MenuManagement
     description: Управление меню владельцем ресторана
+
+  - name: Review
+    description: Отзывы о заказах
+  - name: Tracking
+    description: Трек курьера
+  - name: Recommendation
+    description: Рекомендации по заказам
+  - name: Analytics
+    description: Отчёты о продажах
+  - name: Search
+    description: Поиск по витрине
 
 paths:
 
@@ -375,6 +387,609 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  "/api/v1/customers/{customerId}/orders/{orderId}/review":
+    "post":
+      "tags":
+        - "Review"
+      "operationId": "createReview"
+      "summary": "Оставить отзыв о доставленном заказе"
+      "description": "Маршрут доступен при включённом модуле Review. При выключенном модуле обработчик отсутствует. Клиент может оставить один отзыв о собственном доставленном заказе."
+      "responses":
+        "201":
+          "description": "Оставить отзыв о доставленном заказе"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+      "parameters":
+        -
+          "name": "customerId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "orderId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateReviewRequest"
+  "/api/v1/restaurants/{restaurantId}/reviews":
+    "get":
+      "tags":
+        - "Review"
+      "operationId": "getRestaurantReviews"
+      "summary": "Отзывы ресторана"
+      "description": "Маршрут доступен при включённом модуле Review. При выключенном модуле обработчик отсутствует."
+      "responses":
+        "200":
+          "description": "Отзывы ресторана"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewPageResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+      "parameters":
+        -
+          "name": "restaurantId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "page"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 0
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 100
+            "default": 20
+      "security": []
+  "/api/v1/restaurants/{restaurantId}/reviews/summary":
+    "get":
+      "tags":
+        - "Review"
+      "operationId": "getRestaurantRatingSummary"
+      "summary": "Сводка оценок ресторана"
+      "description": "Маршрут доступен при включённом модуле Review. При выключенном модуле обработчик отсутствует."
+      "responses":
+        "200":
+          "description": "Сводка оценок ресторана"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RatingSummaryResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+      "parameters":
+        -
+          "name": "restaurantId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+      "security": []
+  "/api/v1/couriers/{courierId}/deliveries/{deliveryId}/positions":
+    "post":
+      "tags":
+        - "Tracking"
+      "operationId": "reportPosition"
+      "summary": "Принята координата курьера"
+      "description": "Маршрут доступен при включённом модуле Tracking. При выключенном модуле обработчик отсутствует. Только назначенный курьер, доставка в статусе PICKED_UP."
+      "responses":
+        "202":
+          "description": "Принята координата курьера"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PositionResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+      "parameters":
+        -
+          "name": "courierId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "deliveryId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReportPositionRequest"
+  "/api/v1/couriers/{courierId}/deliveries/{deliveryId}/track":
+    "get":
+      "tags":
+        - "Tracking"
+      "operationId": "getCourierTrack"
+      "summary": "Последние координаты доставки"
+      "description": "Маршрут доступен при включённом модуле Tracking. При выключенном модуле обработчик отсутствует. Только назначенный курьер."
+      "responses":
+        "200":
+          "description": "Последние координаты доставки"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/TrackResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+      "parameters":
+        -
+          "name": "courierId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "deliveryId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 1000
+            "default": 100
+  "/api/v1/customers/{customerId}/orders/{orderId}/track":
+    "get":
+      "tags":
+        - "Tracking"
+      "operationId": "getOrderTrack"
+      "summary": "Последние координаты курьера по заказу"
+      "description": "Маршрут доступен при включённом модуле Tracking. При выключенном модуле обработчик отсутствует. Только владелец заказа."
+      "responses":
+        "200":
+          "description": "Последние координаты курьера по заказу"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/TrackResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+      "parameters":
+        -
+          "name": "customerId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "orderId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 1000
+            "default": 100
+  "/api/v1/customers/{customerId}/recommendations":
+    "get":
+      "tags":
+        - "Recommendation"
+      "operationId": "getRecommendations"
+      "summary": "Персональные рекомендации"
+      "description": "Маршрут доступен при включённом модуле Recommendation. При выключенном модуле обработчик отсутствует. Только собственные рекомендации."
+      "responses":
+        "200":
+          "description": "Персональные рекомендации"
+          "content":
+            "application/json":
+              "schema":
+                "type": "array"
+                "items":
+                  "$ref": "#/components/schemas/RecommendedItemResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+      "parameters":
+        -
+          "name": "customerId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 50
+            "default": 10
+  "/api/v1/menu-items/{menuItemId}/ordered-together":
+    "get":
+      "tags":
+        - "Recommendation"
+      "operationId": "getOrderedTogether"
+      "summary": "Блюда, которые заказывают вместе"
+      "description": "Маршрут доступен при включённом модуле Recommendation. При выключенном модуле обработчик отсутствует."
+      "responses":
+        "200":
+          "description": "Блюда, которые заказывают вместе"
+          "content":
+            "application/json":
+              "schema":
+                "type": "array"
+                "items":
+                  "$ref": "#/components/schemas/RecommendedItemResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+      "parameters":
+        -
+          "name": "menuItemId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 50
+            "default": 10
+  "/api/v1/admin/recommendations/project":
+    "post":
+      "tags":
+        - "Recommendation"
+      "operationId": "projectNow"
+      "summary": "Сверить одну пачку заказов"
+      "description": "Маршрут доступен при включённом модуле Recommendation. При выключенном модуле обработчик отсутствует. Только ADMIN. Ноль означает конец прохода; следующий вызов начинает новый проход."
+      "responses":
+        "200":
+          "description": "Сверить одну пачку заказов"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ProjectionResultResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+  "/api/v1/admin/recommendations/rebuild":
+    "post":
+      "tags":
+        - "Recommendation"
+      "operationId": "rebuildRecommendations"
+      "summary": "Перестроить граф рекомендаций"
+      "description": "Маршрут доступен при включённом модуле Recommendation. При выключенном модуле обработчик отсутствует. Только ADMIN. До 200 пачек за вызов, оставшиеся заказы обрабатывает планировщик."
+      "responses":
+        "200":
+          "description": "Перестроить граф рекомендаций"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ProjectionResultResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+  "/api/v1/restaurants/{restaurantId}/analytics/sales":
+    "get":
+      "tags":
+        - "Analytics"
+      "operationId": "getRestaurantSales"
+      "summary": "Продажи ресторана по дням"
+      "description": "Маршрут доступен при включённом модуле Analytics. При выключенном модуле обработчик отсутствует. Управляющий рестораном или ADMIN."
+      "responses":
+        "200":
+          "description": "Продажи ресторана по дням"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SalesReportResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+      "parameters":
+        -
+          "name": "restaurantId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Первый день включительно, UTC."
+        -
+          "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Последний день включительно, UTC; период не больше 366 дней."
+  "/api/v1/restaurants/{restaurantId}/analytics/funnel":
+    "get":
+      "tags":
+        - "Analytics"
+      "operationId": "getRestaurantFunnel"
+      "summary": "Воронка статусов ресторана"
+      "description": "Маршрут доступен при включённом модуле Analytics. При выключенном модуле обработчик отсутствует. Управляющий рестораном или ADMIN."
+      "responses":
+        "200":
+          "description": "Воронка статусов ресторана"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/StatusFunnelResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+      "parameters":
+        -
+          "name": "restaurantId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "format": "int64"
+            "minimum": 1
+        -
+          "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Первый день включительно, UTC."
+        -
+          "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Последний день включительно, UTC; период не больше 366 дней."
+  "/api/v1/admin/analytics/sales":
+    "get":
+      "tags":
+        - "Analytics"
+      "operationId": "getPlatformSales"
+      "summary": "Продажи всей платформы"
+      "description": "Маршрут доступен при включённом модуле Analytics. При выключенном модуле обработчик отсутствует. Только ADMIN."
+      "responses":
+        "200":
+          "description": "Продажи всей платформы"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SalesReportResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Первый день включительно, UTC."
+        -
+          "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+          "description": "Последний день включительно, UTC; период не больше 366 дней."
+  "/api/v1/search":
+    "get":
+      "tags":
+        - "Search"
+      "operationId": "search"
+      "summary": "Поиск ресторанов и блюд"
+      "description": "Маршрут доступен при включённом модуле Search. При выключенном модуле обработчик отсутствует."
+      "responses":
+        "200":
+          "description": "Поиск ресторанов и блюд"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SearchResponse"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+      "parameters":
+        -
+          "name": "q"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "maxLength": 200
+        -
+          "name": "city"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "maxLength": 100
+        -
+          "name": "size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "minimum": 1
+            "maximum": 50
+            "default": 10
+      "security": []
+  "/api/v1/admin/search/reindex":
+    "post":
+      "tags":
+        - "Search"
+      "operationId": "reindex"
+      "summary": "Переиндексировать рестораны и меню"
+      "description": "Маршрут доступен при включённом модуле Search. При выключенном модуле обработчик отсутствует. Только ADMIN."
+      "responses":
+        "200":
+          "description": "Переиндексировать рестораны и меню"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReindexResult"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "401":
+          "description": "Требуется действительный JWT."
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+
 components:
 
   securitySchemes:
@@ -680,6 +1295,430 @@ components:
           format: int32
           minimum: 0
           nullable: true
+
+    "DishRatingRequest":
+      "type": "object"
+      "required":
+        - "menuItemId"
+        - "menuItemName"
+        - "rating"
+      "properties":
+        "menuItemId":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "menuItemName":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 255
+          "description": "Передаётся для совместимости; сервер сохраняет название из позиции заказа."
+        "rating":
+          "type": "integer"
+          "format": "int32"
+          "minimum": 1
+          "maximum": 5
+    "CreateReviewRequest":
+      "type": "object"
+      "required":
+        - "rating"
+      "properties":
+        "rating":
+          "type": "integer"
+          "format": "int32"
+          "minimum": 1
+          "maximum": 5
+        "comment":
+          "type": "string"
+          "maxLength": 2000
+          "nullable": true
+        "dishes":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/DishRatingRequest"
+          "maxItems": 50
+          "nullable": true
+          "description": "Только блюда данного заказа, каждое не более одного раза."
+        "tags":
+          "type": "array"
+          "items":
+            "type": "string"
+            "maxLength": 32
+          "maxItems": 10
+          "nullable": true
+    "DishRatingResponse":
+      "type": "object"
+      "required":
+        - "menuItemId"
+        - "menuItemName"
+        - "rating"
+      "properties":
+        "menuItemId":
+          "type": "integer"
+          "format": "int64"
+        "menuItemName":
+          "type": "string"
+        "rating":
+          "type": "integer"
+          "format": "int32"
+    "ReviewResponse":
+      "type": "object"
+      "required":
+        - "id"
+        - "orderId"
+        - "restaurantId"
+        - "customerId"
+        - "rating"
+        - "dishes"
+        - "tags"
+        - "createdAt"
+      "properties":
+        "id":
+          "type": "string"
+        "orderId":
+          "type": "integer"
+          "format": "int64"
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "customerId":
+          "type": "integer"
+          "format": "int64"
+        "rating":
+          "type": "integer"
+          "format": "int32"
+        "comment":
+          "type": "string"
+          "nullable": true
+        "dishes":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/DishRatingResponse"
+        "tags":
+          "type": "array"
+          "items":
+            "type": "string"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "ReviewPageResponse":
+      "type": "object"
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ReviewResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "TagCountResponse":
+      "type": "object"
+      "required":
+        - "tag"
+        - "count"
+      "properties":
+        "tag":
+          "type": "string"
+        "count":
+          "type": "integer"
+          "format": "int64"
+    "RatingSummaryResponse":
+      "type": "object"
+      "required":
+        - "restaurantId"
+        - "total"
+        - "average"
+        - "histogram"
+        - "topTags"
+      "properties":
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "total":
+          "type": "integer"
+          "format": "int64"
+        "average":
+          "type": "number"
+          "format": "double"
+        "histogram":
+          "type": "object"
+          "additionalProperties":
+            "type": "integer"
+            "format": "int64"
+          "description": "Оценка от 1 до 5 в виде строкового ключа JSON."
+        "topTags":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/TagCountResponse"
+    "ReportPositionRequest":
+      "type": "object"
+      "required":
+        - "latitude"
+        - "longitude"
+      "properties":
+        "latitude":
+          "type": "number"
+          "format": "double"
+          "minimum": -90
+          "maximum": 90
+        "longitude":
+          "type": "number"
+          "format": "double"
+          "minimum": -180
+          "maximum": 180
+        "speedKmh":
+          "type": "number"
+          "format": "double"
+          "minimum": 0
+          "maximum": 300
+          "nullable": true
+    "PositionResponse":
+      "type": "object"
+      "required":
+        - "deliveryId"
+        - "courierId"
+        - "recordedAt"
+        - "latitude"
+        - "longitude"
+      "properties":
+        "deliveryId":
+          "type": "integer"
+          "format": "int64"
+        "courierId":
+          "type": "integer"
+          "format": "int64"
+        "recordedAt":
+          "type": "string"
+          "format": "date-time"
+        "latitude":
+          "type": "number"
+          "format": "double"
+        "longitude":
+          "type": "number"
+          "format": "double"
+        "speedKmh":
+          "type": "number"
+          "format": "double"
+          "nullable": true
+    "TrackResponse":
+      "type": "object"
+      "required":
+        - "deliveryId"
+        - "size"
+        - "positions"
+      "properties":
+        "deliveryId":
+          "type": "integer"
+          "format": "int64"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "positions":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PositionResponse"
+    "RecommendedItemResponse":
+      "type": "object"
+      "required":
+        - "menuItemId"
+        - "name"
+        - "restaurantId"
+        - "score"
+      "properties":
+        "menuItemId":
+          "type": "integer"
+          "format": "int64"
+        "name":
+          "type": "string"
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "score":
+          "type": "integer"
+          "format": "int64"
+    "ProjectionResultResponse":
+      "type": "object"
+      "required":
+        - "ordersRead"
+      "properties":
+        "ordersRead":
+          "type": "integer"
+          "format": "int32"
+    "DailySalesResponse":
+      "type": "object"
+      "required":
+        - "day"
+        - "orders"
+        - "revenue"
+        - "averageCheck"
+      "properties":
+        "day":
+          "type": "string"
+          "format": "date"
+        "orders":
+          "type": "integer"
+          "format": "int64"
+        "revenue":
+          "type": "number"
+        "averageCheck":
+          "type": "number"
+    "SalesReportResponse":
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+        - "totalOrders"
+        - "totalRevenue"
+        - "days"
+      "properties":
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+          "nullable": true
+        "from":
+          "type": "string"
+          "format": "date"
+        "to":
+          "type": "string"
+          "format": "date"
+        "totalOrders":
+          "type": "integer"
+          "format": "int64"
+        "totalRevenue":
+          "type": "number"
+        "days":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/DailySalesResponse"
+    "StatusCountResponse":
+      "type": "object"
+      "required":
+        - "status"
+        - "orders"
+      "properties":
+        "status":
+          "type": "string"
+        "orders":
+          "type": "integer"
+          "format": "int64"
+    "StatusFunnelResponse":
+      "type": "object"
+      "required":
+        - "restaurantId"
+        - "from"
+        - "to"
+        - "statuses"
+      "properties":
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "from":
+          "type": "string"
+          "format": "date"
+        "to":
+          "type": "string"
+          "format": "date"
+        "statuses":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/StatusCountResponse"
+    "FoundRestaurant":
+      "type": "object"
+      "required":
+        - "restaurantId"
+        - "name"
+        - "city"
+        - "active"
+      "properties":
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "name":
+          "type": "string"
+        "description":
+          "type": "string"
+          "nullable": true
+        "city":
+          "type": "string"
+        "active":
+          "type": "boolean"
+    "FoundMenuItem":
+      "type": "object"
+      "required":
+        - "menuItemId"
+        - "restaurantId"
+        - "restaurantName"
+        - "city"
+        - "name"
+        - "price"
+        - "available"
+      "properties":
+        "menuItemId":
+          "type": "integer"
+          "format": "int64"
+        "restaurantId":
+          "type": "integer"
+          "format": "int64"
+        "restaurantName":
+          "type": "string"
+        "city":
+          "type": "string"
+        "name":
+          "type": "string"
+        "description":
+          "type": "string"
+          "nullable": true
+        "price":
+          "type": "number"
+        "available":
+          "type": "boolean"
+    "SearchResponse":
+      "type": "object"
+      "required":
+        - "restaurants"
+        - "items"
+      "properties":
+        "query":
+          "type": "string"
+          "nullable": true
+        "restaurants":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/FoundRestaurant"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/FoundMenuItem"
+    "ReindexResult":
+      "type": "object"
+      "required":
+        - "restaurants"
+        - "items"
+        - "removed"
+      "properties":
+        "restaurants":
+          "type": "integer"
+          "format": "int32"
+        "items":
+          "type": "integer"
+          "format": "int32"
+        "removed":
+          "type": "integer"
+          "format": "int64"
 
 security:
   - bearer-jwt: []

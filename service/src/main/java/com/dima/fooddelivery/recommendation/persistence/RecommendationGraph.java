@@ -3,6 +3,7 @@ package com.dima.fooddelivery.recommendation.persistence;
 import com.dima.fooddelivery.common.stores.StoreToggles;
 import com.dima.fooddelivery.order.domain.Order;
 import com.dima.fooddelivery.order.domain.OrderItem;
+import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -154,21 +155,30 @@ public class RecommendationGraph {
     /**
      * Проецирует заказы и сдвигает метку прочитанного.
      *
-     * <p>Проекция и метка обновляются в одной транзакции. Иначе падение между ними оставило бы
-     * метку впереди данных, и пропущенные заказы никогда бы не спроецировались: следующий
-     * проход начал бы читать уже за ними.
+     * <p>Замена связей и метка обновляются в одной транзакции. При сбое пачку можно
+     * повторить целиком; читатель не видит промежуточного удаления связей.
      *
-     * <p>Пустой список — не повод пропустить обновление метки. Пачка, целиком состоящая
-     * из отменённых заказов, до графа не доезжает, но прочитана она была: без сдвига метки
-     * следующий проход вернулся бы к тем же заказам и застрял бы на них навсегда.
+     * <p>Отменённые заказы передаются в пачке тоже: их прежние связи нужно удалить.
+     * Пустой список с меткой 0 завершает проход и возвращает курсор к началу.
      */
     public void projectOrders(List<Order> orders, long lastOrderId) {
         List<Map<String, Object>> payload = orders.stream()
+                .filter(order -> order.status() != OrderStatus.CANCELED)
+                .filter(order -> !order.items().isEmpty())
                 .map(RecommendationGraph::toParameters)
                 .toList();
 
         try (Session session = driver.session()) {
             session.executeWrite(tx -> {
+                // Удаление и повторная запись атомарны для читателей. Отменённый
+                // заказ удаляет прежние связи, но новых уже не создаёт.
+                tx.run("""
+                        UNWIND $orders AS o
+                        MATCH (:Customer {id: o.customerId})-[ordered:ORDERED {orderId: o.orderId}]->()
+                        DELETE ordered
+                        """, Map.of("orders", orders.stream().map(order -> Map.of(
+                                "customerId", order.customerId(), "orderId", order.id()
+                        )).toList())).consume();
                 if (!payload.isEmpty()) {
                     tx.run(PROJECT_ORDERS, Map.of("orders", payload)).consume();
                 }

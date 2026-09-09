@@ -278,7 +278,9 @@ services:
     volumes:
       - food_delivery_neo4j_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:7474 || exit 1"]
+      # wget, а не curl: в образе neo4j curl не установлен, и проверка на нём всегда
+      # возвращала бы "curl: not found" — контейнер вечно unhealthy при живой базе.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
