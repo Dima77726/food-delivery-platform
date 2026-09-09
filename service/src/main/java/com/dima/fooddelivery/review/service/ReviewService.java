@@ -6,9 +6,10 @@ import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.domain.OrderAccess;
+import com.dima.fooddelivery.order.domain.Order;
+import com.dima.fooddelivery.order.domain.OrderItem;
 import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.order.service.OrderStatusService;
+import com.dima.fooddelivery.order.service.OrderService;
 import com.dima.fooddelivery.review.api.ReviewResponse;
 import com.dima.fooddelivery.review.api.ReviewResponseMapper;
 import com.dima.fooddelivery.review.domain.DishRating;
@@ -25,14 +26,20 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Модуль Review. Отзывы о доставленных заказах.
  *
  * <p><b>Где здесь граница между хранилищами.</b> Заказ живёт в PostgreSQL, отзыв — в MongoDB,
  * и связывает их только {@code orderId}. Право оставить отзыв проверяется через
- * {@link OrderStatusService} — публичный вход модуля Order, — а не запросом в чужую таблицу.
+ * {@link OrderService} — публичный вход модуля Order, — а не запросом в чужую таблицу.
  * Правило то же, что и между остальными модулями; смена хранилища его не отменяет.
  *
  * <p><b>Транзакции здесь нет, и это осознанно.</b> В приложении один менеджер транзакций,
@@ -51,7 +58,7 @@ public class ReviewService {
 
     private final ReviewRepository reviewRepository;
     private final ReviewSummaryRepository reviewSummaryRepository;
-    private final OrderStatusService orderStatusService;
+    private final OrderService orderService;
 
     /**
      * Оставить отзыв о заказе.
@@ -68,9 +75,9 @@ public class ReviewService {
             List<DishRating> dishes,
             List<String> tags
     ) {
-        OrderAccess order = orderStatusService.requireAccess(orderId);
+        Order order = orderService.requireOrder(orderId);
 
-        if (!order.belongsToCustomer(customerId)) {
+        if (!order.customerId().equals(customerId)) {
             log.warn("Попытка оставить отзыв о чужом заказе: orderId={}, customerId={}", orderId, customerId);
 
             throw new AccessDeniedForResourceException("Заказ с id=" + orderId + " принадлежит другому клиенту");
@@ -91,7 +98,7 @@ public class ReviewService {
                 customerId,
                 rating,
                 comment,
-                dishes == null ? List.of() : dishes,
+                validatedDishes(order, dishes),
                 tags == null ? List.of() : tags,
                 Instant.now()
         );
@@ -112,6 +119,30 @@ public class ReviewService {
 
             throw new BusinessRuleViolationException("Отзыв о заказе с id=" + orderId + " уже оставлен");
         }
+    }
+
+    private List<DishRating> validatedDishes(Order order, List<DishRating> dishes) {
+        if (dishes == null) {
+            return List.of();
+        }
+
+        Map<Long, OrderItem> items = order.items().stream()
+                .collect(Collectors.toMap(OrderItem::menuItemId, Function.identity()));
+        Set<Long> seen = new HashSet<>();
+        List<DishRating> result = new ArrayList<>();
+        for (DishRating dish : dishes) {
+            if (dish == null || !items.containsKey(dish.menuItemId())) {
+                throw new BusinessRuleViolationException("Оценить можно только блюдо из этого заказа");
+            }
+            if (!seen.add(dish.menuItemId())) {
+                throw new BusinessRuleViolationException("Оценка блюда не должна повторяться");
+            }
+            if (dish.rating() < Review.MIN_RATING || dish.rating() > Review.MAX_RATING) {
+                throw new BusinessRuleViolationException("Оценка блюда должна быть от 1 до 5");
+            }
+            result.add(new DishRating(dish.menuItemId(), items.get(dish.menuItemId()).menuItemName(), dish.rating()));
+        }
+        return List.copyOf(result);
     }
 
     /**

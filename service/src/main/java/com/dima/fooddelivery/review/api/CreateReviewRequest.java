@@ -32,10 +32,10 @@ public record CreateReviewRequest(
         @Valid
         @Size(max = 50, message = "не больше 50 оценок блюд")
         @Schema(description = "Оценки отдельных блюд заказа")
-        List<DishRatingRequest> dishes,
+        List<@NotNull @Valid DishRatingRequest> dishes,
 
         @Size(max = 10, message = "не больше 10 меток")
         @Schema(description = "Короткие метки", example = "[\"быстро\", \"вкусно\"]")
-        List<@Size(max = 32, message = "метка не длиннее 32 символов") String> tags
+        List<@NotNull @Size(max = 32, message = "метка не длиннее 32 символов") String> tags
 ) {
 }

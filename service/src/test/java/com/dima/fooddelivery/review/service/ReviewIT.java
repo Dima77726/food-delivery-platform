@@ -3,6 +3,7 @@ package com.dima.fooddelivery.review.service;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.order.domain.OrderStatus;
+import com.dima.fooddelivery.order.service.OrderService;
 import com.dima.fooddelivery.review.api.ReviewResponse;
 import com.dima.fooddelivery.review.domain.DishRating;
 import com.dima.fooddelivery.review.domain.RatingSummary;
@@ -36,6 +37,30 @@ class ReviewIT extends AbstractStoresIntegrationTest {
 
     @Autowired
     private ReviewService reviewService;
+
+    @Autowired
+    private OrderService orderService;
+
+    @Test
+    void shouldRejectDishesOutsideTheOrderAndRepeatedDishes() {
+        Long customerId = testData.insertCustomer();
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.DELIVERED);
+        Long foreignItem = testData.insertMenuItem(testData.insertRestaurant(), new BigDecimal("100.00"));
+
+        assertThrows(BusinessRuleViolationException.class, () -> reviewService.createReview(
+                customerId, order.orderId(), 5, null,
+                List.of(new DishRating(foreignItem, "Чужое блюдо", 5)), List.of()));
+
+        DishRating repeated = new DishRating(order.menuItemId(), "Название клиента", 5);
+        assertThrows(BusinessRuleViolationException.class, () -> reviewService.createReview(
+                customerId, order.orderId(), 5, null, List.of(repeated, repeated), List.of()));
+
+        // Неуспешные попытки не должны занимать уникальный ключ отзыва.
+        ReviewResponse saved = reviewService.createReview(customerId, order.orderId(), 5, null,
+                List.of(repeated), List.of());
+        assertEquals(orderService.requireOrder(order.orderId()).items().get(0).menuItemName(),
+                saved.dishes().get(0).menuItemName());
+    }
 
     @Test
     void shouldSaveReviewForDeliveredOrder() {

@@ -20,6 +20,9 @@ import org.springframework.boot.test.context.SpringBootTest;
         "preliquibase.enabled=false",
         "spring.sql.init.mode=never",
         "app.notification.dispatch-enabled=false",
+        "app.outbox.publish-enabled=false",
+        "spring.kafka.admin.auto-create=false",
+        "spring.kafka.listener.auto-startup=false",
         // Единственное исключение из правила выше, и оно осознанное: проверка схемы
         // Hibernate по определению требует соединения — сверить сущности с таблицами,
         // не прочитав таблиц, невозможно. Здесь Liquibase выключен и схемы нет вовсе,

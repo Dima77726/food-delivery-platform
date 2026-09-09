@@ -3,7 +3,6 @@ package com.dima.fooddelivery.recommendation.service;
 import com.dima.fooddelivery.common.stores.Neo4jStoreProperties;
 import com.dima.fooddelivery.common.stores.StoreToggles;
 import com.dima.fooddelivery.order.domain.Order;
-import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.order.service.OrderService;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import com.dima.fooddelivery.recommendation.persistence.RecommendationGraph;
@@ -24,8 +23,9 @@ import java.util.List;
  * которого может не быть вовсе.
  *
  * <p>Поэтому здесь другой, тоже вполне обычный способ: пакетное чтение из системы записи
- * с меткой прочитанного. Отставание графа от PostgreSQL измеряется интервалом проекции,
- * и для рекомендаций это совершенно неважно — они и так строятся на истории за месяцы.
+ * с меткой прочитанного. После конца выборки начинается новый проход: он учитывает отмены
+ * уже прочитанных заказов и поздние коммиты с меньшим ID. Отставание зависит от длительности
+ * полного прохода, а не только от интервала планировщика.
  *
  * <p><b>Отменённые заказы в граф не попадают.</b> Заказ, который клиент отменил, не говорит
  * о его вкусах ничего - скорее наоборот. Витрина продаж их при этом учитывает: там вопрос
@@ -59,29 +59,26 @@ public class RecommendationService {
     /**
      * Догоняет граф на одну пачку заказов.
      *
-     * @return сколько заказов прочитано из PostgreSQL; ноль означает, что граф в актуальном
-     * состоянии
+     * @return сколько заказов прочитано из PostgreSQL; ноль означает конец текущего прохода
+     * и сброс курсора для следующего. Изменённые ранее заказы проверит следующий проход.
      */
-    public int projectNextBatch() {
+    public synchronized int projectNextBatch() {
         long lastProjected = recommendationGraph.lastProjectedOrderId();
 
         List<Order> batch = orderService.findForProjection(lastProjected, properties.projectionBatch());
 
         if (batch.isEmpty()) {
+            // Следующий такт перечитает старые заказы: их статус мог измениться,
+            // а транзакция с меньшим ID могла завершиться после продвижения курсора.
+            recommendationGraph.projectOrders(List.of(), 0L);
             return 0;
         }
 
         // Метка двигается по последнему прочитанному заказу, а не по последнему
-        // спроецированному: отфильтрованные отменённые заказы тоже прочитаны,
-        // и возвращаться к ним незачем.
+        // спроецированному: отменённые заказы тоже обработаны.
         long lastRead = batch.get(batch.size() - 1).id();
 
-        List<Order> projectable = batch.stream()
-                .filter(order -> order.status() != OrderStatus.CANCELED)
-                .filter(order -> !order.items().isEmpty())
-                .toList();
-
-        recommendationGraph.projectOrders(projectable, lastRead);
+        recommendationGraph.projectOrders(batch, lastRead);
 
         return batch.size();
     }
@@ -96,7 +93,7 @@ public class RecommendationService {
      *
      * @return сколько заказов прочитано
      */
-    public int rebuild() {
+    public synchronized int rebuild() {
         recommendationGraph.clear();
 
         int total = 0;
