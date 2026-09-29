@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.dima</groupId>
+        <artifactId>food-delivery-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>food-delivery-service</artifactId>
+    <name>food-delivery-service</name>
+    <description>Приложение платформы доставки еды</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!--
+            Даёт JwtEncoder/JwtDecoder поверх Nimbus JOSE.
+            Свой парсер JWT писать не нужно: подпись, срок жизни и claims проверяет Spring Security.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <!--
+            Actuator даёт health и метрики, micrometer-metrics — сбор,
+            registry-prometheus — эндпоинт в формате, который умеет читать Prometheus.
+            Версия реестра управляется micrometer-bom, импортированным Spring Boot.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-micrometer-metrics</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-kafka</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Даёт @ServiceConnection: контейнер объявляется бином, а Spring сам проставляет
+            url/username/password. Важно, что остальные свойства datasource из application.yml
+            при этом не затираются — иначе тесты потеряли бы currentSchema.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Контейнер Redis живёт в group com.redis, а не org.testcontainers:
+            это сторонний модуль, а не часть основного Testcontainers.
+        -->
+        <dependency>
+            <groupId>com.redis</groupId>
+            <artifactId>testcontainers-redis</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <!--
+            Spring Data JPA тянет за собой Hibernate, spring-orm и JpaTransactionManager.
+            Стоит он здесь не вместо starter-jdbc, а рядом с ним: часть модулей осталась
+            на голом SQL, и обе технологии работают поверх одного DataSource.
+
+            Практическое следствие — менеджер транзакций в приложении остаётся один,
+            JpaTransactionManager. Он умеет и то и другое: JdbcTemplate берёт соединение через
+            DataSourceUtils и попадает в ту же транзакцию, что и EntityManager. Объявлять рядом
+            DataSourceTransactionManager не нужно, и это была бы ошибка — на один запрос
+            получилось бы две независимые транзакции, которые коммитятся порознь.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-liquibase</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>net.lbruun.springboot</groupId>
+            <artifactId>preliquibase-spring-boot-starter</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+
+        <!--
+            ================================ Пять новых хранилищ ================================
+
+            Каждое взято под ту задачу, для которой оно и придумано, а не «чтобы было».
+            Общее правило: PostgreSQL остаётся системой записи. Всё, что живёт в этих пяти,
+            — либо производная проекция (её можно потерять и построить заново), либо данные,
+            которым реляционная модель не нужна вовсе.
+
+            Способ доступа у каждого свой, и это продолжение того же осознанного разнобоя,
+            что уже есть между модулями на JPA, Spring JDBC и голом JDBC:
+
+              mongo         — Spring Data MongoDB: репозитории и aggregation pipeline;
+              elasticsearch — Spring Data Elasticsearch: ElasticsearchOperations и Query DSL;
+              cassandra     — голый драйвер DataStax, CQL и подготовленные запросы;
+              neo4j         — голый драйвер Neo4j, Cypher руками;
+              clickhouse    — JdbcTemplate поверх собственного пула, SQL руками.
+
+            Почему у Cassandra и Neo4j взяты драйверы, а не стартеры Spring Boot, — написано
+            в CassandraConfig и Neo4jConfig соответственно. Если коротко: стартер поднимает
+            соединение на старте контекста (Cassandra) и добавляет второй менеджер транзакций
+            рядом с JpaTransactionManager (Neo4j). Ни то, ни другое нам не нужно.
+        -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-mongodb</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+
+        <!-- Версией управляет spring-boot-dependencies (cassandra-driver.version). -->
+        <dependency>
+            <groupId>org.apache.cassandra</groupId>
+            <artifactId>java-driver-core</artifactId>
+        </dependency>
+
+        <!-- Версией управляет spring-boot-dependencies (neo4j-java-driver.version). -->
+        <dependency>
+            <groupId>org.neo4j.driver</groupId>
+            <artifactId>neo4j-java-driver</artifactId>
+        </dependency>
+
+        <!--
+            ClickHouse Spring Boot не знает, поэтому версия задана явно в родительском pom.
+            Драйвер обычный JDBC, поэтому работает и Hikari, и JdbcTemplate.
+        -->
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>${clickhouse-jdbc.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-mongodb</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-elasticsearch</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-cassandra</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-neo4j</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-clickhouse</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                Генерация server-интерфейсов и моделей из спецификации.
+
+                interfaceOnly=true — генерируются только интерфейсы с аннотациями маршрутов,
+                реализацию пишем сами. skipDefaultInterface=true убирает default-методы,
+                возвращающие 501: с ними забытая реализация метода компилируется молча,
+                а падает уже в проде.
+
+                useTags=true раскладывает операции по интерфейсам согласно tags в спеке,
+                иначе всё свалилось бы в один гигантский DefaultApi.
+            -->
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>generate-server-api</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${openapi.spec}</inputSpec>
+                            <generatorName>spring</generatorName>
+                            <library>spring-boot</library>
+                            <apiPackage>com.dima.fooddelivery.generated.api</apiPackage>
+                            <modelPackage>com.dima.fooddelivery.generated.model</modelPackage>
+                            <generateApiTests>false</generateApiTests>
+                            <generateModelTests>false</generateModelTests>
+                            <generateApiDocumentation>false</generateApiDocumentation>
+                            <generateModelDocumentation>false</generateModelDocumentation>
+                            <configOptions>
+                                <interfaceOnly>true</interfaceOnly>
+                                <skipDefaultInterface>true</skipDefaultInterface>
+                                <useSpringBoot3>true</useSpringBoot3>
+                                <useJakartaEe>true</useJakartaEe>
+                                <useTags>true</useTags>
+                                <documentationProvider>springdoc</documentationProvider>
+                                <annotationLibrary>swagger2</annotationLibrary>
+                                <openApiNullable>false</openApiNullable>
+                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                            </configOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                classifier=exec принципиально важен с тех пор, как появился модуль client.
+
+                По умолчанию плагин подменяет обычный jar исполняемым, и классы в нём лежат
+                в BOOT-INF/classes. Такой артефакт нельзя подключить зависимостью: компилятор
+                просто не увидит классы. Контрактный тест в client именно об это и споткнулся.
+
+                С классификатором главным артефактом остаётся обычная библиотека, а бутовый
+                jar publishes рядом как food-delivery-service-<version>-exec.jar. Docker-образ
+                собирается из него — см. Dockerfile.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <classifier>exec</classifier>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <!--
+                Разделение тестов на два круга.
+
+                Surefire (фаза test) гоняет быстрые тесты: доменные enum'ы, обработчик ошибок.
+                Они не требуют ни Docker, ни базы и дают обратную связь за секунды.
+
+                Failsafe (фаза verify) гоняет классы *IT — интеграционные, на настоящем
+                PostgreSQL в контейнере. Они медленнее, но именно они проверяют SQL.
+
+                Практический вывод: во время работы достаточно ./mvnw test,
+                перед коммитом нужен ./mvnw verify.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

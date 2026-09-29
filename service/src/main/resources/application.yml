@@ -1,0 +1,322 @@
+spring:
+  application:
+    name: food-delivery-platform
+
+  lifecycle:
+    # Сколько ждать завершения текущей работы при graceful shutdown. По умолчанию 30 секунд,
+    # и это больше, чем ждёт Docker: он шлёт SIGKILL через 10 секунд после SIGTERM, так что
+    # штатное завершение просто не успевало бы закончиться. Двадцать секунд согласованы
+    # с stop_grace_period в docker-compose.yml — правьте их вместе.
+    timeout-per-shutdown-phase: 20s
+
+  datasource:
+    # currentSchema задаёт search_path сразу после установки соединения, поэтому SQL в коде
+    # пишется без префикса схемы. public оставлен вторым: там по умолчанию живут расширения
+    # PostgreSQL (uuid-ossp, pgcrypto), и без него они перестали бы резолвиться.
+    # Хост вынесен в переменную: локально это localhost, внутри docker-compose — имя сервиса
+    # postgres. Без этого приложение в контейнере искало бы базу внутри самого себя.
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:food_delivery}?currentSchema=${APP_SCHEMA:food_app},public
+    username: ${POSTGRES_USER:food_user}
+    password: ${POSTGRES_PASSWORD:food_password}
+    driver-class-name: org.postgresql.Driver
+
+    hikari:
+      # Пул задан явно, хотя значения близки к умолчанию. Смысл в том, чтобы размер был
+      # осознанным: соединение одновременно держат веб-потоки, два слушателя Kafka
+      # и планировщик. Десяти хватает на фон и на разумную веб-нагрузку, при этом
+      # несколько экземпляров приложения умещаются в max_connections PostgreSQL,
+      # где по умолчанию всего 100 на всех.
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      # Пул фиксированного размера: minimum-idle равен максимуму. Пул, который сжимается
+      # в простое, платит за это установкой соединения на первом же запросе после паузы —
+      # а это как раз момент, когда пользователь ждёт ответа.
+      minimum-idle: ${DB_POOL_SIZE:10}
+      # Тридцать секунд по умолчанию — это ожидание свободного соединения. Для HTTP-запроса
+      # столько ждать бессмысленно: клиент уже отвалится по своему таймауту, а поток
+      # останется занятым. Лучше быстро вернуть ошибку.
+      connection-timeout: 3000
+      # Соединение, не возвращённое в пул за 20 секунд, — почти наверняка утечка.
+      # Hikari напишет об этом в лог со стектрейсом места, где оно было взято.
+      # Стоит недорого, а ловит ровно ту ошибку, из-за которой пул исчерпывается
+      # под нагрузкой и приложение встаёт целиком.
+      leak-detection-threshold: 20000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Небольшой таймаут намеренно. Кэш обязан быть быстрее базы; если Redis отвечает
+      # дольше, ждать его бессмысленно — быстрее сходить в PostgreSQL. Значение по умолчанию
+      # в Lettuce — минута, и при недоступном Redis каждый запрос витрины висел бы минуту.
+      timeout: 500ms
+      connect-timeout: 500ms
+
+    # Отзывы о заказах. Клиент MongoDB соединение при создании не открывает, поэтому эти
+    # настройки безобидны и при выключенном хранилище: бины автоконфигурации существуют,
+    # но в базу никто не ходит — весь модуль отзывов включается отдельно, через
+    # app.stores.mongo.enabled.
+    mongodb:
+      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
+      # Автоматическое создание индексов выключено намеренно: оно срабатывает при первом
+      # разборе доменного типа, то есть на старте приложения и без оглядки на выключатель.
+      # Индексы создаёт ReviewIndexes — см. комментарий там.
+      auto-index-creation: false
+
+  # Поиск по витрине. Клиент так же ленив, как у MongoDB: HTTP-соединение открывается
+  # при первом запросе.
+  elasticsearch:
+    uris: http://${ELASTIC_HOST:localhost}:${ELASTIC_PORT:9200}
+    # Таймауты короткие по той же причине, что и у Redis: поиск обязан быть быстрым.
+    # Значение по умолчанию (минута на сокет) означало бы, что недоступный Elasticsearch
+    # подвешивает поисковый запрос на минуту вместо честной ошибки.
+    connection-timeout: 2s
+    socket-timeout: 5s
+
+  cache:
+    type: redis
+
+  kafka:
+    # По умолчанию — localhost:9094, внешний листенер брокера. Так приложение из IDE
+    # достучится до Kafka в контейнере без единой правки. Внутри compose переменная
+    # переопределяется на kafka:9092.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+
+    producer:
+      # acks=all — подтверждение только после записи на все синхронизированные реплики.
+      # Со значением 1 сообщение теряется при падении лидера сразу после подтверждения,
+      # а для событий заказа потеря недопустима.
+      acks: all
+      properties:
+        # Идемпотентный продюсер: при повторной отправке из-за таймаута брокер распознаёт
+        # дубликат по номеру последовательности и не пишет его второй раз.
+        enable.idempotence: true
+        # Больше пяти при включённой идемпотентности брокер не разрешает: иначе он не сможет
+        # восстановить порядок сообщений внутри партиции после повтора.
+        max.in.flight.requests.per.connection: 5
+
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:food-delivery-notifications}
+      # earliest, а не latest: новый экземпляр обязан прочитать всё, что накопилось,
+      # а не начать с текущего момента, потеряв события за время простоя.
+      auto-offset-reset: earliest
+      properties:
+        # Ограничивает объём работы между обращениями к брокеру. При слишком большой пачке
+        # обработка не укладывается в max.poll.interval.ms, и брокер исключает потребителя
+        # из группы, считая его зависшим.
+        max.poll.records: 50
+
+    listener:
+      # Офсет фиксируется после каждого сообщения. Дороже по количеству коммитов, зато
+      # при падении переобрабатывается одно сообщение, а не вся пачка.
+      ack-mode: record
+
+  jpa:
+    # Диалект задан явно, хотя Hibernate умеет определять его сам. Определяет он его,
+    # открывая соединение и читая метаданные JDBC, — то есть приложение лезет в базу
+    # ещё до того, как ему это понадобилось. С явным значением старт не зависит от
+    # доступности базы в этот момент и происходит на один round-trip быстрее.
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+    hibernate:
+      # Схемой владеет Liquibase, и только он. validate означает: на старте Hibernate сверяет
+      # свои сущности с реальными таблицами и падает при расхождении, но сам ничего не меняет.
+      # update здесь был бы прямым вредительством — он правил бы схему в обход миграций,
+      # и на разных стендах она разъехалась бы молча.
+      ddl-auto: validate
+
+    # Выключено намеренно, потому что значение по умолчанию — true. С open-in-view Spring
+    # держит EntityManager открытым до конца отрисовки ответа, и ленивые связи подгружаются
+    # уже в контроллере: запросы уходят в базу после того, как транзакция закрыта. N+1
+    # при этом перестаёт быть виден в сервисе и всплывает нагрузкой на проде.
+    open-in-view: false
+
+    properties:
+      hibernate:
+        # Та же схема, что у datasource и Liquibase, но заданная явно. Hibernate не читает
+        # currentSchema из JDBC-URL: без этого свойства валидатор искал бы таблицы
+        # по метаданным во всех схемах сразу и результат зависел бы от драйвера.
+        default_schema: ${APP_SCHEMA:food_app}
+        jdbc:
+          # Без batch_size Hibernate шлёт по одному INSERT на строку.
+          batch_size: 50
+        # Разрешают Hibernate переупорядочить операции перед отправкой. Без них пачка
+        # собирается только из подряд идущих однотипных запросов, то есть почти никогда.
+        order_inserts: true
+        order_updates: true
+
+  liquibase:
+    enabled: true
+    change-log: classpath:/db/changelog/changelog.yml
+    # Liquibase намеренно не полагается на search_path: миграции обязаны быть явными.
+    default-schema: ${APP_SCHEMA:food_app}
+    liquibase-schema: ${LIQUIBASE_SCHEMA:liquibase_meta}
+    parameters:
+      appSchema: ${APP_SCHEMA:food_app}
+
+app:
+  outbox:
+    # Пауза между разборами очереди. Две секунды — компромисс: событие доезжает до
+    # потребителя почти сразу, а пустых запросов к базе немного.
+    publish-interval: ${OUTBOX_PUBLISH_INTERVAL:PT2S}
+    publish-enabled: ${OUTBOX_PUBLISH_ENABLED:true}
+
+  security:
+    # Первый администратор. Пустые значения по умолчанию — намеренно: без переменных окружения
+    # учётка не создаётся вовсе, и в репозитории не оказывается ни одного пароля.
+    bootstrap-admin:
+      email: ${APP_ADMIN_EMAIL:}
+      password: ${APP_ADMIN_PASSWORD:}
+    jwt:
+      # ВНИМАНИЕ: значение по умолчанию — только для локальной разработки.
+      # JwtSecretValidator не даст приложению стартовать с ним под любым профилем, кроме dev/test.
+      secret: ${JWT_SECRET:dev-only-insecure-secret-change-me-in-any-real-environment}
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
+
+  # --- Пять дополнительных хранилищ ---------------------------------------------------------
+  #
+  # По умолчанию выключены все пять, и приложение стартует ровно так же, как стартовало
+  # до их появления: одним PostgreSQL, Redis и Kafka. Причина проста — вместе они просят
+  # около пяти гигабайт памяти, и держать их поднятыми ради модуля, который сегодня
+  # не трогают, незачем.
+  #
+  # Включить: docker compose --profile stores up -d и STORE_*_ENABLED=true в .env.
+  # Подробности каждого выключателя — в StoreToggles.
+  #
+  # Важное следствие: включённое хранилище обязано быть доступно. Схему свою модуль
+  # создаёт на старте и при недоступном сервере не даёт приложению подняться.
+  stores:
+    # Отзывы о заказах.
+    mongo:
+      enabled: ${STORE_MONGO_ENABLED:false}
+
+    # Трек курьера. Настройки соединения свои, а не spring.cassandra.*: стартер Spring Boot
+    # здесь не используется, см. CassandraConfig.
+    cassandra:
+      enabled: ${STORE_CASSANDRA_ENABLED:false}
+      contact-points: ${CASSANDRA_CONTACT_POINTS:localhost:9042}
+      local-datacenter: ${CASSANDRA_DATACENTER:datacenter1}
+      keyspace: ${CASSANDRA_KEYSPACE:food_delivery}
+      # Неделя истории трека. Строки исчезают сами, DELETE в Cassandra оставлял бы надгробия.
+      track-ttl: ${CASSANDRA_TRACK_TTL:P7D}
+      request-timeout: ${CASSANDRA_REQUEST_TIMEOUT:PT5S}
+
+    # Рекомендации по графу заказов.
+    neo4j:
+      enabled: ${STORE_NEO4J_ENABLED:false}
+      uri: ${NEO4J_URI:bolt://localhost:7687}
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:food_delivery_neo4j}
+      # Проекция циклически сверяет заказы пачками. Один такт — одна пачка;
+      # изменения старых заказов видны после следующего полного прохода.
+      projection-interval: ${NEO4J_PROJECTION_INTERVAL:PT30S}
+      projection-batch: ${NEO4J_PROJECTION_BATCH:200}
+      # Выключает только таймер, но не сам сервис: тесты запускают проекцию вручную,
+      # чтобы точно знать момент, когда она произошла.
+      projection-enabled: ${NEO4J_PROJECTION_ENABLED:true}
+
+    # Витрина аналитики заказов.
+    clickhouse:
+      enabled: ${STORE_CLICKHOUSE_ENABLED:false}
+      url: jdbc:clickhouse://${CLICKHOUSE_HOST:localhost}:${CLICKHOUSE_PORT:8123}/${CLICKHOUSE_DB:food_delivery}
+      username: ${CLICKHOUSE_USER:default}
+      password: ${CLICKHOUSE_PASSWORD:}
+      pool-size: ${CLICKHOUSE_POOL_SIZE:4}
+      query-timeout: ${CLICKHOUSE_QUERY_TIMEOUT:PT10S}
+      # Своя группа потребителей: тот же топик независимо читают уведомления.
+      consumer-group: ${CLICKHOUSE_CONSUMER_GROUP:food-delivery-analytics}
+
+    # Поиск по витрине.
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
+      reindex-interval: ${ELASTIC_REINDEX_INTERVAL:PT5M}
+      reindex-enabled: ${ELASTIC_REINDEX_ENABLED:true}
+      max-results: ${ELASTIC_MAX_RESULTS:50}
+
+management:
+  server:
+    # Отдельный порт для служебных эндпоинтов — не косметика.
+    # В docker-compose он не публикуется наружу, поэтому метрики и health доступны
+    # только внутри сети, где живёт Prometheus. На одном порту с публичным API пришлось бы
+    # либо открывать /actuator/prometheus всему интернету, либо городить аутентификацию
+    # для скрейпера, у которого нет способа обновлять JWT.
+    port: ${MANAGEMENT_PORT:8081}
+
+  endpoints:
+    web:
+      exposure:
+        # Перечислены поимённо. Значение * открыло бы и heapdump с threaddump —
+        # дамп кучи содержит всё, что было в памяти, включая пароли из запросов.
+        include: health,info,prometheus
+
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        # Разделяет liveness и readiness: первый отвечает «процесс жив»,
+        # второй — «готов принимать трафик». Перезапускать под из-за недоступной
+        # базы не нужно, а вот убрать его из балансировки — нужно.
+        enabled: true
+
+  # Индикаторы здоровья MongoDB и Elasticsearch привязаны к тем же переменным окружения,
+  # что и сами модули. Иначе выключенное хранилище утягивало бы общий статус в DOWN:
+  # автоконфигурация создаёт индикатор по факту наличия клиента в classpath, а клиент
+  # там есть всегда. Readiness-проба при этом отвечала бы «не готов» на совершенно
+  # исправное приложение.
+  #
+  # Cassandra, Neo4j и ClickHouse в этом списке отсутствуют не по недосмотру: их клиенты
+  # создаются нашими конфигурациями, и автоматических индикаторов для них не появляется.
+  health:
+    # Ключ именно mongodb, а не mongo: в Spring Boot 4 старое имя объявлено удалённым.
+    # Ошибки при этом не возникает, значение просто игнорируется — индикатор остаётся
+    # включённым, минуту ждёт недоступный MongoDB и роняет общий статус в DOWN.
+    mongodb:
+      enabled: ${STORE_MONGO_ENABLED:false}
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
+
+  metrics:
+    tags:
+      # Общий тег на все метрики: без него метрики нескольких приложений
+      # в одном Prometheus невозможно различить.
+      application: ${spring.application.name}
+    distribution:
+      # Гистограммы по длительности HTTP-запросов, чтобы считались перцентили.
+      # Без них доступен только средний отклик, а он скрывает как раз то,
+      # что интересно: медленный хвост.
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: 8080
+
+  # Значение по умолчанию — immediate: при SIGTERM приложение обрывает всё на середине.
+  # Для этого сервиса это означает недообработанный запрос, слушателя Kafka, не успевшего
+  # зафиксировать офсет, и публикатор outbox, остановленный между отправкой в брокер
+  # и отметкой в базе. Dockerfile специально написан так, чтобы SIGTERM дошёл до JVM
+  # (форма exec в ENTRYPOINT) — без graceful это старание пропадает впустую.
+  shutdown: graceful
+
+logging:
+  # Отдельное свойство, а не переопределение всего шаблона: Boot подставляет correlation
+  # в стандартный формат сам, и остальная его часть — цвета, обрезка имени класса —
+  # остаётся нетронутой. Переписав шаблон целиком, это пришлось бы поддерживать руками.
+  #
+  # Прочерк вместо пустоты у обоих значений намеренный: строка лога из фонового потока
+  # не имеет метки запроса, и по прочерку это видно сразу, а не выглядит сбоем разметки.
+  pattern:
+    correlation: "[${spring.application.name:},%X{correlationId:-},%X{userId:-}] "
+
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG
+    liquibase: INFO
+    net.lbruun.springboot.preliquibase: TRACE

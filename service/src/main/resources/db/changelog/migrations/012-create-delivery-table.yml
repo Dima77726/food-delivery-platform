@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 012-create-delivery-table
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/012-create-delivery-table.sql
+            relativeToChangelogFile: true
+            splitStatements: true

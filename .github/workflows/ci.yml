@@ -1,0 +1,68 @@
+name: CI
+
+# Прогон на каждый PR и на каждый пуш в защищаемые ветки.
+# Пуш нужен отдельно от PR: после мержа состояние ветки отличается от того,
+# что проверялось в PR, если за это время туда влили что-то ещё.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# Новый коммит в ту же ветку отменяет предыдущий прогон: проверять устаревшее
+# состояние смысла нет, а раннеры не бесконечны.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Явное сужение прав токена. По умолчанию он может больше, чем нужно сборке,
+# а сборке не нужно ничего, кроме чтения кода.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Сборка и тесты
+    runs-on: ubuntu-latest
+    # Testcontainers ждёт готовности контейнера; при зависшем Docker без лимита
+    # job висел бы до потолка в 6 часов.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          # Кэш ~/.m2. Без него каждый прогон заново тянет Spring Boot целиком.
+          cache: maven
+
+      # verify запускает оба круга: surefire с быстрыми тестами и failsafe
+      # с интеграционными на настоящем PostgreSQL. Docker на ubuntu-latest
+      # доступен из коробки, поэтому Testcontainers поднимается без настройки.
+      - name: Сборка и тесты
+        run: ./mvnw -B --no-transfer-progress clean verify
+
+      # Отчёты нужны именно когда упало: в логе видно только строчку с ошибкой,
+      # а в отчёте — стектрейс и вывод конкретного теста.
+      #
+      # Пути со звёздочками, потому что сборка многомодульная: отчёты лежат
+      # в service/target и client/target, а корневого target у reactor-модуля
+      # нет вовсе. С путём target/surefire-reports этот шаг молча выгружал
+      # пустой архив — ровно в тот момент, когда он и был нужен.
+      #
+      # if-no-files-found оставлен на значении по умолчанию (warn): при пустом
+      # результате в логе появится предупреждение. Со значением ignore следующая
+      # такая же ошибка в путях снова осталась бы незамеченной.
+      - name: Отчёты о тестах
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          retention-days: 7

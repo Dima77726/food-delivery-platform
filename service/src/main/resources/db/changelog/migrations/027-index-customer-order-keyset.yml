@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 027-index-customer-order-keyset
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/027-index-customer-order-keyset.sql
+            relativeToChangelogFile: true
+            splitStatements: true

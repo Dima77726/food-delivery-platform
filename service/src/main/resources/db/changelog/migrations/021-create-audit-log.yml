@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 021-create-audit-log
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/021-create-audit-log.sql
+            relativeToChangelogFile: true
+            splitStatements: true

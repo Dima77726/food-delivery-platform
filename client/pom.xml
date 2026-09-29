@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.dima</groupId>
+        <artifactId>food-delivery-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>food-delivery-client</artifactId>
+    <name>food-delivery-client</name>
+    <description>Типизированный Java-клиент к API платформы, целиком генерируемый из спецификации</description>
+
+    <!--
+        Рукописного основного кода в модуле нет ни строки: каталога src/main не существует
+        намеренно. Всё содержимое артефакта появляется на этапе generate-sources
+        из openapi/food-delivery-api.yaml. Как только сюда попадёт рукописный класс, клиент
+        перестанет быть производным от контракта и начнёт от него отставать.
+
+        src/test при этом есть: там живёт контрактный тест, который поднимает приложение
+        и ходит в него сгенерированным клиентом.
+
+        Модуль не зависит от service: потребителю клиента незачем тянуть Liquibase,
+        Security и драйвер базы. Общее у них ровно одно — спецификация.
+    -->
+
+    <dependencies>
+        <!--
+            RestClient из Spring Framework, а не RestTemplate: последний в поддерживающем
+            режиме, новых возможностей не получает и в новом коде не рекомендуется.
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+        </dependency>
+
+        <!--
+            Только для тестов. Контрактный тест поднимает настоящее приложение и ходит в него
+            сгенерированным клиентом: это единственный способ убедиться, что обе стороны
+            понимают спеку одинаково. Компиляции клиента для этого мало — она не заметит,
+            что сервер отдаёт поле под другим именем.
+
+            Scope test означает, что потребителю артефакта эта зависимость не достаётся:
+            SDK остаётся лёгким, тяжесть живёт только в сборке.
+        -->
+        <dependency>
+            <groupId>com.dima</groupId>
+            <artifactId>food-delivery-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>generate-java-client</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${openapi.spec}</inputSpec>
+                            <generatorName>java</generatorName>
+                            <library>restclient</library>
+                            <apiPackage>com.dima.fooddelivery.client.api</apiPackage>
+                            <modelPackage>com.dima.fooddelivery.client.model</modelPackage>
+                            <invokerPackage>com.dima.fooddelivery.client</invokerPackage>
+                            <generateApiTests>false</generateApiTests>
+                            <generateModelTests>false</generateModelTests>
+                            <generateApiDocumentation>false</generateApiDocumentation>
+                            <generateModelDocumentation>false</generateModelDocumentation>
+                            <configOptions>
+                                <useJakartaEe>true</useJakartaEe>
+                                <openApiNullable>false</openApiNullable>
+                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                                <useTags>true</useTags>
+                                <!--
+                                    Клиенту swagger-аннотации не нужны: он ничего не публикует,
+                                    его никто не сканирует ради документации. Заодно уходит
+                                    зависимость на swagger-annotations, версия которой
+                                    не управляется BOM'ом Spring Boot.
+                                -->
+                                <annotationLibrary>none</annotationLibrary>
+                                <documentationProvider>none</documentationProvider>
+                            </configOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Контрактные тесты — интеграционные, поэтому тот же failsafe, что и в service. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

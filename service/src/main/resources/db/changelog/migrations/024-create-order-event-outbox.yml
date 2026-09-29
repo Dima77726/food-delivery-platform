@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 024-create-order-event-outbox
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/024-create-order-event-outbox.sql
+            relativeToChangelogFile: true
+            splitStatements: true

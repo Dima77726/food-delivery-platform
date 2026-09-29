@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 009-add-order-cooking-started-event-type
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/009-add-order-cooking-started-event-type.sql
+            relativeToChangelogFile: true
+            splitStatements: true

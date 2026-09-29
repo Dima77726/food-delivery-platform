@@ -1,0 +1,25 @@
+# Конфигурация Prometheus для локального стека.
+
+global:
+  # Раз в 15 секунд. Чаще — лишняя нагрузка и рост объёма хранилища,
+  # реже — короткие всплески теряются между снимками.
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: food-delivery
+    # Actuator отдаёт метрики не по корню, а по своему пути.
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      # В режиме full работает app:8081; при запуске из IDE — host.docker.internal:8081.
+      # Один из двух targets будет DOWN, и для локальной конфигурации это ожидаемо.
+      - targets: ['app:8081', 'host.docker.internal:8081']
+        labels:
+          service: food-delivery-platform
+
+  # Prometheus снимает метрики и с самого себя — полезно, когда непонятно,
+  # кто именно тормозит: приложение или сборщик метрик.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

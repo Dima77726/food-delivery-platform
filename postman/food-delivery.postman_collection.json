@@ -1,0 +1,3624 @@
+{
+  "info": {
+    "name": "Food Delivery Platform API",
+    "_postman_id": "8f3c1a52-4d6b-4a19-9c7e-2b5e1f0a7d34",
+    "description": "Полный REST API платформы доставки еды: 17 папок, 77 запросов.\n\nПапки 12-16 работают только при включённых дополнительных хранилищах — см. раздел о профиле `stores` в README проекта. При выключенном хранилище маршрута не существует и ответ будет 404.\n\n## Как пользоваться\n\n1. Поднимите окружение: `docker compose up -d` (или запустите приложение из IDE — тогда база, Redis и Kafka всё равно нужны из compose).\n2. Импортируйте окружение `food-delivery.postman_environment.json` и выберите его.\n3. Выполните папку **01. Аутентификация** — регистрации и входы сохранят токены и идентификаторы в переменные коллекции.\n4. Дальше папки идут в том же порядке, что и жизненный цикл заказа: создать ресторан → наполнить меню → корзина → заказ → оплата → готовка → доставка.\n\n## Что заполняется само\n\nТесты запросов сохраняют в переменные коллекции: `customerToken`, `ownerToken`, `courierToken`, `adminToken`, `customerId`, `ownerId`, `courierId`, `restaurantId`, `categoryId`, `menuItemId`, `cartItemId`, `orderId`, `paymentId`, `deliveryId`.\n\nРуками задавать нужно только пароли и адрес сервера.\n\n## Токены по ролям\n\nАутентификация задана на уровне папок, а не коллекции: у платформы четыре роли, и один общий токен заставлял бы переключать его вручную перед каждым запросом. Папка «Корзина» всегда ходит под `customerToken`, «Управление меню» — под `ownerToken`, «Доставка» — под `courierToken`, «Администрирование» — под `adminToken`.\n\nТокен живёт час. Когда начнёт прилетать 401 — повторите нужный вход из папки 01.\n\n## Администратор\n\nЧерез регистрацию роль ADMIN не выдаётся. Первая учётка создаётся при старте приложения из переменных окружения `APP_ADMIN_EMAIL` и `APP_ADMIN_PASSWORD`; если они не заданы, администратора нет вовсе. Те же значения впишите в переменные `adminEmail` и `adminPassword`.\n\n## Сквозная метка запроса\n\nКаждый запрос отправляет заголовок `X-Correlation-Id` и получает его обратно. По этой метке запрос прослеживается через логи приложения, событие в outbox, сообщение Kafka и работу потребителя. Значение видно во вкладке Headers ответа — его удобно грепать в `docker compose logs`.\n\n## Коды ответов\n\n- `400` — не прошла валидация запроса\n- `401` — нет токена или он истёк\n- `403` — роль есть, но ресурс чужой\n- `404` — ресурс не найден\n- `409` — операция невозможна в текущем статусе (например, принять неоплаченный заказ)\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{customerToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Сквозная метка на каждый запрос. Сервер принимает её, чистит от лишних",
+          "// символов и возвращает в ответе — по ней запрос ищется в логах.",
+          "pm.request.headers.upsert({",
+          "    key: 'X-Correlation-Id',",
+          "    value: 'postman-' + require('uuid').v4()",
+          "});"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Ответ содержит X-Correlation-Id', () => {",
+          "    pm.expect(pm.response.headers.has('X-Correlation-Id')).to.be.true;",
+          "});",
+          "",
+          "// Подсказка вместо молчаливого падения следующих запросов.",
+          "if (pm.response.code === 401) {",
+          "    console.warn('401: токен истёк или не сохранён. Выполните нужный вход из папки 01.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "mgmtUrl",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "customerEmail",
+      "value": "customer@example.com",
+      "type": "string"
+    },
+    {
+      "key": "customerPassword",
+      "value": "customer-password",
+      "type": "string"
+    },
+    {
+      "key": "ownerEmail",
+      "value": "owner@example.com",
+      "type": "string"
+    },
+    {
+      "key": "ownerPassword",
+      "value": "owner-password",
+      "type": "string"
+    },
+    {
+      "key": "courierEmail",
+      "value": "courier@example.com",
+      "type": "string"
+    },
+    {
+      "key": "courierPassword",
+      "value": "courier-password",
+      "type": "string"
+    },
+    {
+      "key": "adminEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "restaurantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "menuItemId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cartItemId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "paymentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deliveryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "targetUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "targetRole",
+      "value": "COURIER",
+      "type": "string"
+    },
+    {
+      "key": "resourceType",
+      "value": "ORDER",
+      "type": "string"
+    },
+    {
+      "key": "resourceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reviewId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00. Служебное",
+      "item": [
+        {
+          "name": "Ping приложения",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ping"
+              ]
+            },
+            "description": "Проверка, что приложение отвечает. Аутентификация не нужна.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping базы данных",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/db/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "db",
+                "ping"
+              ]
+            },
+            "description": "Проверка соединения с PostgreSQL.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actuator health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mgmtUrl}}/actuator/health",
+              "host": [
+                "{{mgmtUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": "Служебный порт 8081, отдельный от публичного 8080.\n\nВ docker-compose наружу не публикуется — доступен только внутри сети, где живёт Prometheus. Локально из IDE приложение слушает оба порта.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actuator prometheus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mgmtUrl}}/actuator/prometheus",
+              "host": [
+                "{{mgmtUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
+            },
+            "description": "Метрики в формате Prometheus, включая бизнес-метрики заказов и платежей.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Проверка живости. Ни один запрос не требует токена.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "01. Аутентификация",
+      "item": [
+        {
+          "name": "Регистрация: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Регистрирует пользователя и сразу возвращает токен.\n\nРоль ADMIN через этот запрос получить нельзя — сервис её отклоняет.\n\nТест сохраняет accessToken в customerToken и id в customerId: оба подставляются дальше автоматически.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"{{customerPassword}}\",\n  \"fullName\": \"Иван Клиентов\",\n  \"phone\": \"+79990000001\",\n  \"role\": \"CUSTOMER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('customerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('customerId', b.user.id);",
+                  "    console.log('customerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Регистрация: владелец ресторана",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Владелец сможет создать ресторан и стать его управляющим.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{ownerPassword}}\",\n  \"fullName\": \"Пётр Ресторанов\",\n  \"phone\": \"+79990000002\",\n  \"role\": \"RESTAURANT_OWNER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('ownerId', b.user.id);",
+                  "    console.log('ownerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Регистрация: курьер",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{courierEmail}}\",\n  \"password\": \"{{courierPassword}}\",\n  \"fullName\": \"Сергей Курьеров\",\n  \"phone\": \"+79990000003\",\n  \"role\": \"COURIER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('courierToken', b.accessToken);",
+                  "    pm.collectionVariables.set('courierId', b.user.id);",
+                  "    console.log('courierToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"{{customerPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('customerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('customerId', b.user.id);",
+                  "    console.log('customerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход: владелец ресторана",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{ownerPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('ownerId', b.user.id);",
+                  "    console.log('ownerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход: курьер",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{courierEmail}}\",\n  \"password\": \"{{courierPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('courierToken', b.accessToken);",
+                  "    pm.collectionVariables.set('courierId', b.user.id);",
+                  "    console.log('courierToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход: администратор",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Администратор через регистрацию не создаётся. Первая учётка поднимается при старте приложения из переменных окружения APP_ADMIN_EMAIL и APP_ADMIN_PASSWORD — без них она не создаётся вовсе.\n\nПодставьте те же значения в переменные adminEmail и adminPassword.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 200 || pm.response.code === 201;",
+                  "pm.test('Токен получен', () => pm.expect(ok).to.be.true);",
+                  "if (ok) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('adminToken', b.accessToken);",
+                  "    pm.collectionVariables.set('adminId', b.user.id);",
+                  "    console.log('adminToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Кто я",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Единственный способ узнать свой userId, который дальше подставляется в пути вида /api/v1/customers/{customerId}/orders.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Начните отсюда: запросы сохраняют токены в переменные коллекции, и остальные папки берут их автоматически.\n\nТокен живёт час (JWT_ACCESS_TOKEN_TTL). Когда начнёт прилетать 401 — повторите нужный вход.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "02. Витрина (без токена)",
+      "item": [
+        {
+          "name": "Список ресторанов",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants"
+              ]
+            },
+            "description": "Кэшируется в Redis на 5 минут. Открыт анонимно — это то, ради чего пользователь приходит.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "if (Array.isArray(list) && list.length && !pm.collectionVariables.get('restaurantId')) {",
+                  "    pm.collectionVariables.set('restaurantId', list[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ресторан по id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Меню ресторана",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu"
+              ]
+            },
+            "description": "Меню глазами посетителя: архивные позиции сюда не попадают. Кэшируется на 10 минут, вытесняется при любой правке меню.\n\nТест запоминает первую позицию в menuItemId — её можно сразу класть в корзину.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const menu = pm.response.json();",
+                  "const cat = (menu.categories || []).find(c => (c.items || []).length);",
+                  "if (cat) {",
+                  "    pm.collectionVariables.set('menuItemId', cat.items[0].id);",
+                  "    console.log('menuItemId =', cat.items[0].id, '—', cat.items[0].name);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Публичная часть API. Токен не нужен и намеренно не отправляется.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "03. Управление рестораном",
+      "item": [
+        {
+          "name": "Создать ресторан",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants"
+              ]
+            },
+            "description": "Создатель автоматически становится управляющим. Требует роли RESTAURANT_OWNER или ADMIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Пельменная №1\",\n  \"description\": \"Домашние пельмени и вареники\",\n  \"city\": \"Москва\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('restaurantId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Изменить ресторан",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}"
+              ]
+            },
+            "description": "Незаполненные поля не меняются.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Домашние пельмени, вареники и бульоны\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Открыть приём заказов",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "open"
+              ]
+            },
+            "description": "Пока ресторан закрыт, заказ в нём создать нельзя."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Закрыть приём заказов",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "close"
+              ]
+            },
+            "description": "Уже оформленные заказы это не отменяет."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Доступ только у управляющего конкретным рестораном.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{ownerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "04. Управление меню",
+      "item": [
+        {
+          "name": "Меню целиком (для владельца)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/manage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "manage"
+              ]
+            },
+            "description": "Включая скрытые и архивные позиции. Из кэша не читается — владельцу нужна правда."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать категорию",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Горячее\",\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('categoryId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Переименовать категорию",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Горячие блюда\",\n  \"sortOrder\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Добавить блюдо",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}",
+                "items"
+              ]
+            },
+            "description": "Цена — number без format, чтобы на стороне Java это был BigDecimal, а не Double.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Пельмени домашние\",\n  \"description\": \"Порция 300 г\",\n  \"price\": 450.0,\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('menuItemId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Изменить блюдо",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/items/{{menuItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "items",
+                "{{menuItemId}}"
+              ]
+            },
+            "description": "На существующие корзины и заказы не влияет: они хранят копию цены на момент добавления.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 490.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Блюдо закончилось",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/items/{{menuItemId}}/out-of-stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "items",
+                "{{menuItemId}}",
+                "out-of-stock"
+              ]
+            },
+            "description": "Временно скрыть. Обратимо, в отличие от архивирования."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Блюдо снова в продаже",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/items/{{menuItemId}}/in-stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "items",
+                "{{menuItemId}}",
+                "in-stock"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Убрать блюдо из меню",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/items/{{menuItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "items",
+                "{{menuItemId}}"
+              ]
+            },
+            "description": "Архивирование, а не удаление: строка остаётся в базе, потому что на неё ссылаются позиции прошлых заказов. Для клиента API неотличимо от удаления."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Убрать категорию из меню",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Вместе со всеми её блюдами."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Контракт этой папки описан в openapi/food-delivery-api.yaml.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{ownerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "05. Корзина",
+      "item": [
+        {
+          "name": "Активная корзина",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "description": "Если активной корзины нет, она создаётся пустой."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const cart = pm.response.json();",
+                  "if ((cart.items || []).length) {",
+                  "    pm.collectionVariables.set('cartItemId', cart.items[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Добавить позицию",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "description": "Цена фиксируется в момент добавления: последующая правка меню на корзину не влияет.\n\nЕсли menuItemId пуст — сначала выполните «Меню ресторана» в папке 02, оно заполнит переменную.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId}}\",\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const cart = pm.response.json();",
+                  "if ((cart.items || []).length) {",
+                  "    pm.collectionVariables.set('cartItemId', cart.items[cart.items.length - 1].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Изменить количество",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart/items/{{cartItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart",
+                "items",
+                "{{cartItemId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Удалить позицию",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart/items/{{cartItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart",
+                "items",
+                "{{cartItemId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "customerId стоит в пути, поэтому одной роли CUSTOMER мало: сервер сверяет его с токеном и на чужой идентификатор отвечает 403.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "06. Заказы клиента",
+      "item": [
+        {
+          "name": "Создать заказ из корзины",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ]
+            },
+            "description": "Корзина закрывается в той же транзакции, поэтому два параллельных запроса не создадут два заказа из одной корзины — второй упрётся в compare-and-set."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Мои заказы",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "Номер страницы, с нуля"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Размер страницы, максимум 100"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Мои заказы (лента по курсору)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/feed?cursor=&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Курсор из nextCursor предыдущего ответа; пусто — сначала"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Сколько записей вернуть, максимум 100"
+                }
+              ]
+            },
+            "description": "Курсорная выборка: подряд, без номеров страниц. Следующая порция запрашивается со значением nextCursor из предыдущего ответа — тест кладёт его в переменную orderCursor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.nextCursor) {",
+                  "    pm.collectionVariables.set('orderCursor', body.nextCursor);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ по id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "История событий заказа",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "events"
+              ]
+            },
+            "description": "Полный журнал переходов: создан, оплачен, принят, готовится, доставлен."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Отменить заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "cancel"
+              ]
+            },
+            "description": "Отменить можно только заказ в статусе CREATED или PAID. Если заказ был оплачен, в той же транзакции оформляется возврат.\n\nВ остальных статусах — 409."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "07. Оплата",
+      "item": [
+        {
+          "name": "Оплатить заказ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            },
+            "description": "Сумма берётся из заказа, а не из запроса: иначе клиент платил бы столько, сколько захочет.\n\nPre-request скрипт генерирует новый ключ идемпотентности перед каждым вызовом. Способы оплаты: CARD, CASH_ON_DELIVERY.\n\nШлюз имитированный и иногда отвечает отказом — это штатный 409, а не сбой.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', require('uuid').v4());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('paymentId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплатить повторно тем же ключом",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            },
+            "description": "Ключ не перегенерируется — используется тот же, что и в предыдущем запросе.\n\nСервер обязан вернуть результат первого платежа, а не списать деньги второй раз. Тест это проверяет.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Повтор не создал второй платёж', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    const prev = pm.collectionVariables.get('paymentId');",
+                  "    if (prev) { pm.expect(String(pm.response.json().id)).to.eql(String(prev)); }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Платежи по заказу",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            },
+            "description": "Включая неудачные попытки — у каждой своя запись со статусом FAILED и причиной."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Все платежи клиента",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "payments"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "08. Заказы ресторана",
+      "item": [
+        {
+          "name": "Заказы ресторана",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders?status=PAID&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PAID",
+                  "description": "CREATED, PAID, ACCEPTED, COOKING, READY_FOR_DELIVERY, IN_DELIVERY, DELIVERED, CANCELED. Параметр необязательный"
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "Номер страницы, с нуля"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Размер страницы, максимум 100"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказы ресторана (лента по курсору)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/feed?status=&cursor=&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Фильтр по статусу заказа, необязателен"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Курсор из nextCursor предыдущего ответа; пусто — сначала"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "Сколько записей вернуть, максимум 100"
+                }
+              ]
+            },
+            "description": "То же для ресторана. Параметр status можно оставить пустым — тогда вернутся заказы в любом статусе."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.nextCursor) {",
+                  "    pm.collectionVariables.set('orderCursor', body.nextCursor);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Принять заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "accept"
+              ]
+            },
+            "description": "Только из статуса PAID. Иначе 409."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Начать готовку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/start-cooking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "start-cooking"
+              ]
+            },
+            "description": "Только из статуса ACCEPTED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Готов к доставке",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/ready-for-delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "ready-for-delivery"
+              ]
+            },
+            "description": "Только из статуса COOKING."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать доставку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "deliveries"
+              ]
+            },
+            "description": "Доставку создаёт ресторан, а не курьер: иначе курьер назначал бы себе заказы, которых ещё нет на выдаче."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('deliveryId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Переходы строго последовательны: PAID → ACCEPTED → COOKING → READY_FOR_DELIVERY.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{ownerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "09. Доставка (курьер)",
+      "item": [
+        {
+          "name": "Свободные доставки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/deliveries/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "deliveries",
+                "available"
+              ]
+            },
+            "description": "Те, которые ещё никто не взял."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "if (Array.isArray(list) && list.length) {",
+                  "    pm.collectionVariables.set('deliveryId', list[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Мои доставки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Взять доставку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/assign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "assign"
+              ]
+            },
+            "description": "Гонка двух курьеров за одну доставку разрешается на уровне базы: проигравший получит 409."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Забрать заказ из ресторана",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/pick-up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "pick-up"
+              ]
+            },
+            "description": "Переводит заказ в IN_DELIVERY. Статус доставки и статус заказа меняются атомарно."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Завершить доставку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/deliver",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "deliver"
+              ]
+            },
+            "description": "Переводит заказ в DELIVERED — финальный статус."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{courierToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "10. Уведомления",
+      "item": [
+        {
+          "name": "Мои уведомления",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "me"
+              ]
+            },
+            "description": "Идентификатор берётся из токена, а не из пути: сценария «посмотреть чужие уведомления» нет, поэтому и подделывать нечего.\n\nУведомления рождаются из событий Kafka и отправляются фоновой задачей раз в 30 секунд, так что сразу после смены статуса список может быть пуст."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "11. Администрирование",
+      "item": [
+        {
+          "name": "Все пользователи",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Выдать роль",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/{{targetUserId}}/roles/{{targetRole}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "roles",
+                "{{targetRole}}"
+              ]
+            },
+            "description": "targetRole: CUSTOMER, RESTAURANT_OWNER, COURIER, ADMIN."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Разблокировать пользователя",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/{{targetUserId}}/enable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "enable"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заблокировать пользователя",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/{{targetUserId}}/disable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "disable"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Назначить управляющего рестораном",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/{{targetUserId}}/restaurants/{{restaurantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "restaurants",
+                "{{restaurantId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Журнал аудита",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/audit?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Не больше 500"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Аудит по ресурсу",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/audit/resources/{{resourceType}}/{{resourceId}}?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "audit",
+                "resources",
+                "{{resourceType}}",
+                "{{resourceId}}"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Не больше 500"
+                }
+              ]
+            },
+            "description": "resourceType — например ORDER или USER, resourceId — его идентификатор."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Продажи всей платформы",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/analytics/sales?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Тот же отчёт, что у ресторана, но без фильтра по нему. Читает больше данных, поэтому и лежит под админским префиксом."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Переиндексировать витрину",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/search/reindex",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "search",
+                "reindex"
+              ]
+            },
+            "description": "Перестраивает поисковый индекс из PostgreSQL, не дожидаясь расписания. Заодно убирает из индекса документы исчезнувших ресторанов и блюд."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Догнать граф рекомендаций",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/recommendations/project",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "recommendations",
+                "project"
+              ]
+            },
+            "description": "Одна пачка заказов из PostgreSQL в граф. Возвращает, сколько заказов прочитано; ноль означает, что граф уже в актуальном состоянии."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Перестроить граф рекомендаций",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/recommendations/rebuild",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "recommendations",
+                "rebuild"
+              ]
+            },
+            "description": "Стирает граф и строит его заново по всем заказам. Операция для случая, когда поменялась сама модель графа: догонять проекцией старые узлы бессмысленно."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Путь /api/v1/admin/** закрыт ролью ADMIN дважды: в цепочке фильтров и аннотацией на контроллере.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{adminToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "12. Отзывы (MongoDB)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nОтзыв можно оставить только о своём доставленном заказе, и ровно один раз: второй упрётся в уникальный индекс по заказу и вернёт 409.\n\nЧтение отзывов и сводки открыто без токена — это часть витрины.",
+      "item": [
+        {
+          "name": "Оставить отзыв",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "review"
+              ]
+            },
+            "description": "Заказ должен быть в статусе DELIVERED. Оценки блюд и метки необязательны: схема документа гибкая, и всё, кроме общей оценки, можно не присылать.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Привезли горячим, курьер вежливый\",\n  \"dishes\": [\n    {\n      \"menuItemId\": \"{{menuItemId}}\",\n      \"menuItemName\": \"Пицца\",\n      \"rating\": 5\n    }\n  ],\n  \"tags\": [\n    \"быстро\",\n    \"вкусно\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('reviewId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Отзывы о ресторане",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/reviews?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Свежие сверху. Листание постраничное, а не курсорное: отзывы читают глазами, зато общее число нужно показать всегда."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Сводка по отзывам",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/reviews/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "reviews",
+                "summary"
+              ]
+            },
+            "description": "Среднее, гистограмма оценок и самые частые метки — один aggregation pipeline со стадией $facet, то есть один поход в базу и один момент времени."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "13. Поиск (Elasticsearch)",
+      "auth": {
+        "type": "noauth"
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nИндекс наполняется переиндексацией по расписанию (по умолчанию раз в пять минут) и при старте приложения. Сразу после правки меню поиск ещё показывает старое — чтобы не ждать, есть «Переиндексировать витрину» в папке 11.",
+      "item": [
+        {
+          "name": "Поиск по витрине",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search?q=пицца&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "пицца"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Ищет по названиям и описаниям ресторанов и блюд сразу. Опечатка в одну-две буквы поиску не мешает — за это отвечает нечёткое совпадение."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const found = pm.response.json();",
+                  "pm.test('есть оба раздела', () => {",
+                  "    pm.expect(found).to.have.property('restaurants');",
+                  "    pm.expect(found).to.have.property('items');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Поиск с фильтром по городу",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search?q=&city=Москва&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "key": "city",
+                  "value": "Москва"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Город — фильтр, а не часть текстового запроса: он совпадает точно и не влияет на релевантность. Пустой q означает «покажи всё, что есть в городе»."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14. Трек курьера (Cassandra)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{courierToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nТочки пишутся только пока доставка в статусе PICKED_UP: до того курьер её ещё не забрал, после — везти уже нечего.\n\nПоследний запрос папки ходит под токеном клиента: он смотрит свой заказ, а не чужую доставку, и номера доставки не знает.",
+      "item": [
+        {
+          "name": "Отправить координату",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/positions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "positions"
+              ]
+            },
+            "description": "Отвечает 202: точка трека — телеметрия, а не созданный ресурс, ссылки на неё нет. Скорость можно не присылать.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 55.751244,\n  \"longitude\": 37.618423,\n  \"speedKmh\": 24.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Трек своей доставки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/track?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "track"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Точки идут от свежей к старой. Порядок задан не сортировкой в запросе, а порядком хранения строк в Cassandra."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Где мой заказ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/track?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "track"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Тот же трек глазами клиента. Номер доставки он не знает и знать не должен — превращение orderId в deliveryId делает модуль Delivery.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "15. Рекомендации (Neo4j)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nГраф строится проекцией из PostgreSQL по расписанию, поэтому на свежей базе рекомендации сначала будут пустыми. Заполнить их сразу помогают «Догнать граф» и «Перестроить граф» в папке 11.\n\nОтменённые заказы в граф не попадают: они ничего не говорят о вкусах.",
+      "item": [
+        {
+          "name": "Рекомендации клиенту",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/recommendations?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Обход графа на два шага: мои блюда → другие клиенты, бравшие их же → их блюда. Поле score — сколько человек подтвердили связь."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказывают вместе с блюдом",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/menu-items/{{menuItemId}}/ordered-together?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "menu-items",
+                "{{menuItemId}}",
+                "ordered-together"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Совместная встречаемость внутри одного заказа. Именно внутри одного: иначе ответ выродился бы в список самого популярного."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "16. Аналитика (ClickHouse)",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{ownerToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Работает только при включённом хранилище: `docker compose --profile stores up -d` и соответствующая переменная `STORE_*_ENABLED=true` в `.env`. Если хранилище выключено, маршрута нет вовсе и ответ будет 404.\n\nВитрина наполняется отдельным потребителем того же топика заказов, что читают уведомления. Пока по заказам не прошло ни одного события, отчёты пусты.\n\nПериод задаётся датами включительно; больше года за раз запросить нельзя.",
+      "item": [
+        {
+          "name": "Продажи ресторана по дням",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/sales?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Выручка признаётся в момент оплаты, а не доставки: отменённый после оплаты заказ обязан попадать в отчёт наравне с доставленным."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Воронка статусов",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/funnel?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "funnel"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "Сколько разных заказов побывало в каждом статусе за период. Разрыв между соседними ступенями и показывает, где заказы теряются."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

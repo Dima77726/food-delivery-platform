@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 025-index-order-event-outbox-failed
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/025-index-order-event-outbox-failed.sql
+            relativeToChangelogFile: true
+            splitStatements: true

@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 011-add-order-ready-for-delivery-event-type
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/011-add-order-ready-for-delivery-event-type.sql
+            relativeToChangelogFile: true
+            splitStatements: true

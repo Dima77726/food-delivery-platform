@@ -1,0 +1,158 @@
+{
+  "title": "Food Delivery Platform",
+  "uid": "food-delivery",
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Заказов создано за час",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "increase(food_delivery_orders_created_total[1h])",
+          "legendFormat": "создано"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Доля неудачных оплат",
+      "description": "Один счётчик с тегом outcome позволяет посчитать долю одним запросом, без сопоставления двух рядов.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(food_delivery_payments_total{outcome=\"failed\"}[5m])) / clamp_min(sum(rate(food_delivery_payments_total[5m])), 0.0001)",
+          "legendFormat": "отказы"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Заказов доставлено за час",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "increase(food_delivery_orders_delivered_total[1h])",
+          "legendFormat": "доставлено"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Заказов отменено за час",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "increase(food_delivery_orders_canceled_total[1h])",
+          "legendFormat": "отменено"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP: время ответа, перцентили",
+      "description": "Медиана и хвосты. Среднее здесь бесполезно: оно скрывает как раз те запросы, из-за которых жалуются.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP: запросы по кодам ответа",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Оплаты по исходу",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "expr": "sum(rate(food_delivery_payments_total[5m])) by (outcome)",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Время оформления заказа",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(food_delivery_checkout_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Пул соединений к базе",
+      "description": "Если активные соединения упираются в максимум, а ожидающие растут — узкое место в базе, а не в приложении.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "targets": [
+        {
+          "expr": "hikaricp_connections_active",
+          "legendFormat": "активные"
+        },
+        {
+          "expr": "hikaricp_connections_pending",
+          "legendFormat": "в ожидании"
+        },
+        {
+          "expr": "hikaricp_connections_max",
+          "legendFormat": "максимум"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Память JVM",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+          "legendFormat": "heap занято"
+        },
+        {
+          "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})",
+          "legendFormat": "heap максимум"
+        }
+      ]
+    }
+  ]
+}

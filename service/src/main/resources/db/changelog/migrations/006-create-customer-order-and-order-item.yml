@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-create-customer-order-and-order-item
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/006-create-customer-order-and-order-item.sql
+            relativeToChangelogFile: true
+            splitStatements: true
