@@ -1,37 +1,62 @@
 package com.dima.fooddelivery.support;
 
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
-import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Выпускает токены так же, как монолит: HS256, издатель, {@code sub} — числовой идентификатор,
- * {@code roles} — список ролей.
+ * Выпускает токены так же, как identity-service: RS256, {@code kid}, издатель, {@code sub} —
+ * числовой идентификатор, {@code roles} и {@code email}.
  *
- * <p>Регистрироваться через монолит каталогу в тестах негде, да и незачем: проверяется,
- * что каталог правильно понимает токен, а выпуск — забота монолита и его тестов.
- * Форма токена — общий контракт, и совпадение формы здесь и там — ровно то, что проверяется.
+ * <p>Сервиса пользователей в тестах нет, и ходить за его JWKS некуда. Поэтому пара ключей
+ * генерируется здесь, один раз на прогон, а тестовая конфигурация подменяет декодер на тот,
+ * что знает открытую половину. Проверяется ровно то, что принадлежит этому сервису: что он
+ * понимает токен правильной формы и отвергает неправильный. Совпадение формы с настоящими
+ * токенами проверяют тесты identity-service — JWKS там проверяется по-настоящему.
  */
 public class TestJwt {
 
     public static final String ISSUER = "food-delivery-platform";
 
-    /** Идентификаторы пользователей далеко от тех, что выдаёт база: пользователей здесь нет вовсе. */
-    private static final AtomicLong USER_IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L);
+    private static final KeyPair KEYS = generate();
 
-    private final NimbusJwtEncoder encoder;
+    /** Идентификаторы далеко от тех, что выдаст база: в тестах, где пользователей нет вовсе. */
+    private static final AtomicLong USER_IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L + 1_000_000_000L);
 
-    public TestJwt(String secret) {
-        this.encoder = new NimbusJwtEncoder(new ImmutableSecret<>(secret.getBytes(StandardCharsets.UTF_8)));
+    private final NimbusJwtEncoder encoder = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(
+            new RSAKey.Builder((RSAPublicKey) KEYS.getPublic())
+                    .privateKey((RSAPrivateKey) KEYS.getPrivate())
+                    .keyID("test-key")
+                    .build()
+    )));
+
+    /** Декодер, которым тестовая конфигурация подменяет JWKS-декодер сервиса. */
+    public static JwtDecoder decoder() {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey((RSAPublicKey) KEYS.getPublic())
+                .signatureAlgorithm(SignatureAlgorithm.RS256)
+                .build();
+
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(ISSUER));
+
+        return decoder;
     }
 
     public long newUserId() {
@@ -39,22 +64,39 @@ public class TestJwt {
     }
 
     public String tokenFor(long userId, String... roles) {
+        return tokenWithIssuer(userId, ISSUER, roles);
+    }
+
+    /** Токен от чужого издателя — для проверки, что такие отвергаются. */
+    public String tokenWithIssuer(long userId, String issuer, String... roles) {
         Instant now = Instant.now();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(ISSUER)
+                .issuer(issuer)
                 .issuedAt(now)
                 .expiresAt(now.plus(Duration.ofMinutes(10)))
                 .subject(String.valueOf(userId))
                 .claim("roles", List.of(roles))
+                .claim("email", "user-" + userId + "@example.test")
                 .build();
 
-        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId("test-key").build();
+
+        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
     /** Новый пользователь с ролями — токен для него. */
     public String newUserToken(String... roles) {
         return tokenFor(newUserId(), roles);
+    }
+
+    private static KeyPair generate() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return generator.generateKeyPair();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

@@ -6,18 +6,15 @@ import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -124,24 +121,10 @@ class OrderFeedApiIT extends AbstractIntegrationTest {
         }
     }
 
-    private Customer registerCustomer() throws Exception {
-        String body = mockMvc.perform(post("/api/v1/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "feed-%s@example.test",
-                                  "password": "password123",
-                                  "fullName": "Тестовый Клиент",
-                                  "role": "CUSTOMER"
-                                }
-                                """.formatted(UUID.randomUUID())))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-
-        return new Customer(
-                ((Number) JsonPath.read(body, "$.user.id")).longValue(),
-                JsonPath.read(body, "$.accessToken")
-        );
+    /** Клиент — строка с идентификатором и токен в форме identity-service для него. */
+    private Customer registerCustomer() {
+        long id = testData.insertCustomer();
+        return new Customer(id, jwt.tokenFor(id, "CUSTOMER"));
     }
 
     private record Customer(long id, String token) {

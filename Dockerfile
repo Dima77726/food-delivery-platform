@@ -29,6 +29,7 @@ COPY libs/grpc-contracts/pom.xml libs/grpc-contracts/
 COPY service/pom.xml service/
 COPY notification-service/pom.xml notification-service/
 COPY catalog-service/pom.xml catalog-service/
+COPY identity-service/pom.xml identity-service/
 COPY api-gateway/pom.xml api-gateway/
 COPY client/pom.xml client/
 
@@ -46,6 +47,7 @@ COPY libs/ libs/
 COPY service/src/ service/src/
 COPY notification-service/src/ notification-service/src/
 COPY catalog-service/src/ catalog-service/src/
+COPY identity-service/src/ identity-service/src/
 COPY api-gateway/src/ api-gateway/src/
 
 # Тесты здесь не гоняются намеренно: интеграционные требуют Docker внутри Docker.

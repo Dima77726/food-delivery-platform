@@ -1,11 +1,9 @@
 package com.dima.fooddelivery.common.web;
 
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
-import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -17,7 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -109,21 +106,12 @@ class RequestCorrelationIT extends AbstractIntegrationTest {
      */
     @Test
     void shouldIgnoreUserIdSuppliedByClient() throws Exception {
-        String email = "corr-" + UUID.randomUUID() + "@example.com";
-        String registration = mockMvc.perform(post("/api/v1/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(registrationJson(email)))
-                .andExpect(status().isCreated())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        String token = JsonPath.read(registration, "$.accessToken");
-        Integer ownId = JsonPath.read(registration, "$.user.id");
+        long ownId = testData.insertCustomer();
+        String token = jwt.tokenFor(ownId, "CUSTOMER");
 
         String foreignId = String.valueOf(ownId + 1000);
 
-        MvcResult result = mockMvc.perform(get("/api/v1/auth/me")
+        MvcResult result = mockMvc.perform(get("/api/v1/customers/{id}/orders", ownId)
                         .header("Authorization", "Bearer " + token)
                         .header(RequestContext.USER_ID_HEADER, foreignId))
                 .andExpect(status().isOk())
@@ -153,17 +141,5 @@ class RequestCorrelationIT extends AbstractIntegrationTest {
 
     private void assertFalseContains(String value, String forbidden) {
         assertTrue(!value.contains(forbidden), "в метке не должно остаться «" + forbidden + "»");
-    }
-
-    private String registrationJson(String email) {
-        return """
-                {
-                  "email": "%s",
-                  "password": "password123",
-                  "fullName": "Тестовый Пользователь",
-                  "phone": "+70000000000",
-                  "role": "CUSTOMER"
-                }
-                """.formatted(email);
     }
 }

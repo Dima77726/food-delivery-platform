@@ -2,7 +2,6 @@ package com.dima.fooddelivery.support;
 
 import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
 import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.user.domain.UserRole;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -43,7 +42,12 @@ public class TestDataFactory {
      * {@code "password123"} — считать хеш на каждый вызов дорого: BCrypt намеренно медленный,
      * и на сотне тестов это заметно.
      */
-    public Long insertUser(String emailPrefix, UserRole... roles) {
+    /**
+     * Пользователь в старой таблице {@code app_user} монолита. Пользователи живут в
+     * identity-service, а здесь строка нужна только как источник уникального идентификатора
+     * клиента или курьера — монолит пользователей больше не читает.
+     */
+    public Long insertUser(String emailPrefix, String... roles) {
         Long userId = jdbcTemplate.queryForObject(
                 """
                         INSERT INTO app_user (email, password_hash, full_name, phone)
@@ -57,11 +61,11 @@ public class TestDataFactory {
                 "+70000000000"
         );
 
-        for (UserRole role : roles) {
+        for (String role : roles) {
             jdbcTemplate.update(
                     "INSERT INTO app_user_role (user_id, role) VALUES (?, ?)",
                     userId,
-                    role.name()
+                    role
             );
         }
 
@@ -69,11 +73,11 @@ public class TestDataFactory {
     }
 
     public Long insertCustomer() {
-        return insertUser("customer", UserRole.CUSTOMER);
+        return insertUser("customer", "CUSTOMER");
     }
 
     public Long insertCourier() {
-        return insertUser("courier", UserRole.COURIER);
+        return insertUser("courier", "COURIER");
     }
 
     public Long insertRestaurant() {

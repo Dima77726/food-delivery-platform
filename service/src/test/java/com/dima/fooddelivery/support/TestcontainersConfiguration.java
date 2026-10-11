@@ -6,6 +6,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -67,6 +68,29 @@ public class TestcontainersConfiguration {
     @Primary
     LegacyTablesCatalogClient legacyTablesCatalogClient(JdbcTemplate jdbcTemplate) {
         return new LegacyTablesCatalogClient(jdbcTemplate);
+    }
+
+    /** Права на рестораны вместо gRPC-клиента к identity-service — см. {@link LegacyTablesRestaurantAccessClient}. */
+    @Bean
+    @Primary
+    LegacyTablesRestaurantAccessClient legacyTablesRestaurantAccessClient(JdbcTemplate jdbcTemplate) {
+        return new LegacyTablesRestaurantAccessClient(jdbcTemplate);
+    }
+
+    @Bean
+    TestJwt testJwt() {
+        return new TestJwt();
+    }
+
+    /**
+     * Декодер с открытым ключом {@link TestJwt} вместо JWKS сервиса пользователей — его в тестах
+     * нет. {@code @Primary}: настоящий декодер в контексте тоже есть, но JWKS он скачивает лениво
+     * и до первого токена никуда не ходит.
+     */
+    @Bean
+    @Primary
+    JwtDecoder testJwtDecoder() {
+        return TestJwt.decoder();
     }
 
     @Bean

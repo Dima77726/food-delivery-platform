@@ -5,7 +5,9 @@ import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import jakarta.persistence.EntityManager;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
@@ -27,6 +29,12 @@ class AuthApiIT extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Test
     void shouldRegisterAndReturnToken() throws Exception {
@@ -68,30 +76,8 @@ class AuthApiIT extends AbstractIntegrationTest {
 
     @Test
     void shouldRejectUnauthenticatedAccessToProtectedEndpoint() throws Exception {
-        mockMvc.perform(get("/api/v1/customers/1/orders"))
+        mockMvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isUnauthorized());
-    }
-
-    /**
-     * Открытые пути монолита пропускают анонима. Витрина ресторанов переехала в каталог,
-     * и анонимный доступ к ней проверяют тесты каталога.
-     */
-    @Test
-    void shouldAllowAnonymousAccessToPublicEndpoint() throws Exception {
-        mockMvc.perform(get("/api/v1/ping"))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void shouldForbidReadingForeignOrders() throws Exception {
-        String token = registerAndGetToken(uniqueEmail());
-        Long foreignCustomerId = testData.insertCustomer();
-
-        // Роль CUSTOMER у пользователя есть, но идентификатор в пути чужой.
-        // Без сверки с токеном это была бы дыра, через которую видны чужие заказы.
-        mockMvc.perform(get("/api/v1/customers/{id}/orders", foreignCustomerId)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -103,15 +89,37 @@ class AuthApiIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    /** Токен называет того, кто зарегистрировался: {@code /auth/me} отвечает его же данными. */
     @Test
-    void shouldAllowReadingOwnOrders() throws Exception {
+    void shouldReturnCurrentUserByToken() throws Exception {
         String email = uniqueEmail();
         String token = registerAndGetToken(email);
-        long userId = userIdFromToken(token);
 
-        mockMvc.perform(get("/api/v1/customers/{id}/orders", userId)
+        mockMvc.perform(get("/api/v1/auth/me")
                         .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(email))
+                .andExpect(jsonPath("$.id").value(userIdFromToken(token)));
+    }
+
+    /** Заблокированный пользователь войти не может, даже с верным паролем. */
+    @Test
+    void shouldRejectLoginOfDisabledUser() throws Exception {
+        String email = uniqueEmail();
+        registerAndGetToken(email);
+
+        jdbcTemplate.update("UPDATE app_user SET is_enabled = FALSE WHERE LOWER(email) = LOWER(?)", email);
+        // Блокировка сделана SQL в обход Hibernate, а пользователь, загруженный при регистрации,
+        // остался в контексте персистентности этой же транзакции. Без очистки вход прочитал бы
+        // его оттуда — включённым — и тест проверял бы кэш, а не блокировку.
+        entityManager.clear();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email": "%s", "password": "password123"}
+                                """.formatted(email)))
+                .andExpect(status().isForbidden());
     }
 
     private String registerAndGetToken(String email) throws Exception {
