@@ -29,12 +29,33 @@ class InfrastructureSmokeIT extends AbstractIntegrationTest {
 
     @Test
     void shouldApplyLiquibaseMigrations() {
-        Integer restaurants = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM restaurant",
+        Integer initChecks = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM app_init_check",
                 Integer.class
         );
 
-        assertTrue(restaurants != null && restaurants > 0, "Миграции должны были засеять рестораны");
+        assertTrue(initChecks != null && initChecks > 0, "Первая миграция должна была записать контрольную строку");
+    }
+
+    /**
+     * Таблицы, уехавшие в другие сервисы, удалены последней миграцией. Если какая-то осталась,
+     * значит, у неё нашлась живая ссылка, и миграция 029 тихо не сработала бы — а этого быть
+     * не должно.
+     */
+    @Test
+    void shouldNotKeepTablesMovedToOtherServices() {
+        Integer leftovers = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM information_schema.tables
+                        WHERE table_schema = current_schema()
+                          AND table_name IN ('restaurant', 'menu_category', 'menu_item',
+                                             'app_user', 'app_user_role', 'restaurant_manager', 'notification')
+                        """,
+                Integer.class
+        );
+
+        assertTrue(leftovers != null && leftovers == 0, "старые таблицы должны быть удалены, осталось: " + leftovers);
     }
 
     @Test

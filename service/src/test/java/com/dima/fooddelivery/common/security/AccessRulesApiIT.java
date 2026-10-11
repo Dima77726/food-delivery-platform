@@ -4,7 +4,6 @@ import com.dima.fooddelivery.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,9 +21,6 @@ class AccessRulesApiIT extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     @Test
     void shouldRejectUnauthenticatedAccessToProtectedEndpoint() throws Exception {
@@ -70,8 +66,7 @@ class AccessRulesApiIT extends AbstractIntegrationTest {
 
     /**
      * Заказы ресторана видит только его управляющий. Ответ на вопрос «управляет ли» монолит
-     * получает у сервиса пользователей — здесь вместо него тестовый клиент поверх старой
-     * таблицы, поэтому управляющий назначается строкой SQL.
+     * получает у сервиса пользователей — здесь вместо него тестовые права в памяти.
      */
     @Test
     void shouldLetOnlyManagerReadRestaurantOrders() throws Exception {
@@ -79,7 +74,7 @@ class AccessRulesApiIT extends AbstractIntegrationTest {
         long strangerId = testData.insertUser("stranger", "RESTAURANT_OWNER");
         long restaurantId = testData.insertRestaurant();
 
-        jdbcTemplate.update("INSERT INTO restaurant_manager (user_id, restaurant_id) VALUES (?, ?)", ownerId, restaurantId);
+        testData.assignRestaurantManager(ownerId, restaurantId);
 
         mockMvc.perform(get("/api/v1/restaurants/{id}/orders", restaurantId)
                         .header("Authorization", "Bearer " + jwt.tokenFor(ownerId, "RESTAURANT_OWNER")))

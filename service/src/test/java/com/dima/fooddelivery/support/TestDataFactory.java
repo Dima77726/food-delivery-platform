@@ -13,6 +13,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Данные вставляются напрямую через SQL, а не через публичные методы сервисов. Это сделано
  * намеренно: тест доставки должен падать из-за доставки, а не из-за того, что сломался
  * {@code CartService}. Подготовка данных не должна быть ещё одним тестируемым кодом.
+ *
+ * <p>Рестораны, блюда и пользователи — не в базе: они живут в других сервисах. Их заменяют
+ * {@link TestCatalog}, {@link TestRestaurantAccess} и генератор идентификаторов.
  */
 public class TestDataFactory {
 
@@ -22,15 +25,17 @@ public class TestDataFactory {
      */
     private static final AtomicLong SEQUENCE = new AtomicLong(System.nanoTime());
 
-    /** BCrypt-хеш строки "password123". */
-    public static final String KNOWN_PASSWORD = "password123";
-    private static final String KNOWN_PASSWORD_HASH =
-            "$2a$10$3euPcmQFCiblsZeEu5s7p.9OVHgeHWFwaAHubD8Wypx0GKF/hi5Ne";
+    /** Идентификаторы пользователей: в базе монолита их выдавать больше некому. */
+    private static final AtomicLong USER_IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L + 2_000_000_000L);
 
     private final JdbcTemplate jdbcTemplate;
+    private final TestCatalog catalog;
+    private final TestRestaurantAccess restaurantAccess;
 
-    public TestDataFactory(JdbcTemplate jdbcTemplate) {
+    public TestDataFactory(JdbcTemplate jdbcTemplate, TestCatalog catalog, TestRestaurantAccess restaurantAccess) {
         this.jdbcTemplate = jdbcTemplate;
+        this.catalog = catalog;
+        this.restaurantAccess = restaurantAccess;
     }
 
     public long uniqueSuffix() {
@@ -38,38 +43,12 @@ public class TestDataFactory {
     }
 
     /**
-     * Пользователь с ролями. Пароль кладётся заранее посчитанным BCrypt-хешом строки
-     * {@code "password123"} — считать хеш на каждый вызов дорого: BCrypt намеренно медленный,
-     * и на сотне тестов это заметно.
-     */
-    /**
-     * Пользователь в старой таблице {@code app_user} монолита. Пользователи живут в
-     * identity-service, а здесь строка нужна только как источник уникального идентификатора
-     * клиента или курьера — монолит пользователей больше не читает.
+     * Пользователь — это только идентификатор. Пользователи живут в identity-service, в базе
+     * монолита их нет, а заказы, корзины и доставки хранят их идентификаторы без внешних ключей.
+     * Роли значения не имеют: в тестах их несёт токен ({@link TestJwt}).
      */
     public Long insertUser(String emailPrefix, String... roles) {
-        Long userId = jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO app_user (email, password_hash, full_name, phone)
-                        VALUES (?, ?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                emailPrefix + "-" + uniqueSuffix() + "@example.test",
-                KNOWN_PASSWORD_HASH,
-                "Test User",
-                "+70000000000"
-        );
-
-        for (String role : roles) {
-            jdbcTemplate.update(
-                    "INSERT INTO app_user_role (user_id, role) VALUES (?, ?)",
-                    userId,
-                    role
-            );
-        }
-
-        return userId;
+        return USER_IDS.incrementAndGet();
     }
 
     public Long insertCustomer() {
@@ -80,36 +59,18 @@ public class TestDataFactory {
         return insertUser("courier", "COURIER");
     }
 
+    /** Управляющий ресторана — в тестовых правах вместо identity-service. */
+    public void assignRestaurantManager(Long userId, Long restaurantId) {
+        restaurantAccess.assignManager(userId, restaurantId);
+    }
+
     public Long insertRestaurant() {
         return insertRestaurant(true);
     }
 
+    /** Ресторан — в тестовом каталоге: в базе монолита ресторанов нет. */
     public Long insertRestaurant(boolean active) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO restaurant (name, description, city, is_active)
-                        VALUES (?, ?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                "Test Restaurant " + uniqueSuffix(),
-                "Ресторан для интеграционных тестов",
-                "Moscow",
-                active
-        );
-    }
-
-    public Long insertMenuCategory(Long restaurantId) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO menu_category (restaurant_id, name, sort_order)
-                        VALUES (?, ?, 1)
-                        RETURNING id
-                        """,
-                Long.class,
-                restaurantId,
-                "Test Category " + uniqueSuffix()
-        );
+        return catalog.addRestaurant(active);
     }
 
     public Long insertMenuItem(Long restaurantId, BigDecimal price) {
@@ -117,21 +78,7 @@ public class TestDataFactory {
     }
 
     public Long insertMenuItem(Long restaurantId, BigDecimal price, boolean available) {
-        Long categoryId = insertMenuCategory(restaurantId);
-
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO menu_item (category_id, name, description, price, is_available, sort_order)
-                        VALUES (?, ?, ?, ?, ?, 1)
-                        RETURNING id
-                        """,
-                Long.class,
-                categoryId,
-                "Test Item " + uniqueSuffix(),
-                "Блюдо для интеграционных тестов",
-                price,
-                available
-        );
+        return catalog.addItem(restaurantId, "Test Item " + uniqueSuffix(), price, available);
     }
 
     public Long insertCart(Long customerId, Long restaurantId, String status) {

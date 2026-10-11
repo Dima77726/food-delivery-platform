@@ -55,52 +55,6 @@ services:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
 
-  # Одноразовый перенос ресторанов и меню из базы монолита в базу каталога — с сохранением
-  # идентификаторов, на которые ссылаются корзины и заказы. Ждёт, пока обе схемы появятся,
-  # переносит только в пустой каталог и при повторном запуске ничего не делает.
-  # Подробности — в самом скрипте.
-  #
-  # Профиля нет: при запуске сервисов из IDE перенос нужен точно так же. Если сервисы
-  # стартуют позже, чем скрипт перестанет их ждать, его запускают повторно:
-  #   docker compose up catalog-data-migration
-  catalog-data-migration:
-    image: postgres:16
-    container_name: food-delivery-catalog-data-migration
-    restart: "no"
-    depends_on:
-      postgres-provision:
-        condition: service_completed_successfully
-    environment:
-      PGHOST: postgres
-      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
-      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
-      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
-      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
-    volumes:
-      - ./docker/migrations/catalog-from-monolith.sh:/migrate.sh:ro
-    entrypoint: ["sh", "/migrate.sh"]
-
-  # Тот же одноразовый перенос — для пользователей: app_user, роли и права на рестораны
-  # из базы монолита в базу identity-service, с сохранением идентификаторов.
-  identity-data-migration:
-    image: postgres:16
-    container_name: food-delivery-identity-data-migration
-    restart: "no"
-    depends_on:
-      postgres-provision:
-        condition: service_completed_successfully
-    environment:
-      PGHOST: postgres
-      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
-      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
-      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
-      IDENTITY_DB_NAME: ${IDENTITY_DB_NAME:-identity}
-    volumes:
-      - ./docker/migrations/identity-from-monolith.sh:/migrate.sh:ro
-    entrypoint: ["sh", "/migrate.sh"]
-
   redis:
     image: redis:7-alpine
     container_name: food-delivery-redis

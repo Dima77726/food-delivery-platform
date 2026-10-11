@@ -3,9 +3,9 @@ package com.dima.fooddelivery.cart.service;
 import com.dima.fooddelivery.cart.api.AddCartItemRequest;
 import com.dima.fooddelivery.cart.api.CartResponse;
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
+import com.dima.fooddelivery.support.TestCatalog;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 
@@ -20,8 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * корзину без вызова каталога на каждое чтение. А по смыслу он и правильнее: клиент
  * платит за то, что видел, когда выбирал.
  *
- * <p>Изменение меню здесь делается в обход каталога, прямо в таблице, из которой отвечает
- * тестовый каталог (см. {@code LegacyTablesCatalogClient}): для корзины это ровно то же,
+ * <p>Меню меняется в тестовом каталоге ({@link TestCatalog}): для корзины это ровно то же,
  * что правка меню в настоящем каталоге.
  */
 class CartSnapshotIT extends AbstractIntegrationTest {
@@ -30,21 +29,18 @@ class CartSnapshotIT extends AbstractIntegrationTest {
     private CartService cartService;
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private TestCatalog catalog;
 
     @Test
     void shouldKeepPriceAndNameFromMomentOfAdding() {
         Long customerId = testData.insertCustomer();
         Long restaurantId = testData.insertRestaurant();
         Long itemId = testData.insertMenuItem(restaurantId, new BigDecimal("500.00"));
-        String originalName = jdbcTemplate.queryForObject("SELECT name FROM menu_item WHERE id = ?", String.class, itemId);
+        String originalName = catalog.itemName(itemId);
 
         cartService.addItemToCart(customerId, restaurantId, new AddCartItemRequest(itemId, 2));
 
-        jdbcTemplate.update(
-                "UPDATE menu_item SET price = 700.00, name = 'Переименованное блюдо' WHERE id = ?",
-                itemId
-        );
+        catalog.changeItem(itemId, "Переименованное блюдо", new BigDecimal("700.00"));
 
         CartResponse cart = cartService.getActiveCart(customerId, restaurantId);
 
