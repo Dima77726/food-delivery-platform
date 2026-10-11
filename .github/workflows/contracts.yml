@@ -1,0 +1,57 @@
+name: Contracts
+
+# Публикация контрактов в GitHub Packages — по тегу вида contracts-v1.2.0.
+#
+# Контракты выпускаются отдельно от сервисов и своим номером версии: на них завязаны все
+# сервисы сразу, и правила у них свои. Совместимое изменение (новое поле, новый метод) —
+# минорная версия. Несовместимое — мажорная и новый пакет .proto (catalog.v2), а старый
+# живёт рядом, пока его не перестанут использовать.
+#
+# Пока сервисы живут в монорепозитории, они берут контракты из той же сборки, и публикация
+# им не нужна. Она нужна для того, что придёт после разделения на репозитории: тогда каждый
+# сервис подключит опубликованную версию, а не соседнюю папку.
+on:
+  push:
+    tags: ['contracts-v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Публикация контрактов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # server-id совпадает с id репозитория в distributionManagement контрактов:
+      # setup-java пишет settings.xml с этим сервером и токеном из окружения.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Версия из тега
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#contracts-v}" >> "$GITHUB_OUTPUT"
+
+      # Версия выставляется только контрактам: у них свои pom без родителя платформы.
+      - name: Выставить версию
+        run: |
+          for module in libs/event-contracts libs/grpc-contracts; do
+            ./mvnw -B --no-transfer-progress -f "$module/pom.xml" versions:set \
+              -DnewVersion=${{ steps.version.outputs.version }} -DgenerateBackupPoms=false
+          done
+
+      - name: Опубликовать
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for module in libs/event-contracts libs/grpc-contracts; do
+            ./mvnw -B --no-transfer-progress -f "$module/pom.xml" deploy
+          done

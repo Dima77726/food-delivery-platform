@@ -145,6 +145,13 @@ services:
 
   # Сервисы приложения — все под профилем full: обычный `docker compose up -d` их НЕ поднимает.
   #
+  # У каждого сервиса и build, и image. По умолчанию (IMAGE_TAG=local) compose собирает образы
+  # из исходников и называет их так же, как они называются в реестре. Готовые образы из
+  # GitHub Container Registry — те, что собрал CI после мержа, — поднимаются без сборки:
+  #   IMAGE_TAG=dev docker compose --profile full pull
+  #   IMAGE_TAG=dev docker compose --profile full up -d --no-build
+  # Вместо dev можно взять sha конкретного коммита — так поднимается ровно та версия.
+  #
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
   #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
   #   catalog-service      — рестораны, меню, поиск;
@@ -173,6 +180,7 @@ services:
   #   docker compose --profile full up -d --build — весь стек
   core:
     profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-core:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -255,6 +263,7 @@ services:
 
   catalog-service:
     profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-catalog-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -291,6 +300,7 @@ services:
 
   identity-service:
     profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-identity-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -320,6 +330,7 @@ services:
 
   notification-service:
     profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-notification-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -349,6 +360,7 @@ services:
 
   api-gateway:
     profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-api-gateway:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile

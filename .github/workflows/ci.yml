@@ -15,54 +15,120 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Явное сужение прав токена. По умолчанию он может больше, чем нужно сборке,
-# а сборке не нужно ничего, кроме чтения кода.
+# Явное сужение прав токена: сборке не нужно ничего, кроме чтения кода.
 permissions:
   contents: read
 
 jobs:
+  # Какие модули затронуты изменением. Монорепозиторий не должен вести себя как монолит:
+  # правка в шлюзе не повод гонять двадцать минут тестов монолита. Каждый модуль собирается
+  # и тестируется отдельно, и только если изменился он сам или то, от чего он зависит.
+  #
+  # Общее для всех — сборка (корневой pom, mvnw) и контракты. Их правка запускает всех
+  # потребителей: ровно это и нужно проверить, когда меняется контракт.
+  changes:
+    name: Что изменилось
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            libs/event-contracts: &build
+              - 'pom.xml'
+              - 'mvnw'
+              - '.mvn/**'
+              - 'libs/event-contracts/**'
+            libs/grpc-contracts:
+              - *build
+              - 'libs/grpc-contracts/**'
+            service:
+              - *build
+              - 'libs/**'
+              - 'service/**'
+            notification-service:
+              - *build
+              - 'libs/event-contracts/**'
+              - 'notification-service/**'
+            catalog-service:
+              - *build
+              - 'libs/grpc-contracts/**'
+              - 'openapi/**'
+              - 'client/**'
+              - 'catalog-service/**'
+            identity-service:
+              - *build
+              - 'libs/grpc-contracts/**'
+              - 'identity-service/**'
+            api-gateway:
+              - *build
+              - 'api-gateway/**'
+            client:
+              - *build
+              - 'openapi/**'
+              - 'service/**'
+              - 'client/**'
+
   build:
-    name: Сборка и тесты
+    name: ${{ matrix.module }}
+    needs: changes
+    if: needs.changes.outputs.modules != '[]'
     runs-on: ubuntu-latest
     # Testcontainers ждёт готовности контейнера; при зависшем Docker без лимита
     # job висел бы до потолка в 6 часов.
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      # Упавший один модуль не должен прятать результат остальных.
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.modules) }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Java 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-          # Кэш ~/.m2. Без него каждый прогон заново тянет Spring Boot целиком.
           cache: maven
 
-      # verify запускает оба круга: surefire с быстрыми тестами и failsafe
-      # с интеграционными на настоящем PostgreSQL. Docker на ubuntu-latest
-      # доступен из коробки, поэтому Testcontainers поднимается без настройки.
-      - name: Сборка и тесты
-        run: ./mvnw -B --no-transfer-progress clean verify
+      # Два шага, а не один verify с -am. Флаг -am прогнал бы тесты всех модулей, от которых
+      # зависит этот, — а каталог через контрактный тест SDK тянет за собой монолит целиком.
+      # Зависимости собираются без тестов, тестируется только сам модуль.
+      - name: Зависимости модуля
+        run: ./mvnw -B --no-transfer-progress -pl ${{ matrix.module }} -am install -DskipTests
 
-      # Отчёты нужны именно когда упало: в логе видно только строчку с ошибкой,
+      - name: Сборка и тесты модуля
+        run: ./mvnw -B --no-transfer-progress -pl ${{ matrix.module }} verify
+
+      # Отчёты нужны именно когда упало: в логе видна только строчка с ошибкой,
       # а в отчёте — стектрейс и вывод конкретного теста.
-      #
-      # Пути со звёздочками, потому что сборка многомодульная: отчёты лежат
-      # в service/target и client/target, а корневого target у reactor-модуля
-      # нет вовсе. С путём target/surefire-reports этот шаг молча выгружал
-      # пустой архив — ровно в тот момент, когда он и был нужен.
-      #
-      # if-no-files-found оставлен на значении по умолчанию (warn): при пустом
-      # результате в логе появится предупреждение. Со значением ignore следующая
-      # такая же ошибка в путях снова осталась бы незамеченной.
       - name: Отчёты о тестах
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-${{ strategy.job-index }}
           path: |
             **/target/surefire-reports/
             **/target/failsafe-reports/
           retention-days: 7
+
+  # Одна проверка, на которую можно повесить защиту ветки. Отдельные jobs матрицы для этого
+  # не годятся: их набор меняется от PR к PR, а пропущенный job GitHub не считает пройденным.
+  ci-ok:
+    name: CI пройден
+    needs: [changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Все затронутые модули зелёные
+        run: |
+          if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
+            echo "Сборка затронутых модулей не прошла"
+            exit 1
+          fi
+          echo "Затронутые модули: ${{ needs.changes.outputs.modules }}"
