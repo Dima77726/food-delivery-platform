@@ -55,6 +55,21 @@ services:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
 
+  # Сертификаты для взаимного TLS между сервисами: свой CA и по сертификату на сервис.
+  # Одноразовый контейнер: выпускает их в общий том при первом запуске и больше ничего
+  # не трогает. Пересоздать — удалить том food_delivery_grpc_certs.
+  #
+  # Образ postgres:16 взят ради openssl, который в нём уже есть: отдельный образ ради одной
+  # команды — ещё одна загрузка без пользы.
+  grpc-certs:
+    image: postgres:16
+    container_name: food-delivery-grpc-certs
+    restart: "no"
+    volumes:
+      - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
+      - food_delivery_grpc_certs:/certs
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service"]
+
   redis:
     image: redis:7-alpine
     container_name: food-delivery-redis
@@ -194,6 +209,8 @@ services:
     # обрывалось бы ровно так же, как без него, только незаметнее.
     stop_grace_period: 30s
     depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       postgres:
@@ -214,6 +231,8 @@ services:
     # до отбора по профилям, и обязательная переменная сервиса под профилем full ломала бы
     # обычный `docker compose up` без приложения. Недостающие переменные ловит само
     # приложение — на старте, с указанием имени переменной.
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
     environment:
       # Внутри сети compose обращение идёт по имени сервиса и всегда на порт 5432 —
       # проброс на хост здесь ни при чём.
@@ -227,6 +246,11 @@ services:
       # gRPC-клиенты: каталог (ресторан и блюдо) и сервис пользователей (права на ресторан).
       - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      # Взаимный TLS на gRPC: свой сертификат (CN=core) и CA, которому верить.
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/core.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/core.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
@@ -273,16 +297,25 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres-provision:
         condition: service_completed_successfully
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
       # Права на рестораны знает сервис пользователей — каталог спрашивает его по gRPC.
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      # Взаимный TLS на gRPC: свой сертификат (CN=catalog-service) и CA, которому верить.
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/catalog-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/catalog-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
       - CATALOG_DB_HOST=postgres
       - CATALOG_DB_PORT=5432
       - CATALOG_DB_NAME=${CATALOG_DB_NAME:-catalog}
@@ -310,12 +343,21 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
       postgres-provision:
         condition: service_completed_successfully
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
+      # Взаимный TLS на gRPC: свой сертификат (CN=identity-service) и CA, которому верить.
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/identity-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/identity-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
       - IDENTITY_DB_HOST=postgres
       - IDENTITY_DB_PORT=5432
       - IDENTITY_DB_NAME=${IDENTITY_DB_NAME:-identity}
@@ -581,6 +623,8 @@ volumes:
   food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:
+  # Сертификаты mTLS. Не данные — их можно удалить, и grpc-certs выпустит новые.
+  food_delivery_grpc_certs:
   # Тома дополнительных хранилищ объявлены безусловно: список томов профилями
   # не управляется, а неиспользованный том места не занимает.
   #
