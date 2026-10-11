@@ -1,0 +1,37 @@
+# Профиль grpc-tls: взаимный TLS на gRPC — и на сервере каталога, и на его канале к сервису
+# пользователей. Включается в docker-compose; при запуске из IDE выключен, см. GrpcSecurityConfig.
+#
+# Сертификаты — PEM-файлы, пути приходят переменными окружения. В compose их выпускает
+# одноразовый контейнер grpc-certs в общий том.
+spring:
+  ssl:
+    bundle:
+      pem:
+        grpc:
+          # Свой сертификат и ключ: им сервис представляется и как сервер, и как клиент.
+          keystore:
+            certificate: ${GRPC_TLS_CERTIFICATE}
+            private-key: ${GRPC_TLS_PRIVATE_KEY}
+          # Кому верить: только сертификатам, подписанным нашим CA.
+          truststore:
+            certificate: ${GRPC_TLS_CA}
+  grpc:
+    server:
+      ssl:
+        enabled: true
+        bundle: grpc
+        # require — без клиентского сертификата не пройдёт даже рукопожатие.
+        client-auth: require
+    client:
+      channels:
+        identity:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
+
+app:
+  grpc:
+    security:
+      mtls: true
+      # CatalogService нужен только корзине монолита.
+      allowed-clients: core

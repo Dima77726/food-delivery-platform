@@ -1,0 +1,23 @@
+# Профиль grpc-tls: монолит ходит к каталогу и сервису пользователей по взаимному TLS,
+# предъявляя свой сертификат (CN=core). Включается в docker-compose.
+spring:
+  ssl:
+    bundle:
+      pem:
+        grpc:
+          keystore:
+            certificate: ${GRPC_TLS_CERTIFICATE}
+            private-key: ${GRPC_TLS_PRIVATE_KEY}
+          truststore:
+            certificate: ${GRPC_TLS_CA}
+  grpc:
+    client:
+      channels:
+        catalog:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
+        identity:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
