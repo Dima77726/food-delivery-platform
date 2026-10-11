@@ -8,11 +8,16 @@ import com.dima.fooddelivery.grpc.catalog.v1.RestaurantSummary;
 import com.dima.fooddelivery.support.AbstractIntegrationTest;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.MetadataUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.grpc.test.autoconfigure.LocalGrpcPort;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * gRPC-вход каталога по-настоящему: сервер на сетевом порту, вызов через канал Netty.
@@ -34,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * незакоммиченных данных. Изоляцию дают уникальные рестораны.
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@ExtendWith(OutputCaptureExtension.class)
 class CatalogGrpcServiceIT extends AbstractIntegrationTest {
 
     @LocalGrpcPort
@@ -132,6 +139,32 @@ class CatalogGrpcServiceIT extends AbstractIntegrationTest {
                         .setMenuItemId(itemId)
                         .build()
         ));
+    }
+
+    /**
+     * Метка запроса из метаданных вызова попадает в MDC каталога: строка лога, которую пишет
+     * сервис, обрабатывая вызов монолита, несёт ту же метку, что и запрос пользователя
+     * в монолите. Без этого цепочка запроса рвалась бы на каждом синхронном вызове.
+     */
+    @Test
+    void shouldCarryCorrelationIdFromMetadataIntoLogs(CapturedOutput output) {
+        Long restaurantId = testData.insertRestaurant(false);
+        String correlationId = "grpc-trace-" + restaurantId;
+
+        Metadata metadata = new Metadata();
+        metadata.put(Metadata.Key.of("x-correlation-id", Metadata.ASCII_STRING_MARSHALLER), correlationId);
+
+        assertStatus(Status.Code.FAILED_PRECONDITION, () -> catalog
+                .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata))
+                .getActiveRestaurant(GetActiveRestaurantRequest.newBuilder().setRestaurantId(restaurantId).build()));
+
+        // Каталог пишет предупреждение о закрытом ресторане внутри обработки вызова.
+        String warning = output.getOut().lines()
+                .filter(line -> line.contains("Ресторан недоступен для заказов: restaurantId=" + restaurantId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("строка лога о закрытом ресторане не найдена"));
+
+        assertTrue(warning.contains(correlationId), "метка вызова обязана попасть в строку лога: " + warning);
     }
 
     private void assertStatus(Status.Code expected, Runnable call) {

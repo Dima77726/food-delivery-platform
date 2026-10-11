@@ -60,21 +60,20 @@ public class TestcontainersConfiguration {
     }
 
     /**
-     * Каталог вместо gRPC-клиента к catalog-service — см. {@link LegacyTablesCatalogClient}.
-     * {@code @Primary}, потому что настоящий {@code GrpcCatalogClient} в контексте тоже есть:
-     * его канал ленивый и ни к кому не подключается, пока его не вызвали.
+     * Каталог и права на рестораны в памяти вместо gRPC-клиентов к catalog-service
+     * и identity-service. {@code @Primary}: настоящие клиенты в контексте тоже есть, но их
+     * каналы ленивые и ни к кому не подключаются, пока их не вызвали.
      */
     @Bean
     @Primary
-    LegacyTablesCatalogClient legacyTablesCatalogClient(JdbcTemplate jdbcTemplate) {
-        return new LegacyTablesCatalogClient(jdbcTemplate);
+    TestCatalog testCatalog() {
+        return new TestCatalog();
     }
 
-    /** Права на рестораны вместо gRPC-клиента к identity-service — см. {@link LegacyTablesRestaurantAccessClient}. */
     @Bean
     @Primary
-    LegacyTablesRestaurantAccessClient legacyTablesRestaurantAccessClient(JdbcTemplate jdbcTemplate) {
-        return new LegacyTablesRestaurantAccessClient(jdbcTemplate);
+    TestRestaurantAccess testRestaurantAccess() {
+        return new TestRestaurantAccess();
     }
 
     @Bean
@@ -94,7 +93,7 @@ public class TestcontainersConfiguration {
     }
 
     @Bean
-    TestDataFactory testDataFactory(JdbcTemplate jdbcTemplate) {
-        return new TestDataFactory(jdbcTemplate);
+    TestDataFactory testDataFactory(JdbcTemplate jdbcTemplate, TestCatalog catalog, TestRestaurantAccess restaurantAccess) {
+        return new TestDataFactory(jdbcTemplate, catalog, restaurantAccess);
     }
 }
