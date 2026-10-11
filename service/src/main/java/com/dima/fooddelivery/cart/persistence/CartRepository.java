@@ -50,12 +50,11 @@ public class CartRepository {
                             c.status       AS cart_status,
                             ci.id          AS cart_item_id,
                             ci.menu_item_id,
-                            mi.name        AS menu_item_name,
+                            ci.menu_item_name,
                             ci.quantity,
                             ci.price
                         FROM cart c
                         LEFT JOIN cart_item ci ON ci.cart_id = c.id
-                        LEFT JOIN menu_item mi ON mi.id = ci.menu_item_id
                         WHERE c.customer_id = :customerId
                           AND c.restaurant_id = :restaurantId
                           AND c.status = :status
@@ -111,17 +110,25 @@ public class CartRepository {
      * запросах «проверить и вставить» второй упал бы на unique-констрейнте
      * {@code (cart_id, menu_item_id)}. ON CONFLICT перекладывает эту гонку на базу.
      */
-    public int addOrIncreaseItem(Long cartId, Long menuItemId, Integer quantity, BigDecimal price) {
+    /**
+     * Название и цена — снимок из каталога на момент добавления. Меню живёт в другом сервисе,
+     * и join'ить его здесь нечем; а по смыслу клиент и должен видеть в корзине то, что выбрал.
+     *
+     * <p>Повторное добавление того же блюда увеличивает количество, но снимок не обновляет:
+     * цена в корзине фиксируется первым добавлением, и название вместе с ней.
+     */
+    public int addOrIncreaseItem(Long cartId, Long menuItemId, String menuItemName, Integer quantity, BigDecimal price) {
         SqlParameterSource params = new MapSqlParameterSource()
                 .addValue("cartId", cartId)
                 .addValue("menuItemId", menuItemId)
+                .addValue("menuItemName", menuItemName)
                 .addValue("quantity", quantity)
                 .addValue("price", price);
 
         return jdbc.update(
                 """
-                        INSERT INTO cart_item (cart_id, menu_item_id, quantity, price)
-                        VALUES (:cartId, :menuItemId, :quantity, :price)
+                        INSERT INTO cart_item (cart_id, menu_item_id, menu_item_name, quantity, price)
+                        VALUES (:cartId, :menuItemId, :menuItemName, :quantity, :price)
                         ON CONFLICT (cart_id, menu_item_id)
                         DO UPDATE SET
                             quantity = cart_item.quantity + EXCLUDED.quantity,

@@ -1,0 +1,59 @@
+// Каталог: рестораны и блюда в том виде, в каком их видят другие сервисы.
+//
+// Это не зеркало REST API каталога. REST отдаёт витрину человеку, а этот контракт —
+// ровно то, что нужно корзине и заказу, чтобы принять решение: открыт ли ресторан,
+// можно ли продать блюдо и по какой цене. Описание, сортировка, категории сюда
+// не попадают: потребитель, который начал бы от них зависеть, связал бы каталогу руки.
+//
+// Правила эволюции — те же, что у событий Kafka, и их проверяет protobuf сам:
+// поля только добавляются, номера полей не переиспользуются никогда, удалённое поле
+// объявляется reserved. Несовместимое изменение — это новый пакет catalog.v2.
+syntax = "proto3";
+
+package fooddelivery.catalog.v1;
+
+option java_multiple_files = true;
+option java_package = "com.dima.fooddelivery.grpc.catalog.v1";
+option java_outer_classname = "CatalogProto";
+
+service CatalogService {
+  // Ресторан, если он существует и принимает заказы.
+  //
+  // Несуществующий ресторан — NOT_FOUND, закрытый — FAILED_PRECONDITION. Это разные
+  // ситуации для клиента: в первой ошибся он сам, во второй ресторан просто не работает.
+  rpc GetActiveRestaurant(GetActiveRestaurantRequest) returns (RestaurantSummary);
+
+  // Снимок блюда на текущий момент: цена фиксируется в корзине именно отсюда.
+  //
+  // Блюдо ищется в пределах ресторана: идентификатор блюда из чужого меню — NOT_FOUND,
+  // а не успех. Иначе в корзину пиццерии можно было бы положить суши по цене пиццы.
+  // Снятое с продажи или архивное блюдо — FAILED_PRECONDITION.
+  rpc GetAvailableMenuItem(GetAvailableMenuItemRequest) returns (MenuItemSnapshot);
+}
+
+message GetActiveRestaurantRequest {
+  int64 restaurant_id = 1;
+}
+
+message RestaurantSummary {
+  int64 id = 1;
+  string name = 2;
+  string city = 3;
+}
+
+message GetAvailableMenuItemRequest {
+  int64 restaurant_id = 1;
+  int64 menu_item_id = 2;
+}
+
+message MenuItemSnapshot {
+  int64 id = 1;
+  string name = 2;
+  // Деньги — строкой в десятичной записи, например "450.00".
+  //
+  // Не double: двоичная плавающая точка не представляет 0.1 точно, и копейки поплыли бы
+  // на первой же сумме. Не google.type.Money: он хранит единицы и нано отдельно, и ради
+  // одной цены тянуть его и писать конвертацию незачем. Строка разбирается в BigDecimal
+  // без потерь и читается глазами в любом инструменте отладки.
+  string price = 3;
+}

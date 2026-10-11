@@ -80,3 +80,6 @@ databaseChangeLog:
   - include:
       file: migrations/027-index-customer-order-keyset.yml
       relativeToChangelogFile: true
+  - include:
+      file: migrations/028-detach-catalog-tables.yml
+      relativeToChangelogFile: true

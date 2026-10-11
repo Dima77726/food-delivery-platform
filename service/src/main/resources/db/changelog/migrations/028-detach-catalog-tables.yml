@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 028-detach-catalog-tables
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/028-detach-catalog-tables.sql
+            relativeToChangelogFile: true
+            splitStatements: true

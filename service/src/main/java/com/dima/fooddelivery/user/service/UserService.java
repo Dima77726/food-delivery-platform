@@ -134,6 +134,15 @@ public class UserService {
         log.info("Пользователь назначен управляющим рестораном: userId={}, restaurantId={}", userId, restaurantId);
     }
 
+    /**
+     * Управляет ли пользователь рестораном. Ответ для каталога — он спрашивает по gRPC перед
+     * каждой операцией управления рестораном и меню.
+     */
+    @Transactional(readOnly = true)
+    public boolean managesRestaurant(Long userId, Long restaurantId) {
+        return appUserRepository.managesRestaurant(userId, restaurantId);
+    }
+
     @Transactional(readOnly = true)
     public List<Long> getManagedRestaurantIds(Long userId) {
         return appUserRepository.findManagedRestaurantIds(userId);

@@ -72,9 +72,13 @@ class AuthApiIT extends AbstractIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    /**
+     * Открытые пути монолита пропускают анонима. Витрина ресторанов переехала в каталог,
+     * и анонимный доступ к ней проверяют тесты каталога.
+     */
     @Test
-    void shouldAllowAnonymousAccessToRestaurantList() throws Exception {
-        mockMvc.perform(get("/api/v1/restaurants"))
+    void shouldAllowAnonymousAccessToPublicEndpoint() throws Exception {
+        mockMvc.perform(get("/api/v1/ping"))
                 .andExpect(status().isOk());
     }
 

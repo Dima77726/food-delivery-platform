@@ -19,8 +19,9 @@
         из openapi/food-delivery-api.yaml. Как только сюда попадёт рукописный класс, клиент
         перестанет быть производным от контракта и начнёт от него отставать.
 
-        src/test при этом есть: там живёт контрактный тест, который поднимает приложение
-        и ходит в него сгенерированным клиентом.
+        src/test при этом есть: там живёт контрактный тест SDK против контроллеров монолита.
+        Контракт ресторанов, меню и поиска проверяется в catalog-service: сервис, который
+        отдаёт API, и проверяет, что SDK его понимает.
 
         Модуль не зависит от service: потребителю клиента незачем тянуть Liquibase,
         Security и драйвер базы. Общее у них ровно одно — спецификация.
@@ -62,7 +63,7 @@
         </dependency>
 
         <!--
-            Только для тестов. Контрактный тест поднимает настоящее приложение и ходит в него
+            Только для тестов. Контрактный тест вызывает настоящие контроллеры монолита
             сгенерированным клиентом: это единственный способ убедиться, что обе стороны
             понимают спеку одинаково. Компиляции клиента для этого мало — она не заметит,
             что сервер отдаёт поле под другим именем.
@@ -80,18 +81,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-testcontainers</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -133,20 +122,6 @@
                                 <documentationProvider>none</documentationProvider>
                             </configOptions>
                         </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <!-- Контрактные тесты — интеграционные, поэтому тот же failsafe, что и в service. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-failsafe-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>integration-test</goal>
-                            <goal>verify</goal>
-                        </goals>
                     </execution>
                 </executions>
             </plugin>

@@ -45,9 +45,38 @@ services:
       NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification}
       NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER:?задайте NOTIFICATION_DB_USER в .env}
       NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?задайте NOTIFICATION_DB_PASSWORD в .env}
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+      CATALOG_DB_USER: ${CATALOG_DB_USER:?задайте CATALOG_DB_USER в .env}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?задайте CATALOG_DB_PASSWORD в .env}
     volumes:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
+
+  # Одноразовый перенос ресторанов и меню из базы монолита в базу каталога — с сохранением
+  # идентификаторов, на которые ссылаются корзины и заказы. Ждёт, пока обе схемы появятся,
+  # переносит только в пустой каталог и при повторном запуске ничего не делает.
+  # Подробности — в самом скрипте.
+  #
+  # Профиля нет: при запуске сервисов из IDE перенос нужен точно так же. Если сервисы
+  # стартуют позже, чем скрипт перестанет их ждать, его запускают повторно:
+  #   docker compose up catalog-data-migration
+  catalog-data-migration:
+    image: postgres:16
+    container_name: food-delivery-catalog-data-migration
+    restart: "no"
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+    volumes:
+      - ./docker/migrations/catalog-from-monolith.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
 
   redis:
     image: redis:7-alpine
@@ -141,7 +170,11 @@ services:
   #
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
   #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
+  #   catalog-service      — рестораны, меню, поиск;
   #   notification-service — уведомления.
+  #
+  # Монолит и каталог разговаривают друг с другом по gRPC на порту 9090 внутри сети:
+  # корзина спрашивает у каталога ресторан и блюдо, каталог у монолита — права на ресторан.
   #
   # Внутри сети все слушают 8080 (API) и 8081 (actuator): у каждого контейнера своё сетевое
   # пространство, и одинаковые порты не конфликтуют. Различные порты по умолчанию в их
@@ -174,8 +207,6 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       postgres:
         # Именно service_healthy, а не service_started: контейнер с Postgres поднимается
         # за долю секунды, а принимать соединения начинает позже. Со service_started
@@ -202,10 +233,11 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
+      # gRPC: свой сервер (права на рестораны) и адрес каталога.
+      - GRPC_PORT=9090
+      - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
@@ -224,8 +256,6 @@ services:
       # инфраструктуру, потом приложение.
       - MONGO_HOST=mongo
       - MONGO_PORT=27017
-      - ELASTIC_HOST=elasticsearch
-      - ELASTIC_PORT=9200
       - CASSANDRA_CONTACT_POINTS=cassandra:9042
       - NEO4J_URI=bolt://neo4j:7687
       - CLICKHOUSE_HOST=clickhouse
@@ -237,7 +267,6 @@ services:
       - STORE_CASSANDRA_ENABLED
       - STORE_NEO4J_ENABLED
       - STORE_CLICKHOUSE_ENABLED
-      - STORE_ELASTICSEARCH_ENABLED
       - NEO4J_USERNAME
       - NEO4J_PASSWORD
       - CLICKHOUSE_DB
@@ -245,6 +274,41 @@ services:
       - CLICKHOUSE_PASSWORD
     # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза монолит
     # удобнее запускать из IDE — там он слушает localhost:8082.
+
+  catalog-service:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: catalog-service
+    container_name: food-delivery-catalog-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - GRPC_PORT=9090
+      # Права на рестораны знает монолит — каталог спрашивает его по gRPC.
+      - IDENTITY_GRPC_ADDRESS=static://core:9090
+      - CATALOG_DB_HOST=postgres
+      - CATALOG_DB_PORT=5432
+      - CATALOG_DB_NAME=${CATALOG_DB_NAME:-catalog}
+      - CATALOG_DB_USER
+      - CATALOG_DB_PASSWORD
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Поиск переехал сюда вместе со своим выключателем.
+      - ELASTIC_HOST=elasticsearch
+      - ELASTIC_PORT=9200
+      - STORE_ELASTICSEARCH_ENABLED
+      - JWT_SECRET
+      - TZ=${TZ}
 
   notification-service:
     profiles: ["full"]
@@ -292,6 +356,7 @@ services:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
       - CORE_SERVICE_URL=http://core:8080
+      - CATALOG_SERVICE_URL=http://catalog-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
       - TZ=${TZ}
     ports:

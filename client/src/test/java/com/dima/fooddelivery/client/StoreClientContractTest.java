@@ -7,7 +7,6 @@ import com.dima.fooddelivery.analytics.service.AnalyticsService;
 import com.dima.fooddelivery.client.api.AnalyticsApi;
 import com.dima.fooddelivery.client.api.RecommendationApi;
 import com.dima.fooddelivery.client.api.ReviewApi;
-import com.dima.fooddelivery.client.api.SearchApi;
 import com.dima.fooddelivery.client.api.TrackingApi;
 import com.dima.fooddelivery.client.model.CreateReviewRequest;
 import com.dima.fooddelivery.client.model.DishRatingRequest;
@@ -22,12 +21,6 @@ import com.dima.fooddelivery.review.api.ReviewResponse;
 import com.dima.fooddelivery.review.domain.DishRating;
 import com.dima.fooddelivery.review.domain.RatingSummary;
 import com.dima.fooddelivery.review.service.ReviewService;
-import com.dima.fooddelivery.search.api.SearchController;
-import com.dima.fooddelivery.search.domain.MenuItemDocument;
-import com.dima.fooddelivery.search.domain.ReindexResult;
-import com.dima.fooddelivery.search.domain.RestaurantDocument;
-import com.dima.fooddelivery.search.domain.SearchResults;
-import com.dima.fooddelivery.search.service.SearchService;
 import com.dima.fooddelivery.tracking.api.TrackingController;
 import com.dima.fooddelivery.tracking.domain.CourierPosition;
 import com.dima.fooddelivery.tracking.domain.CourierTrack;
@@ -61,7 +54,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Сгенерированный SDK вызывает настоящие MVC-контроллеры через MockMvc transport.
- * Проверяет маршруты, параметры, HTTP-коды и JSON всех 15 операций без баз данных.
+ * Проверяет маршруты, параметры, HTTP-коды и JSON операций монолита без баз данных.
+ * Поиск переехал в catalog-service, его контракт проверяет {@code SearchClientContractTest} там.
  * Бизнес-правила и авторизацию проверяют интеграционные тесты сервиса.
  */
 class StoreClientContractTest {
@@ -69,14 +63,13 @@ class StoreClientContractTest {
     private final TrackingService tracking = mock(TrackingService.class);
     private final RecommendationService recommendations = mock(RecommendationService.class);
     private final AnalyticsService analytics = mock(AnalyticsService.class);
-    private final SearchService search = mock(SearchService.class);
     private ApiClient client;
 
     @BeforeEach
     void setUp() {
         var mvc = MockMvcBuilders.standaloneSetup(new ReviewController(reviews),
                 new TrackingController(tracking), new RecommendationController(recommendations),
-                new AnalyticsController(analytics), new SearchController(search)).build();
+                new AnalyticsController(analytics)).build();
         client = new ApiClient(ApiClient.buildRestClientBuilder()
                 .requestFactory(new MockMvcClientHttpRequestFactory(mvc)).build());
     }
@@ -156,21 +149,5 @@ class StoreClientContractTest {
         assertEquals(day, platform.getFrom());
         assertEquals(amount, platform.getDays().get(0).getAverageCheck());
         assertEquals("PAID", api.getRestaurantFunnel(3L, day, day).getStatuses().get(0).getStatus());
-    }
-
-    @Test
-    void searchPreservesQueryNamesAndReindexCounts() {
-        when(search.search("пицца", "Москва", 10)).thenReturn(new SearchResults("пицца",
-                List.of(new RestaurantDocument("3", 3L, "Пиццерия", null, "Москва", true, Instant.now())),
-                List.of(new MenuItemDocument("4", 4L, 3L, "Пиццерия", "Москва", "Пицца", null,
-                        450.25, true, Instant.now()))));
-        when(search.reindexAll()).thenReturn(new ReindexResult(1, 1, 2));
-        var api = new SearchApi(client);
-        var found = api.search("пицца", "Москва", null);
-        assertEquals("пицца", found.getQuery());
-        assertEquals(new BigDecimal("450.25"), found.getItems().get(0).getPrice());
-        assertTrue(found.getRestaurants().get(0).getActive());
-        assertEquals(2L, api.reindex().getRemoved());
-        verify(search).search("пицца", "Москва", 10);
     }
 }
