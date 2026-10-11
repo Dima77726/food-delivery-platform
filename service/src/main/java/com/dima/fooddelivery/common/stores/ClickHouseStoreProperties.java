@@ -28,8 +28,10 @@ public record ClickHouseStoreProperties(
 
     public ClickHouseStoreProperties {
         url = url == null ? "jdbc:clickhouse://localhost:8123/food_delivery" : url;
-        username = username == null ? "default" : username;
-        password = password == null ? "" : password;
+        // Учётные данные обязательны и приходят из переменных окружения: значения
+        // по умолчанию означали бы пароль в репозитории.
+        username = required(username, "CLICKHOUSE_USER");
+        password = required(password, "CLICKHOUSE_PASSWORD");
         // Аналитике не нужен большой пул: пишет её один потребитель Kafka пачками,
         // читают редкие отчёты. Четырёх соединений хватает с запасом, а лишние соединения
         // к ClickHouse обходятся дороже, чем к PostgreSQL: каждое из них при запросе
@@ -37,5 +39,12 @@ public record ClickHouseStoreProperties(
         poolSize = poolSize == null ? 4 : poolSize;
         queryTimeout = queryTimeout == null ? Duration.ofSeconds(10) : queryTimeout;
         consumerGroup = consumerGroup == null ? "food-delivery-analytics" : consumerGroup;
+    }
+
+    private static String required(String value, String variable) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Не задана переменная окружения " + variable);
+        }
+        return value;
     }
 }
