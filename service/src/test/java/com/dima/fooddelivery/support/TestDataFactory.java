@@ -14,7 +14,7 @@ public class TestDataFactory {
 
     /**
      * Идентификаторы — из одного растущего счётчика, начатого со времени запуска. Контекст
-     * Spring общий для тестов, а хранилища вроде Neo4j и Cassandra откатом не очищаются:
+     * Spring общий для тестов, а хранилища вроде Neo4j и MongoDB откатом не очищаются:
      * уникальность даёт только то, что номера никогда не повторяются.
      */
     private static final AtomicLong IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L + 2_000_000_000L);
@@ -61,13 +61,6 @@ public class TestDataFactory {
 
     public void insertOrderItem(Long orderId, Long menuItemId, int quantity, BigDecimal price) {
         orders.addItem(orderId, menuItemId, "Test Item " + menuItemId, quantity, price);
-    }
-
-    public Long insertDelivery(Long orderId, Long courierId, String status) {
-        Long deliveryId = IDS.incrementAndGet();
-        orders.addDelivery(deliveryId, orderId, courierId, status);
-
-        return deliveryId;
     }
 
     public void changeOrderStatus(Long orderId, String status) {

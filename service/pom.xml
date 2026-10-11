@@ -220,11 +220,6 @@
             <artifactId>spring-boot-starter-data-mongodb</artifactId>
         </dependency>
 
-        <!-- Версией управляет spring-boot-dependencies (cassandra-driver.version). -->
-        <dependency>
-            <groupId>org.apache.cassandra</groupId>
-            <artifactId>java-driver-core</artifactId>
-        </dependency>
 
         <!-- Версией управляет spring-boot-dependencies (neo4j-java-driver.version). -->
         <dependency>
@@ -248,11 +243,6 @@
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-cassandra</artifactId>
-            <scope>test</scope>
-        </dependency>
 
         <dependency>
             <groupId>org.testcontainers</groupId>

@@ -56,6 +56,9 @@ jobs:
             payment-service:
               - *build
               - 'payment-service/**'
+            tracking-service:
+              - *build
+              - 'tracking-service/**'
             api-gateway:
               - *build
               - 'api-gateway/**'

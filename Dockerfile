@@ -32,6 +32,7 @@ COPY catalog-service/pom.xml catalog-service/
 COPY identity-service/pom.xml identity-service/
 COPY order-service/pom.xml order-service/
 COPY payment-service/pom.xml payment-service/
+COPY tracking-service/pom.xml tracking-service/
 COPY api-gateway/pom.xml api-gateway/
 COPY client/pom.xml client/
 
@@ -52,6 +53,7 @@ COPY catalog-service/src/ catalog-service/src/
 COPY identity-service/src/ identity-service/src/
 COPY order-service/src/ order-service/src/
 COPY payment-service/src/ payment-service/src/
+COPY tracking-service/src/ tracking-service/src/
 COPY api-gateway/src/ api-gateway/src/
 
 # Тесты здесь не гоняются намеренно: интеграционные требуют Docker внутри Docker.

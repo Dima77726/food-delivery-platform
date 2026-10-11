@@ -70,7 +70,7 @@ spring:
   grpc:
     client:
       channels:
-        # Сервис заказов: отзывы, рекомендации и трек курьера читают у него заказы и доставки.
+        # Сервис заказов: отзывы и рекомендации читают у него заказы.
         orders:
           address: ${ORDER_GRPC_ADDRESS:static://localhost:7086}
           negotiation-type: plaintext
@@ -178,8 +178,8 @@ app:
 
   # --- Дополнительные хранилища -------------------------------------------------------------
   #
-  # MongoDB, Cassandra, Neo4j и ClickHouse; пятое, Elasticsearch, уехало с поиском в
-  # catalog-service. По умолчанию выключены все, и приложение стартует одним PostgreSQL
+  # MongoDB, Neo4j и ClickHouse. Elasticsearch уехал с поиском в catalog-service, Cassandra —
+  # с треком курьера в tracking-service. По умолчанию выключены все, и приложение стартует одним PostgreSQL
   # и Kafka. Причина проста — вместе они просят несколько гигабайт памяти, и держать их
   # поднятыми ради модуля, который сегодня не трогают, незачем.
   #
@@ -192,17 +192,6 @@ app:
     # Отзывы о заказах.
     mongo:
       enabled: ${STORE_MONGO_ENABLED:false}
-
-    # Трек курьера. Настройки соединения свои, а не spring.cassandra.*: стартер Spring Boot
-    # здесь не используется, см. CassandraConfig.
-    cassandra:
-      enabled: ${STORE_CASSANDRA_ENABLED:false}
-      contact-points: ${CASSANDRA_CONTACT_POINTS:localhost:9042}
-      local-datacenter: ${CASSANDRA_DATACENTER:datacenter1}
-      keyspace: ${CASSANDRA_KEYSPACE:food_delivery}
-      # Неделя истории трека. Строки исчезают сами, DELETE в Cassandra оставлял бы надгробия.
-      track-ttl: ${CASSANDRA_TRACK_TTL:P7D}
-      request-timeout: ${CASSANDRA_REQUEST_TIMEOUT:PT5S}
 
     # Рекомендации по графу заказов.
     neo4j:

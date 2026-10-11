@@ -75,7 +75,7 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service", "order-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service", "order-service", "tracking-service"]
 
   # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
   # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
@@ -328,7 +328,6 @@ services:
       # инфраструктуру, потом приложение.
       - MONGO_HOST=mongo
       - MONGO_PORT=27017
-      - CASSANDRA_CONTACT_POINTS=cassandra:9042
       - NEO4J_URI=bolt://neo4j:7687
       - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PORT=8123
@@ -336,7 +335,6 @@ services:
       # Выключатели и секреты хранилищ пробрасываются без значений: не заданы в .env —
       # применится значение по умолчанию из application.yml, то есть выключено.
       - STORE_MONGO_ENABLED
-      - STORE_CASSANDRA_ENABLED
       - STORE_NEO4J_ENABLED
       - STORE_CLICKHOUSE_ENABLED
       - NEO4J_USERNAME
@@ -506,6 +504,46 @@ services:
       - TZ=${TZ}
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
+  tracking-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-tracking-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: tracking-service
+    container_name: food-delivery-tracking-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
+      cassandra:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      # Чей заказ и чья доставка — спрашивает у сервиса заказов по gRPC.
+      - ORDER_GRPC_ADDRESS=static://order-service:9090
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/tracking-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/tracking-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+      # Живой трек: подписки держит RabbitMQ через свой STOMP-плагин, а не память процесса.
+      - TRACKING_RELAY_ENABLED=true
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_STOMP_PORT=61613
+      - RABBITMQ_USER
+      - RABBITMQ_PASSWORD
+      - TRACKING_ALLOWED_ORIGINS=${TRACKING_ALLOWED_ORIGINS:-http://localhost:*}
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
   notification-service:
     profiles: ["full"]
     image: ghcr.io/dima77726/food-delivery-notification-service:${IMAGE_TAG:-local}
@@ -566,6 +604,8 @@ services:
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
       - ORDER_SERVICE_URL=http://order-service:8080
       - PAYMENT_SERVICE_URL=http://payment-service:8080
+      - TRACKING_SERVICE_URL=http://tracking-service:8080
+      - TRACKING_WS_URL=ws://tracking-service:8080
       - TZ=${TZ}
     ports:
       # Единственный опубликованный порт приложения. Служебный 8081 остаётся внутри сети
@@ -608,8 +648,10 @@ services:
     ports:
       - "${MONGO_PORT:-27017}:27017"
 
+  # Трек курьера. Единственное хранилище tracking-service и обязательное для него, поэтому
+  # поднимается и с профилем full, а не только с stores.
   cassandra:
-    profiles: ["stores"]
+    profiles: ["stores", "full"]
     image: cassandra:5.0
     container_name: food-delivery-cassandra
     restart: unless-stopped

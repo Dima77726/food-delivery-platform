@@ -27,8 +27,6 @@ public final class StoreToggles {
     /** Отзывы о заказах. MongoDB. */
     public static final String MONGO = "app.stores.mongo.enabled";
 
-    /** Трек курьера. Cassandra. */
-    public static final String CASSANDRA = "app.stores.cassandra.enabled";
 
     /** Рекомендации. Neo4j. */
     public static final String NEO4J = "app.stores.neo4j.enabled";

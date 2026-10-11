@@ -1,7 +1,6 @@
 package com.dima.fooddelivery.support;
 
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
-import com.dima.fooddelivery.order.Delivery;
 import com.dima.fooddelivery.order.Order;
 import com.dima.fooddelivery.order.OrderClient;
 import com.dima.fooddelivery.order.OrderItem;
@@ -12,13 +11,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * Сервис заказов в памяти — вместо gRPC-клиента к order-service.
  *
- * <p>Заказов в базе монолита больше нет: отзывы, рекомендации и трек спрашивают их у сервиса
+ * <p>Заказов в базе монолита больше нет: отзывы и рекомендации спрашивают их у сервиса
  * заказов через {@link OrderClient}. Тестам этих модулей нужен ответ, а не живой второй
  * сервис, поэтому {@link TestDataFactory} заводит заказы здесь, а модули читают отсюда же —
  * через тот же интерфейс, что и в бою. Сам gRPC-клиент проверяется отдельно, против сервера
@@ -30,11 +28,10 @@ import java.util.concurrent.ConcurrentSkipListMap;
 public class TestOrders implements OrderClient {
 
     private final Map<Long, Order> orders = new ConcurrentSkipListMap<>();
-    private final Map<Long, Delivery> deliveries = new ConcurrentHashMap<>();
 
     public void addOrder(Long orderId, Long customerId, Long restaurantId, String status, BigDecimal totalAmount) {
         orders.put(orderId, new Order(
-                orderId, customerId, restaurantId, status, totalAmount, OffsetDateTime.now(), List.of(), null
+                orderId, customerId, restaurantId, status, totalAmount, OffsetDateTime.now(), List.of()
         ));
     }
 
@@ -43,19 +40,13 @@ public class TestOrders implements OrderClient {
             List<OrderItem> items = new ArrayList<>(order.items());
             items.add(new OrderItem(menuItemId, name, quantity, price));
 
-            return copy(order, order.status(), items, order.delivery());
+            return copy(order, order.status(), items);
         });
-    }
-
-    public void addDelivery(Long deliveryId, Long orderId, Long courierId, String status) {
-        Delivery delivery = new Delivery(deliveryId, orderId, courierId, status);
-        deliveries.put(deliveryId, delivery);
-        orders.computeIfPresent(orderId, (id, order) -> copy(order, order.status(), order.items(), delivery));
     }
 
     /** Смена статуса «в сервисе заказов» — например, отмена посреди прохода проекции. */
     public void changeStatus(Long orderId, String status) {
-        orders.computeIfPresent(orderId, (id, order) -> copy(order, status, order.items(), order.delivery()));
+        orders.computeIfPresent(orderId, (id, order) -> copy(order, status, order.items()));
     }
 
     @Override
@@ -78,18 +69,7 @@ public class TestOrders implements OrderClient {
                 .toList();
     }
 
-    @Override
-    public Delivery requireDelivery(Long deliveryId) {
-        Delivery delivery = deliveries.get(deliveryId);
-
-        if (delivery == null) {
-            throw new ResourceNotFoundException("Доставка с id=" + deliveryId + " не найдена");
-        }
-
-        return delivery;
-    }
-
-    private static Order copy(Order order, String status, List<OrderItem> items, Delivery delivery) {
+    private static Order copy(Order order, String status, List<OrderItem> items) {
         return new Order(
                 order.id(),
                 order.customerId(),
@@ -97,8 +77,7 @@ public class TestOrders implements OrderClient {
                 status,
                 order.totalAmount(),
                 order.createdAt(),
-                List.copyOf(items),
-                delivery
+                List.copyOf(items)
         );
     }
 }

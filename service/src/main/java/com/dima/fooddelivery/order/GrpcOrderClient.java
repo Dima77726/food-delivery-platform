@@ -2,8 +2,6 @@ package com.dima.fooddelivery.order;
 
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.exception.UpstreamUnavailableException;
-import com.dima.fooddelivery.grpc.order.v1.DeliveryView;
-import com.dima.fooddelivery.grpc.order.v1.GetDeliveryRequest;
 import com.dima.fooddelivery.grpc.order.v1.GetOrderRequest;
 import com.dima.fooddelivery.grpc.order.v1.ListOrdersAfterRequest;
 import com.dima.fooddelivery.grpc.order.v1.OrderItemView;
@@ -76,15 +74,6 @@ public class GrpcOrderClient implements OrderClient {
         }
     }
 
-    @Override
-    public Delivery requireDelivery(Long deliveryId) {
-        try {
-            return toDelivery(withDeadline().getDelivery(GetDeliveryRequest.newBuilder().setDeliveryId(deliveryId).build()));
-        } catch (StatusRuntimeException exception) {
-            throw translate("прочитать доставку", exception);
-        }
-    }
-
     private OrderQueryServiceGrpc.OrderQueryServiceBlockingStub withDeadline() {
         return stub.withDeadlineAfter(deadline.toMillis(), TimeUnit.MILLISECONDS);
     }
@@ -110,8 +99,7 @@ public class GrpcOrderClient implements OrderClient {
                 view.getStatus(),
                 new BigDecimal(view.getTotalAmount()),
                 OffsetDateTime.parse(view.getCreatedAt()),
-                view.getItemsList().stream().map(GrpcOrderClient::toItem).toList(),
-                view.hasDelivery() ? toDelivery(view.getDelivery()) : null
+                view.getItemsList().stream().map(GrpcOrderClient::toItem).toList()
         );
     }
 
@@ -121,15 +109,6 @@ public class GrpcOrderClient implements OrderClient {
                 view.getMenuItemName(),
                 view.getQuantity(),
                 new BigDecimal(view.getPrice())
-        );
-    }
-
-    private static Delivery toDelivery(DeliveryView view) {
-        return new Delivery(
-                view.getId(),
-                view.getOrderId(),
-                view.hasCourierId() ? view.getCourierId() : null,
-                view.getStatus()
         );
     }
 }

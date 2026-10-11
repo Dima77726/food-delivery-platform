@@ -62,6 +62,14 @@ scrape_configs:
         labels:
           service: payment-service
 
+  - job_name: tracking-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['tracking-service:8081', 'host.docker.internal:9088']
+        labels:
+          service: tracking-service
+
   - job_name: notification-service
     metrics_path: /actuator/prometheus
     scrape_interval: 5s

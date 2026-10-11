@@ -7,11 +7,9 @@ import java.util.List;
 /**
  * Заказ глазами монолита — то, что отдаёт по gRPC сервис заказов.
  *
- * <p>Заказы уехали в order-service, а читать их по-прежнему нужно трём модулям: отзывам,
- * рекомендациям и треку курьера. Статус — строкой, как в контракте: монолит сравнивает его
+ * <p>Заказы уехали в order-service, а читать их по-прежнему нужно двум модулям: отзывам
+ * и рекомендациям. Статус — строкой, как в контракте: монолит сравнивает его
  * с парой известных значений и не должен падать на новом статусе, о котором ещё не знает.
- *
- * @param delivery доставка заказа; {@code null}, пока её не создали
  */
 public record Order(
         Long id,
@@ -20,8 +18,7 @@ public record Order(
         String status,
         BigDecimal totalAmount,
         OffsetDateTime createdAt,
-        List<OrderItem> items,
-        Delivery delivery
+        List<OrderItem> items
 ) {
 
     public static final String DELIVERED = "DELIVERED";

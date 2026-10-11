@@ -4,13 +4,13 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
-import org.testcontainers.cassandra.CassandraContainer;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.neo4j.Neo4jContainer;
 
 /**
- * Контейнеры дополнительных хранилищ монолита. Elasticsearch уехал с поиском в catalog-service.
+ * Контейнеры дополнительных хранилищ монолита. Elasticsearch уехал с поиском в catalog-service,
+ * Cassandra — с треком курьера в tracking-service.
  *
  * <p>Отдельная конфигурация, а не дополнение к {@link TestcontainersConfiguration}. Разница
  * принципиальная и стоит нескольких минут прогона: контекст Spring кэшируется по набору
@@ -21,7 +21,7 @@ import org.testcontainers.neo4j.Neo4jContainer;
  *
  * <p><b>Два способа передать адрес приложению.</b> MongoDB подключается
  * через {@link ServiceConnection}: его настройки разбирает автоконфигурация Spring Boot,
- * и она же умеет забрать адрес прямо из контейнера. Cassandra, Neo4j и ClickHouse настраиваются
+ * и она же умеет забрать адрес прямо из контейнера. Neo4j и ClickHouse настраиваются
  * нашими собственными свойствами {@code app.stores.*}, о которых Boot ничего не знает, —
  * их проставляет {@link DynamicPropertyRegistrar}.
  *
@@ -37,18 +37,6 @@ public class StoresTestcontainersConfiguration {
     @ServiceConnection
     MongoDBContainer mongoContainer() {
         return new MongoDBContainer("mongo:8.0");
-    }
-
-    /**
-     * Cassandra стартует дольше всех остальных контейнеров вместе взятых. Куча урезана
-     * до минимума: по умолчанию узел берёт четверть памяти машины, а тестам хватает
-     * нескольких сотен мегабайт.
-     */
-    @Bean
-    CassandraContainer cassandraContainer() {
-        return new CassandraContainer("cassandra:5.0")
-                .withEnv("MAX_HEAP_SIZE", "512M")
-                .withEnv("HEAP_NEWSIZE", "128M");
     }
 
     @Bean
@@ -70,18 +58,10 @@ public class StoresTestcontainersConfiguration {
      */
     @Bean
     DynamicPropertyRegistrar storeProperties(
-            CassandraContainer cassandra,
             Neo4jContainer neo4j,
             ClickHouseContainer clickHouse
     ) {
         return registry -> {
-            registry.add(
-                    "app.stores.cassandra.contact-points",
-                    () -> cassandra.getHost() + ":" + cassandra.getContactPoint().getPort()
-            );
-            registry.add("app.stores.cassandra.local-datacenter", cassandra::getLocalDatacenter);
-            registry.add("app.stores.cassandra.keyspace", () -> "food_delivery_test");
-
             registry.add("app.stores.neo4j.uri", neo4j::getBoltUrl);
             registry.add("app.stores.neo4j.username", () -> "neo4j");
             registry.add("app.stores.neo4j.password", () -> NEO4J_TEST_PASSWORD);

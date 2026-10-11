@@ -5,8 +5,8 @@
 хранилищ — отзывы, трек курьера, аналитика, рекомендации и поиск.
 
 Проект переезжает с модульного монолита на микросервисы — постепенно, по одному сервису
-(см. [Микросервисы](#микросервисы)). Сейчас за единым шлюзом работают монолит и пять
-вынесенных из него сервисов — пользователи, каталог, уведомления, заказы и платежи.
+(см. [Микросервисы](#микросервисы)). Сейчас за единым шлюзом работают монолит и шесть
+вынесенных из него сервисов — пользователи, каталог, уведомления, заказы, платежи и трек курьера.
 Синхронно сервисы разговаривают по gRPC, асинхронно — через Kafka; оплата заказа — сага
 поверх Kafka с outbox и inbox на обеих сторонах.
 
@@ -33,7 +33,7 @@ docker compose --profile full up -d --build
 Полный список переменных с пояснениями — в [.env.example](.env.example).
 
 Профиль `full` поднимает и сами сервисы: шлюз, монолит, пользователей, каталог, уведомления,
-заказы и платежи. Без него
+заказы, платежи и трек курьера (вместе с Cassandra — его хранилищем). Без него
 стартует только инфраструктура — это режим для разработки, когда сервисы запускаются из IDE.
 
 | Что | Адрес |
@@ -61,8 +61,12 @@ curl http://localhost:8080/api/v1/restaurants
 
 MongoDB, Cassandra, Neo4j, ClickHouse и Elasticsearch живут под отдельным профилем
 и по умолчанию выключены. Вместе они просят около пяти гигабайт памяти, а нужны только тем
-пяти модулям, которые с ними работают, — поэтому обычный `docker compose up -d` их
+модулям, которые с ними работают, — поэтому обычный `docker compose up -d` их
 не поднимает и приложение стартует ровно так же, как стартовало без них.
+
+Cassandra здесь особая: с треком курьера она уехала в tracking-service и стала его
+единственным, обязательным хранилищем. Выключателя у неё больше нет, а поднимается она
+и с профилем `full`.
 
 Включение состоит из двух шагов, и оба обязательны:
 
@@ -74,7 +78,6 @@ docker compose --profile stores up -d
 
 ```
 STORE_MONGO_ENABLED=true
-STORE_CASSANDRA_ENABLED=true
 STORE_NEO4J_ENABLED=true
 STORE_CLICKHOUSE_ENABLED=true
 STORE_ELASTICSEARCH_ENABLED=true
@@ -133,6 +136,7 @@ docker compose up -d
 | identity-service | `IdentityServiceApplication` | 8085 | 9085 |
 | order-service | `OrderServiceApplication` | 8086 | 9086 |
 | payment-service | `PaymentServiceApplication` | 8087 | 9087 |
+| tracking-service | `TrackingServiceApplication` | 8088 | 9088 |
 
 gRPC: каталог слушает 7084, identity-service — 7085, order-service — 7086, и по умолчанию
 сервисы ищут друг друга именно там. JWKS для проверки токенов все берут у identity-service:
@@ -151,7 +155,7 @@ gRPC: каталог слушает 7084, identity-service — 7085, order-servi
 | `CATALOG_DB_USER`, `CATALOG_DB_PASSWORD` | catalog-service, всегда |
 | `ORDER_DB_USER`, `ORDER_DB_PASSWORD` | order-service, всегда |
 | `PAYMENT_DB_USER`, `PAYMENT_DB_PASSWORD` | payment-service, всегда |
-| `RABBITMQ_USER`, `RABBITMQ_PASSWORD` | notification-service, всегда |
+| `RABBITMQ_USER`, `RABBITMQ_PASSWORD` | notification-service, всегда; tracking-service — при `TRACKING_RELAY_ENABLED=true` |
 | `NEO4J_USERNAME`, `NEO4J_PASSWORD` | при `STORE_NEO4J_ENABLED=true` |
 | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | при `STORE_CLICKHOUSE_ENABLED=true` |
 | `APP_ADMIN_EMAIL`, `APP_ADMIN_PASSWORD` | identity-service, если нужен администратор |
@@ -218,7 +222,8 @@ Spring кэшируется по набору настроек: попади э�
 |---|---|---|---|
 | корзина (order-service) | каталог | открыт ли ресторан, блюдо с ценой | цена и наличие меняются, копия устареет |
 | каталог, order-service, монолит | identity-service | управляет ли пользователь рестораном; назначить управляющего | права принадлежат пользователю; копии прав расходятся |
-| монолит | order-service | заказ с позициями и доставкой; заказы пачкой для графа | отзыв, рекомендации и трек читают заказ, но не владеют им |
+| монолит | order-service | заказ с позициями; заказы пачкой для графа | отзыв и рекомендации читают заказ, но не владеют им |
+| tracking-service | order-service | чей заказ, чья доставка и в каком она статусе | трек пишется только курьером доставки и только в пути |
 
 Токены выпускает только identity-service: подписывает закрытым RSA-ключом (RS256) и публикует
 открытый в `/.well-known/jwks.json`. Остальные сервисы скачивают JWKS сами, кэшируют
@@ -226,10 +231,39 @@ Spring кэшируется по набору настроек: попади э�
 
 Пути `/restaurants/{id}/reviews` и `/analytics` остались у монолита, а `/restaurants/{id}/orders` —
 у сервиса заказов: рестораном их делает только префикс. Шлюз уводит их по владельцам раньше,
-чем каталожный маршрут `/restaurants/**`. Так же под `/customers/{id}/orders/{id}` трек и отзыв
-остаются у монолита, а всё остальное о заказе — у сервиса заказов. Путь
+чем каталожный маршрут `/restaurants/**`. Так же под `/customers/{id}/orders/{id}` трек уходит в сервис трека, отзыв остаётся у монолита,
+а всё остальное о заказе — у сервиса заказов. Путь
 `/customers/{id}/orders/{id}/payments` делят двое: `POST` (запустить оплату) — сервис заказов,
 `GET` (список платежей) — сервис платежей.
+
+### Живой трек курьера
+
+Клиенту не нужно опрашивать сервер, чтобы видеть курьера на карте. Он открывает одно
+WebSocket-соединение и подписывается на свой заказ — точки приходят в момент записи.
+
+```
+курьер: POST .../deliveries/{id}/positions ─▶ tracking-service ─▶ Cassandra (трек)
+                                                       │
+                                                       └─▶ RabbitMQ (STOMP, amq.topic, order.42.track)
+                                                                   │
+клиент: ws://.../ws/tracking ─ CONNECT (Bearer) ─ SUBSCRIBE /topic/order.42.track ◀─┘
+```
+
+- **Протокол — STOMP поверх WebSocket.** Голый WebSocket — канал без адресов; STOMP добавляет
+  подписки, заголовки и кадры ошибок. Подключение — `ws://localhost:8080/ws/tracking` через шлюз
+  (маршрут со схемой `ws://`), подписка — `/topic/order.{orderId}.track`, в кадре — та же
+  точка, что отдаёт `GET .../track`.
+- **Токен — в кадре CONNECT.** Браузер не умеет добавлять заголовки к рукопожатию WebSocket,
+  а токен в адресе осел бы в логах. Поэтому рукопожатие открыто, а `Authorization: Bearer ...`
+  приходит заголовком кадра CONNECT и проверяется тем же декодером JWKS, что и REST.
+- **Подписка — только на свой заказ.** Каждая подписка проверяется вопросом к сервису заказов:
+  чей это заказ. Чужой заказ — кадр ERROR и закрытое соединение; кадр SEND от клиента
+  отклоняется — двигать курьера по карте может только курьер, через REST.
+- **Рассылку делает RabbitMQ.** Сервис пересылает кадры в STOMP-плагин брокера (порт 61613),
+  и подписки работают при любом числе экземпляров сервиса. Без брокера (`TRACKING_RELAY_ENABLED=false`,
+  так по умолчанию при запуске из IDE) работает встроенный брокер в памяти — для одного экземпляра.
+- **Живой канал — ускорение, а не источник правды.** Точка сначала записывается в Cassandra,
+  потом рассылается; неудачная рассылка не ломает запись.
 
 ### Рассылка уведомлений через RabbitMQ
 
@@ -300,12 +334,13 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 | Модуль | Что это |
 |---|---|
 | `api-gateway` | Spring Cloud Gateway (WebFlux): маршруты, сквозная метка запроса, срез `X-User-Id`, 503 на недоступный сервис |
-| `service` | монолит: отзывы, аналитика, рекомендации, трек курьера |
+| `service` | монолит: отзывы, аналитика, рекомендации |
 | `identity-service` | пользователи, вход, роли, права на рестораны; единственный, кто выпускает JWT |
 | `notification-service` | уведомления: потребитель `order-events`, рассылка через очереди RabbitMQ, своя база, `GET /api/v1/notifications/me` |
 | `catalog-service` | рестораны, меню, поиск: REST наружу, gRPC внутрь; своя база, кэш в Redis, Elasticsearch |
 | `order-service` | корзина, заказ, доставка, журнал аудита заказов; оркестратор саги оплаты; gRPC-чтение заказов для монолита |
 | `payment-service` | платежи: списания и возвраты по командам саги; наружу — только чтение платежей |
+| `tracking-service` | трек курьера: точки в Cassandra по REST, живой трек по WebSocket (STOMP через RabbitMQ) |
 | `libs/event-contracts` | контракты событий Kafka |
 | `libs/grpc-contracts` | `.proto` и сгенерированные из них стабы gRPC |
 | `client` | типизированный Java-клиент к API |
@@ -328,7 +363,7 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 - **Сервисы узнают друг друга по сертификатам.** gRPC идёт по взаимному TLS: обе стороны
   предъявляют сертификаты своего CA, имя сервиса записано в CN, и сервер пускает только
   тех, кому вызов положен. `CatalogService` — только сервису заказов, `RestaurantAccessService` —
-  монолиту, каталогу и сервису заказов, `OrderQueryService` — только монолиту. Посторонний с настоящим сертификатом получает `PERMISSION_DENIED`.
+  монолиту, каталогу и сервису заказов, `OrderQueryService` — монолиту и сервису трека. Посторонний с настоящим сертификатом получает `PERMISSION_DENIED`.
   Сертификаты выпускает одноразовый `grpc-certs` в том `food_delivery_grpc_certs`;
   включается это профилем `grpc-tls`, который в compose задан всем сервисам с gRPC.
   При запуске из IDE профиль выключен и gRPC открыт — об этом пишется предупреждение.
@@ -383,7 +418,7 @@ docker compose --profile full up -d
 | ✅ 2 | catalog-service: рестораны, меню, поиск | gRPC в обе стороны |
 | ✅ 3 | identity-service: пользователи, JWT на RS256 | JWKS |
 | ✅ 4 | order-service и payment-service: корзина, заказ, доставка, оплата | сага поверх Kafka, outbox и inbox |
-| 5 | tracking-service | WebSocket: трек курьера в реальном времени |
+| ✅ 5 | tracking-service | WebSocket (STOMP через RabbitMQ): трек курьера в реальном времени |
 | 6 | insights-service: отзывы, аналитика, рекомендации | GraphQL |
 
 Уведомлениям WebSocket тоже подойдёт — шлюз на WebFlux проксирует `ws://` без доработок.
@@ -395,14 +430,14 @@ docker compose --profile full up -d
 Модули разделены по предметной области, а не по слоям. Рестораны, меню и поиск уехали
 в catalog-service, пользователи — в identity-service, уведомления — в notification-service,
 корзина, заказ, доставка и аудит заказов — в order-service, оплата — в payment-service.
-В монолите остались четыре модуля поверх дополнительных хранилищ — их заберут этапы 5 и 6:
+Трек курьера уехал в tracking-service. В монолите остались три модуля поверх дополнительных
+хранилищ — их заберёт этап 6:
 
 ```
 service/src/main/java/com/dima/fooddelivery/
 ├── order/         gRPC-клиент к сервису заказов
 │
 ├── review/        отзывы о заказах            → MongoDB
-├── tracking/      трек курьера                → Cassandra
 ├── recommendation/рекомендации по графу       → Neo4j
 ├── analytics/     витрина продаж и воронка    → ClickHouse
 │
@@ -444,9 +479,9 @@ PostgreSQL остаётся системой записи. Всё остальн
 | PostgreSQL | все сервисы, у каждого своя база | заказы, деньги, пользователи, каталог | транзакции и целостность |
 | Redis | catalog-service | кэш витрины | скорость чтения |
 | Kafka | order-service → notification-service, `analytics`; сага order ⇄ payment | события заказа, команды и исходы оплаты | независимые потребители, асинхронная сага |
-| RabbitMQ | notification-service | очереди отправки по каналам | повтор через TTL и DLX, приоритеты, подтверждение каждого сообщения |
+| RabbitMQ | notification-service, tracking-service | очереди отправки по каналам; рассылка живого трека по STOMP | повтор через TTL и DLX, приоритеты; подписки WebSocket, общие для всех экземпляров |
 | MongoDB | `review` | отзывы с оценками блюд и метками | подвижная схема, вложенные документы |
-| Cassandra | `tracking` | координаты курьера | поток вставок, чтение по одному ключу, TTL |
+| Cassandra | tracking-service | координаты курьера | поток вставок, чтение по одному ключу, TTL |
 | Neo4j | `recommendation` | «с этим заказывают» | обход графа на два шага |
 | ClickHouse | `analytics` | продажи по дням, воронка статусов | агрегаты по колонкам |
 | Elasticsearch | catalog-service, `search` | поиск с морфологией и опечатками | разбор текста |
@@ -457,7 +492,7 @@ PostgreSQL остаётся системой записи. Всё остальн
 |---|---|---|
 | `review` | Spring Data MongoDB | репозитории; `$facet` в aggregation pipeline |
 | `search` | Spring Data Elasticsearch | `ElasticsearchOperations`, Query DSL, `multi_match` с нечёткостью |
-| `tracking` | голый драйвер DataStax | CQL руками, подготовленные запросы, `timeuuid` как ключ |
+| `tracking` (tracking-service) | голый драйвер DataStax | CQL руками, подготовленные запросы, `timeuuid` как ключ |
 | `recommendation` | голый драйвер Neo4j | Cypher руками, `MERGE` ради идемпотентности |
 | `analytics` | `JdbcTemplate` поверх своего пула | SQL руками, пакетная вставка, `ReplacingMergeTree` |
 

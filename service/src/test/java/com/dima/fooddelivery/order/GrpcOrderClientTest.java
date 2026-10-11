@@ -27,7 +27,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -46,7 +45,7 @@ class GrpcOrderClientTest {
     }
 
     @Test
-    void shouldMapOrderWithItemsAndDelivery() throws IOException {
+    void shouldMapOrderWithItems() throws IOException {
         Order order = clientFor(new FakeOrders(false)).requireOrder(10L);
 
         assertAll(
@@ -55,17 +54,8 @@ class GrpcOrderClientTest {
                 () -> assertEquals("DELIVERED", order.status()),
                 () -> assertEquals(new BigDecimal("900.00"), order.totalAmount()),
                 () -> assertEquals(1, order.items().size()),
-                () -> assertEquals("Пицца", order.items().get(0).menuItemName()),
-                () -> assertEquals(55L, order.delivery().courierId())
+                () -> assertEquals("Пицца", order.items().get(0).menuItemName())
         );
-    }
-
-    /** Курьер не назначен — поле не заполнено, и это {@code null}, а не ноль. */
-    @Test
-    void shouldKeepMissingCourierAsNull() throws IOException {
-        Delivery delivery = clientFor(new FakeOrders(false)).requireDelivery(3L);
-
-        assertNull(delivery.courierId());
     }
 
     @Test

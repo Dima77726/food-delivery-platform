@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>{@link Transactional} здесь работает только наполовину, и об этом важно помнить.</b>
  * Откат после теста возвращает в исходное состояние PostgreSQL — и только его. Ни MongoDB,
- * ни Cassandra, ни ClickHouse, ни Neo4j о транзакции приложения не знают
+ * ни ClickHouse, ни Neo4j о транзакции приложения не знают
  * и записанное не отменят. Поэтому каждый тест обязан либо работать с уникальными
  * идентификаторами, либо убирать за собой сам. Первое надёжнее: идентификаторы заказов
  * и ресторанов приходят из последовательностей PostgreSQL, а те откатом не сбрасываются,
@@ -32,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
         "app.outbox.publish-enabled=false",
 
         "app.stores.mongo.enabled=true",
-        "app.stores.cassandra.enabled=true",
         "app.stores.neo4j.enabled=true",
         "app.stores.clickhouse.enabled=true",
 
@@ -46,9 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
         "logging.level.liquibase=WARN",
         "logging.level.net.lbruun.springboot.preliquibase=WARN",
         "logging.level.org.testcontainers=WARN",
-        "logging.level.com.zaxxer.hikari=WARN",
-        // Драйвер Cassandra очень разговорчив на уровне INFO.
-        "logging.level.com.datastax.oss.driver=WARN"
+        "logging.level.com.zaxxer.hikari=WARN"
 })
 @Import({TestcontainersConfiguration.class, StoresTestcontainersConfiguration.class})
 @Transactional

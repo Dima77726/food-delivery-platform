@@ -72,6 +72,10 @@ jobs:
               - *build
               - 'libs/event-contracts/**'
               - 'payment-service/**'
+            tracking-service:
+              - *build
+              - 'libs/grpc-contracts/**'
+              - 'tracking-service/**'
             api-gateway:
               - *build
               - 'api-gateway/**'
