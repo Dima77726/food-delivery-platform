@@ -1,5 +1,7 @@
 package com.dima.fooddelivery.common.kafka;
 
+import com.dima.fooddelivery.contracts.order.OrderEventTopics;
+
 /**
  * Имена топиков.
  *
@@ -13,10 +15,19 @@ package com.dima.fooddelivery.common.kafka;
  */
 public final class KafkaTopics {
 
-    /** События жизненного цикла заказа. Ключ сообщения — идентификатор заказа. */
-    public static final String ORDER_EVENTS = "food-delivery.order-events";
+    /**
+     * События жизненного цикла заказа. Имя берётся из библиотеки контрактов: его читают
+     * другие сервисы, и держать копию строки здесь значило бы разойтись с ними при первом
+     * переименовании.
+     */
+    public static final String ORDER_EVENTS = OrderEventTopics.ORDER_EVENTS;
 
-    /** Сообщения, которые не удалось обработать. */
+    /**
+     * Сообщения, которые потребители монолита не смогли обработать.
+     *
+     * <p>Топик свой у каждого потребляющего сервиса: notification-service отправляет отказы
+     * в собственный DLT и разбирает их сам.
+     */
     public static final String ORDER_EVENTS_DLT = ORDER_EVENTS + ".DLT";
 
     private KafkaTopics() {

@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * <p>Вторая — выключаемость. Свойство {@code publish-enabled} обязано гасить только таймер,
  * а не сам публикатор: интеграционные тесты вызывают публикацию вручную, и бин им нужен.
  *
- * <p>Ровно так же устроена рассылка уведомлений — см. {@code NotificationDispatchJob}.
+ * <p>Ровно так же устроена рассылка уведомлений в notification-service — см. {@code NotificationDispatchJob}.
  */
 @Slf4j
 @Component

@@ -7,9 +7,11 @@ services:
     container_name: food-delivery-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Форма ${VAR:?...} останавливает Compose до запуска контейнеров и называет
+      # недостающую переменную. Значения берутся из .env, образец — в .env.example.
+      POSTGRES_DB: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      POSTGRES_USER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       TZ: ${TZ}
     ports:
       - "${POSTGRES_PORT}:5432"
@@ -20,6 +22,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # Базы и учётные записи сервисов: у каждого сервиса своя база и свой пользователь
+  # (database-per-service). Локально все базы живут в одном контейнере PostgreSQL —
+  # держать по контейнеру на сервис ради изоляции, которую и так дают права доступа,
+  # незачем. В продакшене каждая база переезжает на свой сервер сменой одного URL.
+  #
+  # Одноразовый контейнер: отработал и вышел. Выполняется при каждом up и идемпотентен —
+  # подробности в самом скрипте. Профиля нет: базы нужны и сервисам, запущенным из IDE.
+  postgres-provision:
+    image: postgres:16
+    container_name: food-delivery-postgres-provision
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification}
+      NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER:?задайте NOTIFICATION_DB_USER в .env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?задайте NOTIFICATION_DB_PASSWORD в .env}
+    volumes:
+      - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
+    entrypoint: ["sh", "/provision.sh"]
 
   redis:
     image: redis:7-alpine
@@ -106,10 +134,20 @@ services:
       # но в общей сети так оставлять нельзя.
       AUTH_TYPE: DISABLED
     ports:
-      # Не 8080: там уже висит приложение.
+      # Не 8080: там уже висит шлюз.
       - "${KAFKA_UI_PORT:-8090}:8080"
 
-  # Приложение под профилем: обычный `docker compose up -d` его НЕ поднимает.
+  # Сервисы приложения — все под профилем full: обычный `docker compose up -d` их НЕ поднимает.
+  #
+  #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
+  #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
+  #   notification-service — уведомления.
+  #
+  # Внутри сети все слушают 8080 (API) и 8081 (actuator): у каждого контейнера своё сетевое
+  # пространство, и одинаковые порты не конфликтуют. Различные порты по умолчанию в их
+  # application.yml нужны только для запуска из IDE, где все сервисы делят localhost.
+  #
+  # Монолит и сервисы наружу не публикуются: снаружи в систему ведёт одна дверь — шлюз.
   #
   # Инфраструктура одинакова у всех и меняется раз в полгода — её удобно один раз описать
   # и забыть. Код сервиса меняется каждые пять минут, и цикл mvn package + docker build +
@@ -119,12 +157,14 @@ services:
   # поедет в CI и на стенд. Поэтому не удалён, а спрятан:
   #   docker compose up -d                        — только инфраструктура
   #   docker compose --profile full up -d --build — весь стек
-  app:
+  core:
     profiles: ["full"]
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: food-delivery-app
+      args:
+        MODULE: service
+    container_name: food-delivery-core
     restart: unless-stopped
     # По умолчанию Docker добивает контейнер через 10 секунд после SIGTERM. Приложение
     # завершается штатно и ждёт текущую работу до 20 секунд (spring.lifecycle
@@ -143,11 +183,17 @@ services:
         condition: service_healthy
     # Список, а не отображение: только в этой форме запись вида `- JWT_SECRET` без значения
     # означает «пробросить переменную, если она задана, и не задавать её иначе».
+    # Значение Compose берёт из .env или из окружения оболочки.
     #
     # Запись `JWT_SECRET: ${JWT_SECRET:-}` выглядит равнозначной, но ведёт себя иначе:
     # она всегда передаёт переменную, подставляя пустую строку. Для Spring пустая строка —
-    # это заданное значение, поэтому default из application.yml перестаёт применяться,
-    # и приложение падает на пустом ключе подписи.
+    # это заданное значение, и вместо понятной ошибки о незаданной переменной приложение
+    # упало бы на пустом ключе подписи.
+    #
+    # Форму ${VAR:?...} здесь применять нельзя: Compose разбирает весь файл целиком,
+    # до отбора по профилям, и обязательная переменная сервиса под профилем full ломала бы
+    # обычный `docker compose up` без приложения. Недостающие переменные ловит само
+    # приложение — на старте, с указанием имени переменной.
     environment:
       # Внутри сети compose обращение идёт по имени сервиса и всегда на порт 5432 —
       # проброс на хост здесь ни при чём.
@@ -158,11 +204,13 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
-      # Не заданы — приложение возьмёт dev-значение и предупредит в логе.
-      # В .env их держать можно, в репозитории — нет.
+      # Обязательная переменная: без неё приложение не стартует. Держится в .env,
+      # в репозитории её нет и быть не должно.
       - JWT_SECRET
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
@@ -190,11 +238,65 @@ services:
       - STORE_NEO4J_ENABLED
       - STORE_CLICKHOUSE_ENABLED
       - STORE_ELASTICSEARCH_ENABLED
+      - NEO4J_USERNAME
       - NEO4J_PASSWORD
       - CLICKHOUSE_DB
+      - CLICKHOUSE_USER
+      - CLICKHOUSE_PASSWORD
+    # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза монолит
+    # удобнее запускать из IDE — там он слушает localhost:8082.
+
+  notification-service:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: notification-service
+    container_name: food-delivery-notification-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-provision:
+        # База сервиса существует только после того, как отработал провижининг.
+        condition: service_completed_successfully
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - NOTIFICATION_DB_HOST=postgres
+      - NOTIFICATION_DB_PORT=5432
+      - NOTIFICATION_DB_NAME=${NOTIFICATION_DB_NAME:-notification}
+      - NOTIFICATION_DB_USER
+      - NOTIFICATION_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Тот же секрет, что у монолита: сервис проверяет выпущенные им токены.
+      - JWT_SECRET
+      - TZ=${TZ}
+
+  api-gateway:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: api-gateway
+    container_name: food-delivery-api-gateway
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # depends_on на сервисы намеренно нет. Шлюз не нуждается в них для старта: недоступный
+    # сервис означает 503 на его маршрутах, а не упавший шлюз. Ровно так это и должно
+    # работать в бою — один лежащий сервис не роняет вход в систему целиком.
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - CORE_SERVICE_URL=http://core:8080
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8080
+      - TZ=${TZ}
     ports:
-      # Публикуется только прикладной порт. Служебный 8081 остаётся внутри сети compose:
-      # снимать метрики может Prometheus, а снаружи их не видно.
+      # Единственный опубликованный порт приложения. Служебный 8081 остаётся внутри сети
+      # compose: снимать метрики может Prometheus, а снаружи их не видно.
       - "${APP_PORT:-8080}:8080"
 
   # --- Пять дополнительных хранилищ ---------------------------------------------------------
@@ -271,7 +373,7 @@ services:
     environment:
       # Пароль обязателен: без NEO4J_AUTH образ требует сменить пароль при первом входе,
       # и драйвер получает отказ, не объясняющий причины.
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-food_delivery_neo4j}
+      NEO4J_AUTH: ${NEO4J_USERNAME}/${NEO4J_PASSWORD}
       NEO4J_server_memory_heap_max__size: 512M
       NEO4J_server_memory_pagecache_size: 256M
       TZ: ${TZ}
@@ -297,10 +399,11 @@ services:
     container_name: food-delivery-clickhouse
     restart: unless-stopped
     environment:
-      # Создаёт базу при первом запуске. Пользователь остаётся default без пароля:
-      # задавать CLICKHOUSE_USER=default нельзя, скрипт образа пытается создать
-      # уже существующего пользователя и падает.
+      # Без явно заданной учётной записи образ закрывает сетевой доступ для default.
+      # Эти локальные значения совпадают с настройками приложения; переопределяются в .env.
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-food_delivery}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       TZ: ${TZ}
     # ClickHouse открывает много файлов одновременно и с лимитом по умолчанию
     # пишет в лог предупреждение на каждом запуске.
@@ -311,7 +414,7 @@ services:
     volumes:
       - food_delivery_clickhouse_data:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:8123/ping || exit 1"]
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --database \"$$CLICKHOUSE_DB\" --query 'SELECT 1'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -350,7 +453,7 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: food-delivery-prometheus
     restart: unless-stopped
-    # depends_on: app убран намеренно. Compose отказывается стартовать, если зависимость
+    # depends_on на сервисы приложения убран намеренно. Compose отказывается стартовать, если зависимость
     # выключена профилем, а Prometheus в приложении и не нуждается: недоступный таргет
     # он показывает как DOWN и продолжает работать.
     extra_hosts:
@@ -374,9 +477,9 @@ services:
     depends_on:
       - prometheus
     environment:
-      # Логин/пароль по умолчанию admin/admin. Это локальный стек, наружу он не смотрит;
-      # в любом другом окружении пароль обязан приходить из переменной окружения.
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # Пароль администратора Grafana. Значения по умолчанию нет намеренно: admin/admin
+      # в файле репозитория — это тот же захардкоженный пароль, только привычный.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?задайте GRAFANA_PASSWORD в .env}
       # Дашборд и источник данных приезжают провижинингом, поэтому мастер первого запуска
       # только мешает.
       - GF_USERS_ALLOW_SIGN_UP=false

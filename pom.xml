@@ -6,16 +6,21 @@
     <!--
         Родительский pom реактора.
 
-        Модулей два, и разделены они по потребителю, а не по слоям:
-          service — само приложение;
-          client  — типизированный Java-клиент к нему, отдельный артефакт.
+        Платформа переезжает с модульного монолита на микросервисы — постепенно,
+        по шаблону strangler fig: сервисы по одному выносятся из монолита, а он продолжает
+        работать и обслуживать всё, что ещё не вынесено. Отсюда состав модулей:
 
-        Смысл разделения в том, что клиента можно отдать потребителю API, не отдавая ему
-        приложение целиком со всеми его зависимостями на базу, Liquibase и Security.
-        Пока оба модуля лежат в одном репозитории, но собираются и версионируются
-        независимо друг от друга.
+          service              — монолит (core): всё, что ещё не вынесено;
+          notification-service — уведомления, первый вынесенный сервис;
+          api-gateway          — единая точка входа, маршрутизирует запросы по сервисам;
+          libs/event-contracts — контракты событий Kafka, общие для продюсера и потребителей;
+          client               — типизированный Java-клиент к API, отдельный артефакт.
 
-        Источник истины для обоих — openapi/food-delivery-api.yaml в корне.
+        Монорепозиторий здесь — решение про удобство, а не про связность. Сервисы
+        не зависят друг от друга ни одной строкой кода: общее у них — только контракты
+        событий и HTTP API. Каждый собирается в свой образ и запускается отдельно.
+
+        Источник истины для REST API — openapi/food-delivery-api.yaml в корне.
     -->
     <parent>
         <groupId>org.springframework.boot</groupId>
@@ -29,10 +34,13 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>food-delivery-platform</name>
-    <description>Модульный монолит доставки еды</description>
+    <description>Платформа доставки еды: монолит и выносимые из него сервисы</description>
 
     <modules>
+        <module>libs/event-contracts</module>
         <module>service</module>
+        <module>notification-service</module>
+        <module>api-gateway</module>
         <module>client</module>
     </modules>
 
@@ -44,6 +52,11 @@
         <!-- ClickHouse не входит в spring-boot-dependencies: версию держим здесь. -->
         <clickhouse-jdbc.version>0.9.9</clickhouse-jdbc.version>
         <!--
+            Релизный поезд Spring Cloud под Spring Boot 4.0. Нужен только шлюзу, но версия
+            держится здесь: следующие сервисы (discovery, config, resilience) возьмут ту же.
+        -->
+        <spring-cloud.version>2025.1.3</spring-cloud.version>
+        <!--
             Путь к спецификации. Оба модуля ссылаются на один файл, иначе контракт сервера
             и контракт клиента разъехались бы уже на второй правке.
 
@@ -52,6 +65,16 @@
         -->
         <openapi.spec>${project.parent.basedir}/openapi/food-delivery-api.yaml</openapi.spec>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.dima</groupId>
+                <artifactId>event-contracts</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <pluginManagement>

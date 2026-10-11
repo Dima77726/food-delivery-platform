@@ -104,8 +104,19 @@ public class MenuCategory {
      * {@code mappedBy} посмотрит именно на сторону блюда — и запишет NULL в {@code category_id}.
      * Ровно поэтому конструктор {@link MenuItem} закрыт границами пакета.
      */
-    public MenuItem addItem(String itemName, String description, BigDecimal price, int itemSortOrder) {
-        MenuItem item = new MenuItem(this, itemName, description, price, itemSortOrder);
+    public MenuItem addItem(
+            String itemName,
+            String description,
+            BigDecimal price,
+            int itemSortOrder
+    ) {
+        MenuItem item = new MenuItem(
+                this,
+                itemName,
+                description,
+                price,
+                itemSortOrder
+        );
 
         items.add(item);
 

@@ -98,7 +98,13 @@ public class MenuItem {
      * Конструктор доступен только внутри пакета: блюдо создаётся через
      * {@link MenuCategory#addItem}, чтобы обе стороны связи всегда были согласованы.
      */
-    MenuItem(MenuCategory category, String name, String description, BigDecimal price, int sortOrder) {
+    MenuItem(
+            MenuCategory category,
+            String name,
+            String description,
+            BigDecimal price,
+            int sortOrder
+    ) {
         this.category = category;
         this.name = name;
         this.description = description;

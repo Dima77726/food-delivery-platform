@@ -24,7 +24,10 @@ public final class MenuResponseMapper {
     public static RestaurantMenu toResponse(com.dima.fooddelivery.menu.domain.RestaurantMenu menu) {
         RestaurantMenu response = new RestaurantMenu().restaurantId(menu.restaurantId());
 
-        menu.categories().stream().map(MenuResponseMapper::toPublicResponse).forEach(response::addCategoriesItem);
+        menu.categories().stream()
+                .map(MenuResponseMapper::toPublicResponse)
+                .forEach(response::addCategoriesItem);
+
 
         return response;
     }
@@ -66,7 +69,9 @@ public final class MenuResponseMapper {
                 .id(category.id())
                 .name(category.name());
 
-        category.items().stream().map(MenuResponseMapper::toPublicResponse).forEach(response::addItemsItem);
+        category.items().stream()
+                .map(MenuResponseMapper::toPublicResponse)
+                .forEach(response::addItemsItem);
 
         return response;
     }

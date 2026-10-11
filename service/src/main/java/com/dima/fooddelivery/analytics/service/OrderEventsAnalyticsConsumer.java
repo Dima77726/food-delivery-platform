@@ -4,7 +4,7 @@ import com.dima.fooddelivery.analytics.domain.AnalyticsEvent;
 import com.dima.fooddelivery.analytics.persistence.OrderAnalyticsRepository;
 import com.dima.fooddelivery.common.kafka.KafkaTopics;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.integration.OrderIntegrationEvent;
+import com.dima.fooddelivery.contracts.order.OrderIntegrationEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -19,11 +19,11 @@ import java.util.List;
 /**
  * Наполнение витрины аналитики из топика заказов.
  *
- * <p><b>Своя группа потребителей.</b> Тот же топик уже читает слушатель уведомлений, и это
+ * <p><b>Своя группа потребителей.</b> Тот же топик уже читает notification-service, и это
  * ровно тот случай, ради которого события вынесены в Kafka: два независимых потребителя
- * читают одну ленту, каждый со своим офсетом, и ни один не мешает другому. Уведомления
- * можно выключить, аналитику остановить и перечитать топик с начала — модуль Order
- * ни о том, ни о другом не знает.
+ * читают одну ленту, каждый со своим офсетом, и ни один не мешает другому — даже живя
+ * в разных процессах. Уведомления можно выключить, аналитику остановить и перечитать
+ * топик с начала — модуль Order ни о том, ни о другом не знает.
  *
  * <p><b>Перечитывание с начала работает.</b> Витрина производная: удалить таблицу, сбросить
  * офсет группы и дать потребителю прочитать топик заново — законная операция восстановления,

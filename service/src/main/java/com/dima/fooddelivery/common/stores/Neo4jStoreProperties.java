@@ -28,12 +28,21 @@ public record Neo4jStoreProperties(
 
     public Neo4jStoreProperties {
         uri = uri == null ? "bolt://localhost:7687" : uri;
-        username = username == null ? "neo4j" : username;
-        password = password == null ? "food_delivery_neo4j" : password;
+        // Учётные данные обязательны и приходят из переменных окружения: значения
+        // по умолчанию означали бы пароль в репозитории.
+        username = required(username, "NEO4J_USERNAME");
+        password = required(password, "NEO4J_PASSWORD");
         projectionInterval = projectionInterval == null ? Duration.ofSeconds(30) : projectionInterval;
         // Пачка небольшая намеренно: проекция догоняет отставание за несколько проходов,
         // зато каждый проход короткий и не держит соединение к PostgreSQL полминуты.
         projectionBatch = projectionBatch == null ? 200 : projectionBatch;
         projectionEnabled = projectionEnabled == null ? Boolean.TRUE : projectionEnabled;
+    }
+
+    private static String required(String value, String variable) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Не задана переменная окружения " + variable);
+        }
+        return value;
     }
 }

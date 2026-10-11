@@ -29,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
  * и то и другое вручную.
  */
 @SpringBootTest(properties = {
-        "app.notification.dispatch-enabled=false",
         "app.outbox.publish-enabled=false",
 
         "app.stores.mongo.enabled=true",
