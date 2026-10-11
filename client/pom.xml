@@ -63,21 +63,10 @@
         </dependency>
 
         <!--
-            Только для тестов. Контрактный тест вызывает настоящие контроллеры монолита
-            сгенерированным клиентом: это единственный способ убедиться, что обе стороны
-            понимают спеку одинаково. Компиляции клиента для этого мало — она не заметит,
-            что сервер отдаёт поле под другим именем.
-
-            Scope test означает, что потребителю артефакта эта зависимость не достаётся:
-            SDK остаётся лёгким, тяжесть живёт только в сборке.
+            Контрактные тесты SDK живут в сервисах, которые отдают API: catalog-service,
+            tracking-service и insights-service подключают этот модуль в scope test и вызывают
+            сгенерированным клиентом свои настоящие контроллеры. Сам SDK от сервисов не зависит.
         -->
-        <dependency>
-            <groupId>com.dima</groupId>
-            <artifactId>food-delivery-service</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

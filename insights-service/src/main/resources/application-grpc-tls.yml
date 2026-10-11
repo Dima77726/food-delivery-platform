@@ -1,0 +1,27 @@
+# Профиль grpc-tls: insights-service ходит к каталогу, сервису заказов и сервису пользователей
+# по взаимному TLS, предъявляя свой сертификат (CN=insights-service). Включается в docker-compose.
+spring:
+  ssl:
+    bundle:
+      pem:
+        grpc:
+          keystore:
+            certificate: ${GRPC_TLS_CERTIFICATE}
+            private-key: ${GRPC_TLS_PRIVATE_KEY}
+          truststore:
+            certificate: ${GRPC_TLS_CA}
+  grpc:
+    client:
+      channels:
+        catalog:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
+        orders:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
+        identity:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc

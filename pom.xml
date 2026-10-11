@@ -7,13 +7,17 @@
         Родительский pom реактора.
 
         Платформа переезжает с модульного монолита на микросервисы — постепенно,
-        по шаблону strangler fig: сервисы по одному выносятся из монолита, а он продолжает
-        работать и обслуживать всё, что ещё не вынесено. Отсюда состав модулей:
+        по шаблону strangler fig: сервисы по одному выносились из монолита, а он продолжал
+        работать и обслуживать всё, что ещё не вынесено. Переезд закончен: последнее, что
+        оставалось в монолите, стало insights-service. Состав модулей:
 
-          service              — монолит (core): всё, что ещё не вынесено;
           notification-service — уведомления, первый вынесенный сервис;
           catalog-service      — рестораны, меню и поиск;
           identity-service     — пользователи, вход, выпуск токенов (RS256 + JWKS);
+          order-service        — корзина, заказ, доставка; оркестратор саги оплаты;
+          payment-service      — платежи: списания и возвраты по командам саги;
+          tracking-service     — трек курьера, живой — по WebSocket;
+          insights-service     — отзывы, аналитика, рекомендации; GraphQL;
           api-gateway          — единая точка входа, маршрутизирует запросы по сервисам;
           libs/event-contracts — контракты событий Kafka, общие для продюсера и потребителей;
           libs/grpc-contracts  — контракты синхронных вызовов между сервисами (gRPC);
@@ -37,18 +41,18 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>food-delivery-platform</name>
-    <description>Платформа доставки еды: монолит и выносимые из него сервисы</description>
+    <description>Платформа доставки еды: микросервисы, вынесенные из монолита</description>
 
     <modules>
         <module>libs/event-contracts</module>
         <module>libs/grpc-contracts</module>
-        <module>service</module>
         <module>notification-service</module>
         <module>catalog-service</module>
         <module>identity-service</module>
         <module>order-service</module>
         <module>payment-service</module>
         <module>tracking-service</module>
+        <module>insights-service</module>
         <module>api-gateway</module>
         <module>client</module>
     </modules>
