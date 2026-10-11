@@ -157,6 +157,33 @@ services:
     ports:
       - "${KAFKA_PORT:-9094}:9094"
 
+  # Брокер очередей. Kafka — журнал событий («что произошло»), RabbitMQ — очереди задач
+  # («сделай это»): подтверждение каждого сообщения, повтор через TTL и dead-letter exchange,
+  # приоритеты. Сейчас через него идёт рассылка уведомлений.
+  #
+  # Плагины — из docker/rabbitmq/enabled_plugins: интерфейс управления (порт 15672),
+  # метрики для Prometheus (15692) и STOMP — для трека курьера по WebSocket.
+  rabbitmq:
+    image: rabbitmq:4.1.4-management
+    container_name: food-delivery-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?задайте RABBITMQ_USER в .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?задайте RABBITMQ_PASSWORD в .env}
+      TZ: ${TZ}
+    volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - food_delivery_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_PORT:-15672}:15672"
+
   # Веб-интерфейс к брокеру: топики, партиции, лаг групп, чтение и отправка сообщений.
   #
   # Нужен ровно за тем же, зачем Grafana рядом с Prometheus. Kafka не отдаёт ничего
@@ -493,6 +520,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       postgres-provision:
         # База сервиса существует только после того, как отработал провижининг.
         condition: service_completed_successfully
@@ -505,6 +534,11 @@ services:
       - NOTIFICATION_DB_USER
       - NOTIFICATION_DB_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Рассылка идёт через очереди RabbitMQ: по очереди на канал, повторы через TTL.
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER
+      - RABBITMQ_PASSWORD
       - TZ=${TZ}
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
@@ -731,6 +765,7 @@ services:
 volumes:
   food_delivery_postgres_data:
   food_delivery_kafka_data:
+  food_delivery_rabbitmq_data:
   food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:

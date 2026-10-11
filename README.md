@@ -41,6 +41,7 @@ docker compose --profile full up -d --build
 | API (через шлюз) | http://localhost:8080/api/v1 |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | Kafka UI | http://localhost:8090 |
+| RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
@@ -150,6 +151,7 @@ gRPC: каталог слушает 7084, identity-service — 7085, order-servi
 | `CATALOG_DB_USER`, `CATALOG_DB_PASSWORD` | catalog-service, всегда |
 | `ORDER_DB_USER`, `ORDER_DB_PASSWORD` | order-service, всегда |
 | `PAYMENT_DB_USER`, `PAYMENT_DB_PASSWORD` | payment-service, всегда |
+| `RABBITMQ_USER`, `RABBITMQ_PASSWORD` | notification-service, всегда |
 | `NEO4J_USERNAME`, `NEO4J_PASSWORD` | при `STORE_NEO4J_ENABLED=true` |
 | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | при `STORE_CLICKHOUSE_ENABLED=true` |
 | `APP_ADMIN_EMAIL`, `APP_ADMIN_PASSWORD` | identity-service, если нужен администратор |
@@ -229,6 +231,40 @@ Spring кэшируется по набору настроек: попади э�
 `/customers/{id}/orders/{id}/payments` делят двое: `POST` (запустить оплату) — сервис заказов,
 `GET` (список платежей) — сервис платежей.
 
+### Рассылка уведомлений через RabbitMQ
+
+Kafka и RabbitMQ в проекте делят работу, а не дублируют друг друга. Kafka — журнал событий:
+«заказ оплачен» хранится, перечитывается, его независимо читают уведомления и аналитика.
+RabbitMQ — очереди задач: «отправь письмо» нужно выполнить один раз, с паузой между
+попытками и с пределом, а это ровно то, что брокер очередей умеет сам.
+
+```
+order-events (Kafka) ─▶ notification-service: запись PENDING ─commit─▶ notifications.dispatch
+                                                                          │ email / sms / push
+                    notifications.<канал> ◀───────────────────────────────┘
+                          │ отказ: попытки ещё есть          ▲ TTL очереди ожидания истёк
+                          ▼                                  │
+                    notifications.retry ─▶ notifications.<канал>.retry
+                          │ попытки кончились
+                          ▼
+                    FAILED в базе + копия задачи в notifications.dead
+```
+
+- **Очередь на канал.** У почты, SMS и пушей разные провайдеры и лимиты. Лёг SMS-шлюз —
+  копятся только SMS. Скорость канала задают `prefetch` и число обработчиков.
+- **Повтор — свойство очереди.** Отклонённая задача по dead-letter exchange уходит в очередь
+  ожидания, по истечении её TTL (`NOTIFICATION_RETRY_DELAY`, 10 с) возвращается обратно.
+  Число попыток брокер записывает в заголовок `x-death`; после `NOTIFICATION_MAX_ATTEMPTS`
+  уведомление помечается FAILED с причиной, а задача ложится в `notifications.dead`.
+- **Приоритеты.** Очереди объявлены с `x-max-priority`: «заказ отменён» обгоняет обычные
+  уведомления, накопившиеся перед ним.
+- **База — источник правды, очередь — толчок.** Задача публикуется после коммита и с
+  подтверждением брокера. Потерянная задача не теряет уведомление: страховочный опрос раз
+  в минуту находит застрявшие в PENDING и ставит задачу заново. Повтор задачи безвреден —
+  отправка идёт под блокировкой строки и только для PENDING.
+
+Раньше рассылка была опросом базы раз в 30 секунд; теперь письмо уходит сразу после коммита.
+
 ### Сага оплаты
 
 Заказ и деньги живут в разных сервисах и разных базах — общей транзакции у них нет.
@@ -266,7 +302,7 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 | `api-gateway` | Spring Cloud Gateway (WebFlux): маршруты, сквозная метка запроса, срез `X-User-Id`, 503 на недоступный сервис |
 | `service` | монолит: отзывы, аналитика, рекомендации, трек курьера |
 | `identity-service` | пользователи, вход, роли, права на рестораны; единственный, кто выпускает JWT |
-| `notification-service` | уведомления: потребитель `order-events`, своя база, `GET /api/v1/notifications/me` |
+| `notification-service` | уведомления: потребитель `order-events`, рассылка через очереди RabbitMQ, своя база, `GET /api/v1/notifications/me` |
 | `catalog-service` | рестораны, меню, поиск: REST наружу, gRPC внутрь; своя база, кэш в Redis, Elasticsearch |
 | `order-service` | корзина, заказ, доставка, журнал аудита заказов; оркестратор саги оплаты; gRPC-чтение заказов для монолита |
 | `payment-service` | платежи: списания и возвраты по командам саги; наружу — только чтение платежей |
@@ -408,6 +444,7 @@ PostgreSQL остаётся системой записи. Всё остальн
 | PostgreSQL | все сервисы, у каждого своя база | заказы, деньги, пользователи, каталог | транзакции и целостность |
 | Redis | catalog-service | кэш витрины | скорость чтения |
 | Kafka | order-service → notification-service, `analytics`; сага order ⇄ payment | события заказа, команды и исходы оплаты | независимые потребители, асинхронная сага |
+| RabbitMQ | notification-service | очереди отправки по каналам | повтор через TTL и DLX, приоритеты, подтверждение каждого сообщения |
 | MongoDB | `review` | отзывы с оценками блюд и метками | подвижная схема, вложенные документы |
 | Cassandra | `tracking` | координаты курьера | поток вставок, чтение по одному ключу, TTL |
 | Neo4j | `recommendation` | «с этим заказывают» | обход графа на два шага |

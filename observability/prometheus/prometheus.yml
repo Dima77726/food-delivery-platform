@@ -70,6 +70,14 @@ scrape_configs:
         labels:
           service: notification-service
 
+  # Брокер очередей: глубина очередей, скорость публикации и подтверждений. Плагин
+  # rabbitmq_prometheus отдаёт метрики на отдельном порту 15692.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']
+        labels:
+          service: rabbitmq
+
   # Prometheus снимает метрики и с самого себя — полезно, когда непонятно,
   # кто именно тормозит: приложение или сборщик метрик.
   - job_name: prometheus
