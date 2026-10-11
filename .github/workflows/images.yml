@@ -50,6 +50,12 @@ jobs:
             identity-service:
               - *build
               - 'identity-service/**'
+            order-service:
+              - *build
+              - 'order-service/**'
+            payment-service:
+              - *build
+              - 'payment-service/**'
             api-gateway:
               - *build
               - 'api-gateway/**'

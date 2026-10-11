@@ -70,12 +70,11 @@ spring:
   grpc:
     client:
       channels:
-        # Каталог: корзина спрашивает у него ресторан и блюдо.
-        catalog:
-          address: ${CATALOG_GRPC_ADDRESS:static://localhost:7084}
-          # Внутри сети сервисов без TLS. Следующий шаг — mTLS между сервисами.
+        # Сервис заказов: отзывы, рекомендации и трек курьера читают у него заказы и доставки.
+        orders:
+          address: ${ORDER_GRPC_ADDRESS:static://localhost:7086}
           negotiation-type: plaintext
-        # Сервис пользователей: права на рестораны для заказов ресторана, доставки, аналитики.
+        # Сервис пользователей: права на рестораны для аналитики ресторана.
         identity:
           address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7085}
           negotiation-type: plaintext
@@ -164,17 +163,11 @@ spring:
 
 app:
   grpc:
-    catalog:
-      # Дедлайн вызова каталога. Без него у gRPC-вызова ожидание бесконечно.
-      deadline: ${CATALOG_GRPC_DEADLINE:PT2S}
+    orders:
+      # Дедлайн вызова сервиса заказов. Без него у gRPC-вызова ожидание бесконечно.
+      deadline: ${ORDER_GRPC_DEADLINE:PT2S}
     identity:
       deadline: ${IDENTITY_GRPC_DEADLINE:PT2S}
-
-  outbox:
-    # Пауза между разборами очереди. Две секунды — компромисс: событие доезжает до
-    # потребителя почти сразу, а пустых запросов к базе немного.
-    publish-interval: ${OUTBOX_PUBLISH_INTERVAL:PT2S}
-    publish-enabled: ${OUTBOX_PUBLISH_ENABLED:true}
 
   security:
     jwt:

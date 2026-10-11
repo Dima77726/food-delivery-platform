@@ -111,7 +111,10 @@ class RequestCorrelationIT extends AbstractIntegrationTest {
 
         String foreignId = String.valueOf(ownId + 1000);
 
-        MvcResult result = mockMvc.perform(get("/api/v1/customers/{id}/orders", ownId)
+        // Ping открыт, но токен, если он есть, всё равно разбирается — и пользователь
+        // определяется по нему. Своих защищённых ресурсов без дополнительных хранилищ
+        // у монолита не осталось: заказы уехали в order-service.
+        MvcResult result = mockMvc.perform(get("/api/v1/ping")
                         .header("Authorization", "Bearer " + token)
                         .header(RequestContext.USER_ID_HEADER, foreignId))
                 .andExpect(status().isOk())

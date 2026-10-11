@@ -51,13 +51,20 @@ services:
       IDENTITY_DB_NAME: ${IDENTITY_DB_NAME:-identity}
       IDENTITY_DB_USER: ${IDENTITY_DB_USER:?задайте IDENTITY_DB_USER в .env}
       IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?задайте IDENTITY_DB_PASSWORD в .env}
+      ORDER_DB_NAME: ${ORDER_DB_NAME:-orders}
+      ORDER_DB_USER: ${ORDER_DB_USER:?задайте ORDER_DB_USER в .env}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?задайте ORDER_DB_PASSWORD в .env}
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
+      PAYMENT_DB_USER: ${PAYMENT_DB_USER:?задайте PAYMENT_DB_USER в .env}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?задайте PAYMENT_DB_PASSWORD в .env}
     volumes:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
 
   # Сертификаты для взаимного TLS между сервисами: свой CA и по сертификату на сервис.
-  # Одноразовый контейнер: выпускает их в общий том при первом запуске и больше ничего
-  # не трогает. Пересоздать — удалить том food_delivery_grpc_certs.
+  # Одноразовый контейнер: при первом запуске выпускает CA и все сертификаты, при следующих —
+  # только недостающие (например, для нового сервиса). Пересоздать всё — удалить том
+  # food_delivery_grpc_certs.
   #
   # Образ postgres:16 взят ради openssl, который в нём уже есть: отдельный образ ради одной
   # команды — ещё одна загрузка без пользы.
@@ -68,7 +75,31 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service", "order-service"]
+
+  # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
+  # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
+  # и сохраняет идентификаторы. Повторный запуск безопасен:
+  #   docker compose --profile full up orders-data-migration
+  orders-data-migration:
+    profiles: ["full"]
+    image: postgres:16
+    container_name: food-delivery-orders-data-migration
+    restart: "no"
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
+      ORDER_DB_NAME: ${ORDER_DB_NAME:-orders}
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
+    volumes:
+      - ./docker/migrations/orders-from-monolith.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
 
   redis:
     image: redis:7-alpine
@@ -171,10 +202,14 @@ services:
   #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
   #   catalog-service      — рестораны, меню, поиск;
   #   identity-service     — пользователи, вход, выпуск токенов;
-  #   notification-service — уведомления.
+  #   notification-service — уведомления;
+  #   order-service        — корзина, заказ, доставка, оркестратор саги оплаты;
+  #   payment-service      — платежи: списания и возвраты по командам саги.
   #
   # Синхронные вызовы между сервисами — gRPC на порту 9090 внутри сети: корзина спрашивает
-  # у каталога ресторан и блюдо, каталог и монолит у identity-service — права на ресторан.
+  # у каталога ресторан и блюдо; каталог и сервис заказов у identity-service — права
+  # на ресторан; монолит у сервиса заказов — заказы и доставки для отзывов, рекомендаций
+  # и трека. Оплата — асинхронно, сагой через Kafka: команды и исходы.
   #
   # Токены подписывает только identity-service закрытым RSA-ключом. Остальные проверяют их
   # открытым ключом из его JWKS — общего секрета у сервисов больше нет.
@@ -243,8 +278,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      # gRPC-клиенты: каталог (ресторан и блюдо) и сервис пользователей (права на ресторан).
-      - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
+      # gRPC-клиенты: сервис заказов (заказы и доставки) и сервис пользователей (права на ресторан).
+      - ORDER_GRPC_ADDRESS=static://order-service:9090
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
       # Взаимный TLS на gRPC: свой сертификат (CN=core) и CA, которому верить.
       - SPRING_PROFILES_ACTIVE=grpc-tls
@@ -372,6 +407,78 @@ services:
       - APP_ADMIN_PASSWORD
       - TZ=${TZ}
 
+  order-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-order-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: order-service
+    container_name: food-delivery-order-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      postgres-provision:
+        condition: service_completed_successfully
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - GRPC_PORT=9090
+      # gRPC-клиенты: каталог (ресторан и блюдо для корзины) и сервис пользователей (права на ресторан).
+      - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      # Взаимный TLS на gRPC: свой сертификат (CN=order-service) и CA, которому верить.
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/order-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/order-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      - ORDER_DB_HOST=postgres
+      - ORDER_DB_PORT=5432
+      - ORDER_DB_NAME=${ORDER_DB_NAME:-orders}
+      - ORDER_DB_USER
+      - ORDER_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
+      - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  payment-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-payment-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: payment-service
+    container_name: food-delivery-payment-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Ни одного синхронного соседа: команды приходят из Kafka, исходы уходят туда же.
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - PAYMENT_DB_HOST=postgres
+      - PAYMENT_DB_PORT=5432
+      - PAYMENT_DB_NAME=${PAYMENT_DB_NAME:-payments}
+      - PAYMENT_DB_USER
+      - PAYMENT_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
   notification-service:
     profiles: ["full"]
     image: ghcr.io/dima77726/food-delivery-notification-service:${IMAGE_TAG:-local}
@@ -423,6 +530,8 @@ services:
       - CATALOG_SERVICE_URL=http://catalog-service:8080
       - IDENTITY_SERVICE_URL=http://identity-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
+      - ORDER_SERVICE_URL=http://order-service:8080
+      - PAYMENT_SERVICE_URL=http://payment-service:8080
       - TZ=${TZ}
     ports:
       # Единственный опубликованный порт приложения. Служебный 8081 остаётся внутри сети

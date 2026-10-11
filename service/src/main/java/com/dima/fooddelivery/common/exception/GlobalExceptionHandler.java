@@ -14,6 +14,7 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -64,33 +65,6 @@ public class GlobalExceptionHandler {
         );
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-    }
-
-    /**
-     * Курсор, который приложение не выдавало: обрезанный, переписанный руками или оставшийся
-     * от предыдущей версии формата. Ответ 400 и без подробностей о внутреннем устройстве —
-     * клиенту здесь нечего чинить, кроме собственного кода: правильный курсор он получает
-     * в поле {@code nextCursor} предыдущего ответа.
-     */
-    @ExceptionHandler(InvalidCursorException.class)
-    public ResponseEntity<ApiErrorResponse> handleInvalidCursor(
-            InvalidCursorException exception,
-            HttpServletRequest request
-    ) {
-        log.warn(
-                "Некорректный курсор: path={}, message={}",
-                request.getRequestURI(),
-                exception.getMessage()
-        );
-
-        ApiErrorResponse response = new ApiErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                HttpStatus.BAD_REQUEST.getReasonPhrase(),
-                "Некорректный курсор: используйте значение nextCursor из предыдущего ответа",
-                request.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
     /**
@@ -384,6 +358,24 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleExceptionAll(Exception exception, HttpServletRequest request) {
+        // Ошибки, которые Spring MVC сам относит к клиенту: неизвестный адрес (404), неверный
+        // метод (405), неподдерживаемый тип тела (415). Код у них уже есть — его и отдаём.
+        // Иначе опечатка в URL выглядела бы как поломка сервиса: 500 с алертом.
+        if (exception instanceof ErrorResponse errorResponse) {
+            HttpStatus status = HttpStatus.valueOf(errorResponse.getStatusCode().value());
+
+            log.warn("Запрос отклонён: path={}, status={}", request.getRequestURI(), status.value());
+
+            ApiErrorResponse body = new ApiErrorResponse(
+                    status.value(),
+                    status.getReasonPhrase(),
+                    errorResponse.getBody().getDetail(),
+                    request.getRequestURI()
+            );
+
+            return ResponseEntity.status(status).body(body);
+        }
+
         log.error(
                 "Непредвиденная ошибка приложения: path={}",
                 request.getRequestURI(),

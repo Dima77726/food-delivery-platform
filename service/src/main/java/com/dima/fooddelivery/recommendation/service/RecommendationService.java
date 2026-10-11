@@ -2,8 +2,8 @@ package com.dima.fooddelivery.recommendation.service;
 
 import com.dima.fooddelivery.common.stores.Neo4jStoreProperties;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.domain.Order;
-import com.dima.fooddelivery.order.service.OrderService;
+import com.dima.fooddelivery.order.Order;
+import com.dima.fooddelivery.order.OrderClient;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import com.dima.fooddelivery.recommendation.persistence.RecommendationGraph;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +23,8 @@ import java.util.List;
  * которого может не быть вовсе.
  *
  * <p>Поэтому здесь другой, тоже вполне обычный способ: пакетное чтение из системы записи
- * с меткой прочитанного. После конца выборки начинается новый проход: он учитывает отмены
+ * с меткой прочитанного. Система записи — сервис заказов, читается он по gRPC
+ * ({@link OrderClient#findAfter}). После конца выборки начинается новый проход: он учитывает отмены
  * уже прочитанных заказов и поздние коммиты с меньшим ID. Отставание зависит от длительности
  * полного прохода, а не только от интервала планировщика.
  *
@@ -45,7 +46,7 @@ public class RecommendationService {
     private static final int MAX_REBUILD_BATCHES = 200;
 
     private final RecommendationGraph recommendationGraph;
-    private final OrderService orderService;
+    private final OrderClient orderClient;
     private final Neo4jStoreProperties properties;
 
     public List<RecommendedItem> recommendForCustomer(Long customerId, int limit) {
@@ -65,7 +66,7 @@ public class RecommendationService {
     public synchronized int projectNextBatch() {
         long lastProjected = recommendationGraph.lastProjectedOrderId();
 
-        List<Order> batch = orderService.findForProjection(lastProjected, properties.projectionBatch());
+        List<Order> batch = orderClient.findAfter(lastProjected, properties.projectionBatch());
 
         if (batch.isEmpty()) {
             // Следующий такт перечитает старые заказы: их статус мог измениться,

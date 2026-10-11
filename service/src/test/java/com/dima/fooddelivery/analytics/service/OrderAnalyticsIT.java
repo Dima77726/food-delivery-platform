@@ -5,7 +5,6 @@ import com.dima.fooddelivery.analytics.domain.DailySales;
 import com.dima.fooddelivery.analytics.domain.StatusCount;
 import com.dima.fooddelivery.analytics.persistence.OrderAnalyticsRepository;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
-import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.support.AbstractStoresIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -96,7 +95,7 @@ class OrderAnalyticsIT extends AbstractStoresIntegrationTest {
     void shouldBuildStatusFunnel() {
         Long restaurantId = testData.insertRestaurant();
 
-        AnalyticsEvent accepted = event(restaurantId, 3001L, OrderStatus.ACCEPTED, "400.00");
+        AnalyticsEvent accepted = event(restaurantId, 3001L, "ACCEPTED", "400.00");
 
         orderAnalyticsRepository.insertBatch(List.of(
                 paid(restaurantId, 3001L, "400.00"),
@@ -109,8 +108,8 @@ class OrderAnalyticsIT extends AbstractStoresIntegrationTest {
                 .collect(Collectors.toMap(StatusCount::status, StatusCount::orders));
 
         assertAll(
-                () -> assertEquals(2L, funnel.get(OrderStatus.PAID.getDbValue()), "оплачено два заказа"),
-                () -> assertEquals(1L, funnel.get(OrderStatus.ACCEPTED.getDbValue()), "принят один"),
+                () -> assertEquals(2L, funnel.get("PAID"), "оплачено два заказа"),
+                () -> assertEquals(1L, funnel.get("ACCEPTED"), "принят один"),
                 () -> assertEquals(2, funnel.size(), "других статусов в периоде не было")
         );
     }
@@ -160,22 +159,22 @@ class OrderAnalyticsIT extends AbstractStoresIntegrationTest {
     }
 
     private static AnalyticsEvent paid(Long restaurantId, long orderId, String amount) {
-        return event(restaurantId, orderId, OrderStatus.PAID, amount);
+        return event(restaurantId, orderId, "PAID", amount);
     }
 
     /**
      * Идентификатор события выводится из заказа и статуса, а не случайный: две копии одного
      * события обязаны быть неотличимы, иначе проверка на дубликаты ничего бы не проверяла.
      */
-    private static AnalyticsEvent event(Long restaurantId, long orderId, OrderStatus status, String amount) {
+    private static AnalyticsEvent event(Long restaurantId, long orderId, String status, String amount) {
         return new AnalyticsEvent(
                 UUID.nameUUIDFromBytes((restaurantId + ":" + orderId + ":" + status).getBytes()),
-                "ORDER_" + status.getDbValue(),
+                "ORDER_" + status,
                 orderId,
                 1L,
                 restaurantId,
                 null,
-                status.getDbValue(),
+                status,
                 new BigDecimal(amount),
                 NOON
         );

@@ -1,13 +1,12 @@
 package com.dima.fooddelivery.tracking.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
+import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.delivery.api.DeliveryResponse;
-import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
-import com.dima.fooddelivery.delivery.service.DeliveryService;
-import com.dima.fooddelivery.order.domain.OrderAccess;
-import com.dima.fooddelivery.order.service.OrderStatusService;
+import com.dima.fooddelivery.order.Delivery;
+import com.dima.fooddelivery.order.Order;
+import com.dima.fooddelivery.order.OrderClient;
 import com.dima.fooddelivery.tracking.domain.CourierPosition;
 import com.dima.fooddelivery.tracking.domain.CourierTrack;
 import com.dima.fooddelivery.tracking.persistence.CourierTrackRepository;
@@ -20,19 +19,16 @@ import org.springframework.stereotype.Service;
 /**
  * Модуль Tracking. Трек курьера по доставке.
  *
- * <p>Права проверяются по PostgreSQL, точки пишутся в Cassandra. Ни одного обращения
- * к чужим таблицам напрямую: доставка спрашивается у {@link DeliveryService}, заказ —
- * у {@link OrderStatusService}.
+ * <p>Права проверяются по данным сервиса заказов, точки пишутся в Cassandra. Заказ и доставку
+ * монолит спрашивает у order-service по gRPC ({@link OrderClient}).
  *
  * <p><b>Почему проверка прав стоит перед каждой записью, хотя запись дешёвая.</b> Записи
  * в Cassandra не откатываются, и «сначала запишем, потом разберёмся» здесь означало бы, что
- * посторонний может засорять чужой трек. Проверка стоит одного индексного чтения в PostgreSQL
+ * посторонний может засорять чужой трек. Проверка стоит одного вызова сервиса заказов
  * и окупается тем, что в партиции доставки лежат только точки её курьера.
  *
- * <p>{@code @Transactional} здесь нет по той же причине, что и в модуле отзывов: менеджер
- * транзакций в приложении управляет PostgreSQL и на Cassandra не распространяется. Читающие
- * проверки открывают собственные короткие транзакции внутри вызываемых сервисов, и этого
- * достаточно.
+ * <p>{@code @Transactional} здесь нет по той же причине, что и в модуле отзывов: транзакции,
+ * которая охватила бы и сервис заказов, и Cassandra, не бывает.
  */
 @Slf4j
 @Service
@@ -41,8 +37,7 @@ import org.springframework.stereotype.Service;
 public class TrackingService {
 
     private final CourierTrackRepository courierTrackRepository;
-    private final DeliveryService deliveryService;
-    private final OrderStatusService orderStatusService;
+    private final OrderClient orderClient;
 
     /**
      * Записывает точку курьера.
@@ -57,11 +52,11 @@ public class TrackingService {
             double longitude,
             Double speedKmh
     ) {
-        DeliveryResponse delivery = deliveryService.getDeliveryForCourier(courierId, deliveryId);
+        Delivery delivery = requireCourierDelivery(courierId, deliveryId);
 
         // Трек имеет смысл только пока заказ едет. До того курьер ещё не забрал его,
         // после — везти уже нечего, и точки были бы слежкой за человеком без причины.
-        if (!DeliveryStatus.PICKED_UP.name().equals(delivery.status())) {
+        if (!delivery.isPickedUp()) {
             throw new BusinessRuleViolationException(
                     "Трек пишется только для доставки в статусе PICKED_UP. Текущий статус="
                             + delivery.status()
@@ -86,7 +81,7 @@ public class TrackingService {
 
     /** Трек глазами курьера: своя доставка. */
     public CourierTrack getTrackForCourier(Long courierId, Long deliveryId, int limit) {
-        deliveryService.getDeliveryForCourier(courierId, deliveryId);
+        requireCourierDelivery(courierId, deliveryId);
 
         return new CourierTrack(deliveryId, courierTrackRepository.findLastPositions(deliveryId, limit));
     }
@@ -95,10 +90,10 @@ public class TrackingService {
      * Трек глазами клиента: свой заказ.
      *
      * <p>Клиент не знает идентификатора доставки и знать его не должен — он оперирует заказом.
-     * Превращение orderId в deliveryId делает модуль Delivery, ему эта таблица и принадлежит.
+     * Доставку заказа сервис заказов отдаёт вместе с ним.
      */
     public CourierTrack getTrackForCustomerOrder(Long customerId, Long orderId, int limit) {
-        OrderAccess order = orderStatusService.requireAccess(orderId);
+        Order order = orderClient.requireOrder(orderId);
 
         if (!order.belongsToCustomer(customerId)) {
             log.warn("Попытка посмотреть трек чужого заказа: orderId={}, customerId={}", orderId, customerId);
@@ -106,8 +101,24 @@ public class TrackingService {
             throw new AccessDeniedForResourceException("Заказ с id=" + orderId + " принадлежит другому клиенту");
         }
 
-        DeliveryResponse delivery = deliveryService.getDeliveryForOrder(orderId);
+        Delivery delivery = order.delivery();
+
+        if (delivery == null) {
+            throw new ResourceNotFoundException("Доставка для заказа с id=" + orderId + " ещё не создана");
+        }
 
         return new CourierTrack(delivery.id(), courierTrackRepository.findLastPositions(delivery.id(), limit));
+    }
+
+    private Delivery requireCourierDelivery(Long courierId, Long deliveryId) {
+        Delivery delivery = orderClient.requireDelivery(deliveryId);
+
+        if (!delivery.assignedTo(courierId)) {
+            log.warn("Курьер обратился к чужой доставке: deliveryId={}, courierId={}", deliveryId, courierId);
+
+            throw new AccessDeniedForResourceException("Эта доставка назначена другому курьеру");
+        }
+
+        return delivery;
     }
 }

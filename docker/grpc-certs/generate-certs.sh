@@ -6,8 +6,9 @@
 # В SAN — DNS-имена, по которым сервис доступен (имя в сети compose и localhost): клиент
 # сверяет их с адресом, к которому подключается, и не поверит сертификату с чужим именем.
 #
-# Идемпотентно: если CA уже есть, ничего не делает. Пересоздать — удалить каталог (или том)
-# с сертификатами и запустить снова: новые сертификаты подпишет новый CA.
+# Идемпотентно: CA создаётся один раз, сертификат сервиса — только если его ещё нет. Так новый
+# сервис получает сертификат от того же CA, и старые сертификаты остаются в силе.
+# Пересоздать всё — удалить каталог (или том) с сертификатами и запустить снова.
 #
 # Это локальный CA для разработки. В бою сертификаты выдаёт настоящий центр — cert-manager
 # в Kubernetes, Vault PKI, сервисная сеть вроде Istio, — и живут они часы, а не годы.
@@ -20,19 +21,22 @@ shift
 
 mkdir -p "$OUT"
 
-if [ -f "$OUT/ca.crt" ]; then
-    echo "Сертификаты уже есть в $OUT — ничего не делаю"
-    exit 0
-fi
-
 DAYS="${CERT_DAYS:-825}"
 
-# Удостоверяющий центр. Его закрытый ключ нужен только здесь, сервисам он не раздаётся.
-openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days "$DAYS" \
-    -subj "/CN=food-delivery-grpc-ca" \
-    -keyout "$OUT/ca.key" -out "$OUT/ca.crt" 2>/dev/null
+if [ -f "$OUT/ca.crt" ]; then
+    echo "CA уже есть в $OUT — выпускаю только недостающие сертификаты"
+else
+    # Удостоверяющий центр. Его закрытый ключ нужен только здесь, сервисам он не раздаётся.
+    openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days "$DAYS" \
+        -subj "/CN=food-delivery-grpc-ca" \
+        -keyout "$OUT/ca.key" -out "$OUT/ca.crt" 2>/dev/null
+fi
 
 for service in "$@"; do
+    if [ -f "$OUT/$service.crt" ]; then
+        continue
+    fi
+
     cat > "$OUT/$service.ext" <<EOF
 basicConstraints = CA:FALSE
 keyUsage = digitalSignature, keyEncipherment

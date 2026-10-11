@@ -5,7 +5,6 @@ import com.dima.fooddelivery.analytics.domain.StatusCount;
 import com.dima.fooddelivery.analytics.persistence.OrderAnalyticsRepository;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.domain.OrderStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -54,7 +53,7 @@ public class AnalyticsService {
 
         return orderAnalyticsRepository.dailySales(
                 restaurantId,
-                OrderStatus.PAID.getDbValue(),
+                "PAID",
                 startOfDay(from),
                 startOfDay(to.plusDays(1))
         );

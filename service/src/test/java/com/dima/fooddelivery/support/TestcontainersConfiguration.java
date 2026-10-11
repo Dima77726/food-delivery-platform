@@ -5,7 +5,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -60,14 +59,14 @@ public class TestcontainersConfiguration {
     }
 
     /**
-     * Каталог и права на рестораны в памяти вместо gRPC-клиентов к catalog-service
+     * Сервис заказов и права на рестораны в памяти вместо gRPC-клиентов к order-service
      * и identity-service. {@code @Primary}: настоящие клиенты в контексте тоже есть, но их
      * каналы ленивые и ни к кому не подключаются, пока их не вызвали.
      */
     @Bean
     @Primary
-    TestCatalog testCatalog() {
-        return new TestCatalog();
+    TestOrders testOrders() {
+        return new TestOrders();
     }
 
     @Bean
@@ -93,7 +92,7 @@ public class TestcontainersConfiguration {
     }
 
     @Bean
-    TestDataFactory testDataFactory(JdbcTemplate jdbcTemplate, TestCatalog catalog, TestRestaurantAccess restaurantAccess) {
-        return new TestDataFactory(jdbcTemplate, catalog, restaurantAccess);
+    TestDataFactory testDataFactory(TestOrders orders, TestRestaurantAccess restaurantAccess) {
+        return new TestDataFactory(orders, restaurantAccess);
     }
 }

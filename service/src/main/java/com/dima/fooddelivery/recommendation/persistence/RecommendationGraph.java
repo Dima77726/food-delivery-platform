@@ -1,9 +1,8 @@
 package com.dima.fooddelivery.recommendation.persistence;
 
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.domain.Order;
-import com.dima.fooddelivery.order.domain.OrderItem;
-import com.dima.fooddelivery.order.domain.OrderStatus;
+import com.dima.fooddelivery.order.Order;
+import com.dima.fooddelivery.order.OrderItem;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -163,7 +162,7 @@ public class RecommendationGraph {
      */
     public void projectOrders(List<Order> orders, long lastOrderId) {
         List<Map<String, Object>> payload = orders.stream()
-                .filter(order -> order.status() != OrderStatus.CANCELED)
+                .filter(order -> !order.isCanceled())
                 .filter(order -> !order.items().isEmpty())
                 .map(RecommendationGraph::toParameters)
                 .toList();

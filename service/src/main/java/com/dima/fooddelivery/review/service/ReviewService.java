@@ -6,10 +6,9 @@ import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
 import com.dima.fooddelivery.common.stores.StoreToggles;
-import com.dima.fooddelivery.order.domain.Order;
-import com.dima.fooddelivery.order.domain.OrderItem;
-import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.order.service.OrderService;
+import com.dima.fooddelivery.order.Order;
+import com.dima.fooddelivery.order.OrderClient;
+import com.dima.fooddelivery.order.OrderItem;
 import com.dima.fooddelivery.review.api.ReviewResponse;
 import com.dima.fooddelivery.review.api.ReviewResponseMapper;
 import com.dima.fooddelivery.review.domain.DishRating;
@@ -37,16 +36,14 @@ import java.util.stream.Collectors;
 /**
  * Модуль Review. Отзывы о доставленных заказах.
  *
- * <p><b>Где здесь граница между хранилищами.</b> Заказ живёт в PostgreSQL, отзыв — в MongoDB,
- * и связывает их только {@code orderId}. Право оставить отзыв проверяется через
- * {@link OrderService} — публичный вход модуля Order, — а не запросом в чужую таблицу.
- * Правило то же, что и между остальными модулями; смена хранилища его не отменяет.
+ * <p><b>Где здесь граница.</b> Заказ живёт в сервисе заказов, отзыв — в MongoDB, и связывает
+ * их только {@code orderId}. Право оставить отзыв проверяется вопросом к сервису заказов
+ * через {@link OrderClient} — по gRPC, а не запросом в чужую базу.
  *
- * <p><b>Транзакции здесь нет, и это осознанно.</b> В приложении один менеджер транзакций,
- * JpaTransactionManager, и на запись в MongoDB он не распространяется: {@code @Transactional}
- * над этим методом создал бы опасную иллюзию, что откат заказа отменит и отзыв. Он бы его
- * не отменил. Поэтому порядок действий выбран так, чтобы этого и не потребовалось: сначала
- * проверки по PostgreSQL, ничего не меняющие, и только потом единственная запись в MongoDB.
+ * <p><b>Транзакции здесь нет, и это осознанно.</b> Распределённой транзакции между сервисом
+ * заказов и MongoDB не бывает, а {@code @Transactional} над этим методом создал бы иллюзию,
+ * что она есть. Поэтому порядок действий выбран так, чтобы она и не потребовалась: сначала
+ * проверки, ничего не меняющие, и только потом единственная запись в MongoDB.
  * Худшее, что может случиться, — отзыв записан, а ответ до клиента не доехал; повтор запроса
  * упрётся в уникальный индекс и вернёт внятную ошибку вместо второго отзыва.
  */
@@ -58,7 +55,7 @@ public class ReviewService {
 
     private final ReviewRepository reviewRepository;
     private final ReviewSummaryRepository reviewSummaryRepository;
-    private final OrderService orderService;
+    private final OrderClient orderClient;
 
     /**
      * Оставить отзыв о заказе.
@@ -75,7 +72,7 @@ public class ReviewService {
             List<DishRating> dishes,
             List<String> tags
     ) {
-        Order order = orderService.requireOrder(orderId);
+        Order order = orderClient.requireOrder(orderId);
 
         if (!order.customerId().equals(customerId)) {
             log.warn("Попытка оставить отзыв о чужом заказе: orderId={}, customerId={}", orderId, customerId);
@@ -84,10 +81,10 @@ public class ReviewService {
         }
 
         // Отзыв о недоставленном заказе оценивал бы то, чего клиент ещё не видел.
-        if (order.status() != OrderStatus.DELIVERED) {
+        if (!order.isDelivered()) {
             throw new BusinessRuleViolationException(
                     "Отзыв можно оставить только о доставленном заказе. Текущий статус="
-                            + order.status().getDbValue()
+                            + order.status()
             );
         }
 

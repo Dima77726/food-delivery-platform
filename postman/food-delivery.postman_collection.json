@@ -1976,7 +1976,7 @@
                 "events"
               ]
             },
-            "description": "Полный журнал переходов: создан, оплачен, принят, готовится, доставлен."
+            "description": "Полный журнал переходов: создан, оплата запрошена, оплачен, принят, готовится, доставлен."
           },
           "response": [],
           "event": [
@@ -2011,7 +2011,7 @@
                 "cancel"
               ]
             },
-            "description": "Отменить можно только заказ в статусе CREATED или PAID. Если заказ был оплачен, в той же транзакции оформляется возврат.\n\nВ остальных статусах — 409."
+            "description": "Отменить можно заказ в статусе CREATED, PAYMENT_PENDING или PAID. Если оплату уже запросили, сервису платежей уходит команда на возврат; в истории заказа появится ORDER_REFUNDED, когда деньги вернутся.\n\nВ остальных статусах — 409."
           },
           "response": [],
           "event": [
@@ -2067,7 +2067,7 @@
                 "payments"
               ]
             },
-            "description": "Сумма берётся из заказа, а не из запроса: иначе клиент платил бы столько, сколько захочет.\n\nPre-request скрипт генерирует новый ключ идемпотентности перед каждым вызовом. Способы оплаты: CARD, CASH_ON_DELIVERY.\n\nШлюз имитированный и иногда отвечает отказом — это штатный 409, а не сбой.",
+            "description": "Запускает сагу оплаты. Сервис заказов переводит заказ в PAYMENT_PENDING и отправляет команду сервису платежей через Kafka; ответ — 202 и заказ в PAYMENT_PENDING. Исход — PAID или CANCELED при отказе банка — через секунду виден в «Заказ по id» и в «Платежи по заказу».\n\nСумма берётся из заказа, а не из запроса. Pre-request скрипт генерирует новый ключ идемпотентности перед каждым вызовом. Способы оплаты: CARD, CASH_ON_DELIVERY. Сумма, оканчивающаяся на .13, имитирует отказ банка.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
@@ -2094,9 +2094,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
-                  "if (pm.response.code === 201) {",
-                  "    pm.collectionVariables.set('paymentId', pm.response.json().id);",
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "if (pm.response.code === 202) {",
+                  "    console.log('Оплата запрошена, статус заказа', pm.response.json().status);",
                   "}"
                 ]
               }
@@ -2128,7 +2128,7 @@
                 "payments"
               ]
             },
-            "description": "Ключ не перегенерируется — используется тот же, что и в предыдущем запросе.\n\nСервер обязан вернуть результат первого платежа, а не списать деньги второй раз. Тест это проверяет.",
+            "description": "Ключ не перегенерируется — используется тот же, что и в предыдущем запросе.\n\nСервер обязан вернуть тот же заказ, не запуская вторую оплату. Тест это проверяет.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
@@ -2146,10 +2146,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Повтор не создал второй платёж', () => {",
-                  "    pm.response.to.have.status(201);",
-                  "    const prev = pm.collectionVariables.get('paymentId');",
-                  "    if (prev) { pm.expect(String(pm.response.json().id)).to.eql(String(prev)); }",
+                  "pm.test('Повтор не запустил вторую оплату', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('orderId')));",
                   "});"
                 ]
               }
@@ -2176,7 +2175,7 @@
                 "payments"
               ]
             },
-            "description": "Включая неудачные попытки — у каждой своя запись со статусом FAILED и причиной."
+            "description": "Отвечает payment-service. Включая неудачные попытки — у каждой своя запись со статусом FAILED и причиной; после отмены оплаченного заказа — REFUNDED."
           },
           "response": [],
           "event": [

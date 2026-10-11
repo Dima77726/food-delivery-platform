@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * gRPC-сервер каталога под взаимным TLS — так, как он работает в compose.
  *
  * <p>Проверяется не «TLS включён», а то, ради чего он включён: сервер знает, кто к нему пришёл.
- * Монолит ({@code CN=core}) получает ответ. Посторонний с настоящим сертификатом от того же CA
+ * Сервис заказов ({@code CN=order-service}) получает ответ. Посторонний с настоящим сертификатом от того же CA
  * получает PERMISSION_DENIED — сертификат подлинный, но вызывать каталог ему не положено.
  * Без сертификата не проходит даже рукопожатие.
  *
@@ -59,10 +59,10 @@ class CatalogGrpcMtlsIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldServeMonolithPresentingItsCertificate() throws IOException {
+    void shouldServeOrderServicePresentingItsCertificate() throws IOException {
         Long restaurantId = testData.insertRestaurant(true);
 
-        RestaurantSummary summary = catalogAs("core").getActiveRestaurant(request(restaurantId));
+        RestaurantSummary summary = catalogAs("order-service").getActiveRestaurant(request(restaurantId));
 
         assertEquals(restaurantId, summary.getId());
     }

@@ -2,8 +2,7 @@ package com.dima.fooddelivery.review.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
-import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.order.service.OrderService;
+import com.dima.fooddelivery.order.OrderClient;
 import com.dima.fooddelivery.review.api.ReviewResponse;
 import com.dima.fooddelivery.review.domain.DishRating;
 import com.dima.fooddelivery.review.domain.RatingSummary;
@@ -39,12 +38,12 @@ class ReviewIT extends AbstractStoresIntegrationTest {
     private ReviewService reviewService;
 
     @Autowired
-    private OrderService orderService;
+    private OrderClient orderClient;
 
     @Test
     void shouldRejectDishesOutsideTheOrderAndRepeatedDishes() {
         Long customerId = testData.insertCustomer();
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.DELIVERED);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "DELIVERED");
         Long foreignItem = testData.insertMenuItem(testData.insertRestaurant(), new BigDecimal("100.00"));
 
         assertThrows(BusinessRuleViolationException.class, () -> reviewService.createReview(
@@ -58,14 +57,14 @@ class ReviewIT extends AbstractStoresIntegrationTest {
         // Неуспешные попытки не должны занимать уникальный ключ отзыва.
         ReviewResponse saved = reviewService.createReview(customerId, order.orderId(), 5, null,
                 List.of(repeated), List.of());
-        assertEquals(orderService.requireOrder(order.orderId()).items().get(0).menuItemName(),
+        assertEquals(orderClient.requireOrder(order.orderId()).items().get(0).menuItemName(),
                 saved.dishes().get(0).menuItemName());
     }
 
     @Test
     void shouldSaveReviewForDeliveredOrder() {
         Long customerId = testData.insertCustomer();
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.DELIVERED);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "DELIVERED");
 
         ReviewResponse response = reviewService.createReview(
                 customerId,
@@ -90,7 +89,7 @@ class ReviewIT extends AbstractStoresIntegrationTest {
     @Test
     void shouldRejectSecondReviewForSameOrder() {
         Long customerId = testData.insertCustomer();
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.DELIVERED);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "DELIVERED");
 
         reviewService.createReview(customerId, order.orderId(), 4, "Нормально", List.of(), List.of());
 
@@ -108,7 +107,7 @@ class ReviewIT extends AbstractStoresIntegrationTest {
     @Test
     void shouldRejectReviewForOrderThatIsNotDeliveredYet() {
         Long customerId = testData.insertCustomer();
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.COOKING);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "COOKING");
 
         assertThrows(
                 BusinessRuleViolationException.class,
@@ -121,7 +120,7 @@ class ReviewIT extends AbstractStoresIntegrationTest {
         Long owner = testData.insertCustomer();
         Long stranger = testData.insertCustomer();
 
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(owner, OrderStatus.DELIVERED);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(owner, "DELIVERED");
 
         assertThrows(
                 AccessDeniedForResourceException.class,
@@ -184,10 +183,7 @@ class ReviewIT extends AbstractStoresIntegrationTest {
         Long customerId = testData.insertCustomer();
         BigDecimal price = new BigDecimal("450.00");
 
-        Long cartId = testData.insertCart(customerId, restaurantId, "CHECKED_OUT");
-        Long orderId = testData.insertOrder(
-                cartId, customerId, restaurantId, OrderStatus.DELIVERED, price
-        );
+        Long orderId = testData.insertOrder(customerId, restaurantId, "DELIVERED", price);
 
         reviewService.createReview(customerId, orderId, rating, null, List.of(), tags);
     }

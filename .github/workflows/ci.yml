@@ -64,6 +64,14 @@ jobs:
               - *build
               - 'libs/grpc-contracts/**'
               - 'identity-service/**'
+            order-service:
+              - *build
+              - 'libs/**'
+              - 'order-service/**'
+            payment-service:
+              - *build
+              - 'libs/event-contracts/**'
+              - 'payment-service/**'
             api-gateway:
               - *build
               - 'api-gateway/**'

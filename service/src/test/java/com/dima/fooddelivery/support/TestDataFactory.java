@@ -1,62 +1,42 @@
 package com.dima.fooddelivery.support;
 
-import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
-import com.dima.fooddelivery.order.domain.OrderStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-
 import java.math.BigDecimal;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Собирает состояние базы для интеграционных тестов.
+ * Собирает состояние для интеграционных тестов монолита.
  *
- * <p>Данные вставляются напрямую через SQL, а не через публичные методы сервисов. Это сделано
- * намеренно: тест доставки должен падать из-за доставки, а не из-за того, что сломался
- * {@code CartService}. Подготовка данных не должна быть ещё одним тестируемым кодом.
- *
- * <p>Рестораны, блюда и пользователи — не в базе: они живут в других сервисах. Их заменяют
- * {@link TestCatalog}, {@link TestRestaurantAccess} и генератор идентификаторов.
+ * <p>В базе монолита не осталось ни пользователей, ни ресторанов, ни заказов: они живут
+ * в identity-service, catalog-service и order-service. Их заменяют генераторы идентификаторов,
+ * {@link TestRestaurantAccess} и {@link TestOrders} — заказы «в сервисе заказов» заводятся там.
  */
 public class TestDataFactory {
 
     /**
-     * Уникальные суффиксы для имён. Таблицы меню и категорий имеют unique-констрейнты по имени,
-     * а откат транзакции не сбрасывает последовательности — поэтому счётчик, а не константа.
+     * Идентификаторы — из одного растущего счётчика, начатого со времени запуска. Контекст
+     * Spring общий для тестов, а хранилища вроде Neo4j и Cassandra откатом не очищаются:
+     * уникальность даёт только то, что номера никогда не повторяются.
      */
-    private static final AtomicLong SEQUENCE = new AtomicLong(System.nanoTime());
+    private static final AtomicLong IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L + 2_000_000_000L);
 
-    /** Идентификаторы пользователей: в базе монолита их выдавать больше некому. */
-    private static final AtomicLong USER_IDS = new AtomicLong(System.nanoTime() % 1_000_000_000L + 2_000_000_000L);
-
-    private final JdbcTemplate jdbcTemplate;
-    private final TestCatalog catalog;
+    private final TestOrders orders;
     private final TestRestaurantAccess restaurantAccess;
 
-    public TestDataFactory(JdbcTemplate jdbcTemplate, TestCatalog catalog, TestRestaurantAccess restaurantAccess) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.catalog = catalog;
+    public TestDataFactory(TestOrders orders, TestRestaurantAccess restaurantAccess) {
+        this.orders = orders;
         this.restaurantAccess = restaurantAccess;
     }
 
     public long uniqueSuffix() {
-        return SEQUENCE.incrementAndGet();
-    }
-
-    /**
-     * Пользователь — это только идентификатор. Пользователи живут в identity-service, в базе
-     * монолита их нет, а заказы, корзины и доставки хранят их идентификаторы без внешних ключей.
-     * Роли значения не имеют: в тестах их несёт токен ({@link TestJwt}).
-     */
-    public Long insertUser(String emailPrefix, String... roles) {
-        return USER_IDS.incrementAndGet();
+        return IDS.incrementAndGet();
     }
 
     public Long insertCustomer() {
-        return insertUser("customer", "CUSTOMER");
+        return IDS.incrementAndGet();
     }
 
     public Long insertCourier() {
-        return insertUser("courier", "COURIER");
+        return IDS.incrementAndGet();
     }
 
     /** Управляющий ресторана — в тестовых правах вместо identity-service. */
@@ -65,148 +45,51 @@ public class TestDataFactory {
     }
 
     public Long insertRestaurant() {
-        return insertRestaurant(true);
-    }
-
-    /** Ресторан — в тестовом каталоге: в базе монолита ресторанов нет. */
-    public Long insertRestaurant(boolean active) {
-        return catalog.addRestaurant(active);
+        return IDS.incrementAndGet();
     }
 
     public Long insertMenuItem(Long restaurantId, BigDecimal price) {
-        return insertMenuItem(restaurantId, price, true);
+        return IDS.incrementAndGet();
     }
 
-    public Long insertMenuItem(Long restaurantId, BigDecimal price, boolean available) {
-        return catalog.addItem(restaurantId, "Test Item " + uniqueSuffix(), price, available);
+    public Long insertOrder(Long customerId, Long restaurantId, String status, BigDecimal totalAmount) {
+        Long orderId = IDS.incrementAndGet();
+        orders.addOrder(orderId, customerId, restaurantId, status, totalAmount);
+
+        return orderId;
     }
 
-    public Long insertCart(Long customerId, Long restaurantId, String status) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO cart (customer_id, restaurant_id, status)
-                        VALUES (?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                customerId,
-                restaurantId,
-                status
-        );
+    public void insertOrderItem(Long orderId, Long menuItemId, int quantity, BigDecimal price) {
+        orders.addItem(orderId, menuItemId, "Test Item " + menuItemId, quantity, price);
     }
 
-    public Long insertCartItem(Long cartId, Long menuItemId, int quantity, BigDecimal price) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO cart_item (cart_id, menu_item_id, menu_item_name, quantity, price)
-                        VALUES (?, ?, ?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                cartId,
-                menuItemId,
-                "Test Item " + menuItemId,
-                quantity,
-                price
-        );
+    public Long insertDelivery(Long orderId, Long courierId, String status) {
+        Long deliveryId = IDS.incrementAndGet();
+        orders.addDelivery(deliveryId, orderId, courierId, status);
+
+        return deliveryId;
     }
 
-    public Long insertOrder(Long cartId, Long customerId, Long restaurantId, OrderStatus status, BigDecimal totalAmount) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO customer_order (cart_id, customer_id, restaurant_id, status, total_amount)
-                        VALUES (?, ?, ?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                cartId,
-                customerId,
-                restaurantId,
-                status.getDbValue(),
-                totalAmount
-        );
+    public void changeOrderStatus(Long orderId, String status) {
+        orders.changeStatus(orderId, status);
     }
 
-    public Long insertOrderItem(Long orderId, Long menuItemId, int quantity, BigDecimal price) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO customer_order_item (
-                            order_id, menu_item_id, menu_item_name, quantity, price, line_total
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                orderId,
-                menuItemId,
-                "Test Item",
-                quantity,
-                price,
-                price.multiply(BigDecimal.valueOf(quantity))
-        );
-    }
-
-    public Long insertDelivery(Long orderId, Long courierId, DeliveryStatus status) {
-        return jdbcTemplate.queryForObject(
-                """
-                        INSERT INTO delivery (order_id, courier_id, status)
-                        VALUES (?, ?, ?)
-                        RETURNING id
-                        """,
-                Long.class,
-                orderId,
-                courierId,
-                status.getDbValue()
-        );
-    }
-
-    /**
-     * Заказ со всей обязательной обвязкой: ресторан, блюдо, оформленная корзина, одна позиция.
-     * Возвращает контекст, чтобы тест мог достать любой из созданных идентификаторов.
-     */
-    public OrderContext insertOrderInStatus(Long customerId, OrderStatus status) {
+    /** Заказ с одной позицией в новом ресторане. */
+    public OrderContext insertOrderInStatus(Long customerId, String status) {
         BigDecimal price = new BigDecimal("450.00");
 
         Long restaurantId = insertRestaurant();
         Long menuItemId = insertMenuItem(restaurantId, price);
-        Long cartId = insertCart(customerId, restaurantId, "CHECKED_OUT");
-        Long orderId = insertOrder(cartId, customerId, restaurantId, status, price);
-        Long orderItemId = insertOrderItem(orderId, menuItemId, 1, price);
+        Long orderId = insertOrder(customerId, restaurantId, status, price);
+        insertOrderItem(orderId, menuItemId, 1, price);
 
-        return new OrderContext(restaurantId, menuItemId, cartId, orderId, orderItemId, price);
-    }
-
-    public String currentOrderStatus(Long orderId) {
-        return jdbcTemplate.queryForObject(
-                "SELECT status FROM customer_order WHERE id = ?",
-                String.class,
-                orderId
-        );
-    }
-
-    public String currentDeliveryStatus(Long deliveryId) {
-        return jdbcTemplate.queryForObject(
-                "SELECT status FROM delivery WHERE id = ?",
-                String.class,
-                deliveryId
-        );
-    }
-
-    public Integer countOrderEvents(Long orderId, String eventType) {
-        return jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM customer_order_event WHERE order_id = ? AND event_type = ?",
-                Integer.class,
-                orderId,
-                eventType
-        );
+        return new OrderContext(restaurantId, menuItemId, orderId, price);
     }
 
     public record OrderContext(
             Long restaurantId,
             Long menuItemId,
-            Long cartId,
             Long orderId,
-            Long orderItemId,
             BigDecimal price
     ) {
     }

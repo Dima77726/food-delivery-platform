@@ -2,8 +2,6 @@ package com.dima.fooddelivery.tracking.service;
 
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.security.AccessDeniedForResourceException;
-import com.dima.fooddelivery.delivery.domain.DeliveryStatus;
-import com.dima.fooddelivery.order.domain.OrderStatus;
 import com.dima.fooddelivery.support.AbstractStoresIntegrationTest;
 import com.dima.fooddelivery.support.TestDataFactory;
 import com.dima.fooddelivery.tracking.domain.CourierPosition;
@@ -115,8 +113,8 @@ class CourierTrackIT extends AbstractStoresIntegrationTest {
         Long courierId = testData.insertCourier();
 
         TestDataFactory.OrderContext order =
-                testData.insertOrderInStatus(customerId, OrderStatus.READY_FOR_DELIVERY);
-        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, DeliveryStatus.ASSIGNED);
+                testData.insertOrderInStatus(customerId, "READY_FOR_DELIVERY");
+        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, "ASSIGNED");
 
         assertThrows(
                 BusinessRuleViolationException.class,
@@ -132,8 +130,8 @@ class CourierTrackIT extends AbstractStoresIntegrationTest {
         Long customerId = testData.insertCustomer();
         Long courierId = testData.insertCourier();
 
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.IN_DELIVERY);
-        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, DeliveryStatus.PICKED_UP);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "IN_DELIVERY");
+        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, "PICKED_UP");
 
         trackingService.reportPosition(courierId, deliveryId, 55.75, 37.61, 15.0);
 
@@ -151,8 +149,8 @@ class CourierTrackIT extends AbstractStoresIntegrationTest {
         Long stranger = testData.insertCustomer();
         Long courierId = testData.insertCourier();
 
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(owner, OrderStatus.IN_DELIVERY);
-        testData.insertDelivery(order.orderId(), courierId, DeliveryStatus.PICKED_UP);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(owner, "IN_DELIVERY");
+        testData.insertDelivery(order.orderId(), courierId, "PICKED_UP");
 
         assertThrows(
                 AccessDeniedForResourceException.class,
@@ -165,8 +163,8 @@ class CourierTrackIT extends AbstractStoresIntegrationTest {
         Long customerId = testData.insertCustomer();
         Long courierId = testData.insertCourier();
 
-        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, OrderStatus.IN_DELIVERY);
-        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, DeliveryStatus.PICKED_UP);
+        TestDataFactory.OrderContext order = testData.insertOrderInStatus(customerId, "IN_DELIVERY");
+        Long deliveryId = testData.insertDelivery(order.orderId(), courierId, "PICKED_UP");
 
         return new Courier(courierId, deliveryId);
     }

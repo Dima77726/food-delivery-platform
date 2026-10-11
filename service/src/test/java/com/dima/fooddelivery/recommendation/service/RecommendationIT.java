@@ -1,7 +1,5 @@
 package com.dima.fooddelivery.recommendation.service;
 
-import com.dima.fooddelivery.order.domain.OrderStatus;
-import com.dima.fooddelivery.order.service.OrderService;
 import com.dima.fooddelivery.recommendation.persistence.RecommendationGraph;
 import com.dima.fooddelivery.recommendation.domain.RecommendedItem;
 import com.dima.fooddelivery.support.AbstractStoresIntegrationTest;
@@ -35,9 +33,6 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
 
     @Autowired
     private RecommendationService recommendationService;
-
-    @Autowired
-    private OrderService orderService;
 
     @Autowired
     private RecommendationGraph graph;
@@ -141,7 +136,7 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
         Long other = testData.insertCustomer();
 
         placeOrder(me, restaurantId, List.of(shared));
-        placeOrder(other, restaurantId, OrderStatus.CANCELED, List.of(shared, extra));
+        placeOrder(other, restaurantId, "CANCELED", List.of(shared, extra));
 
         projectEverything();
 
@@ -188,14 +183,11 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
     }
 
     private void placeOrder(Long customerId, Long restaurantId, List<Long> menuItemIds) {
-        placeOrder(customerId, restaurantId, OrderStatus.DELIVERED, menuItemIds);
+        placeOrder(customerId, restaurantId, "DELIVERED", menuItemIds);
     }
 
-    private Long placeOrder(Long customerId, Long restaurantId, OrderStatus status, List<Long> menuItemIds) {
-        Long cartId = testData.insertCart(customerId, restaurantId, "CHECKED_OUT");
-
+    private Long placeOrder(Long customerId, Long restaurantId, String status, List<Long> menuItemIds) {
         Long orderId = testData.insertOrder(
-                cartId,
                 customerId,
                 restaurantId,
                 status,
@@ -214,12 +206,12 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
         Long me = testData.insertCustomer();
         Long other = testData.insertCustomer();
         placeOrder(me, restaurantId, List.of(shared));
-        Long orderId = placeOrder(other, restaurantId, OrderStatus.CREATED, List.of(shared, extra));
+        Long orderId = placeOrder(other, restaurantId, "CREATED", List.of(shared, extra));
 
         // Курсор ещё не сброшен: отмена происходит посреди прохода.
         assertTrue(recommendationService.projectNextBatch() > 0);
         assertEquals(1, recommendationService.recommendForCustomer(me, 10).size());
-        orderService.cancelOrder(other, orderId);
+        testData.changeOrderStatus(orderId, "CANCELED");
 
         projectEverything();
         projectEverything();
@@ -236,7 +228,7 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
         Long me = testData.insertCustomer();
         Long other = testData.insertCustomer();
         placeOrder(me, restaurantId, List.of(shared));
-        Long lateOrder = placeOrder(other, restaurantId, OrderStatus.DELIVERED, List.of(shared, extra));
+        Long lateOrder = placeOrder(other, restaurantId, "DELIVERED", List.of(shared, extra));
         // Как при позднем коммите: данные уже видны, но курсор оказался впереди них.
         graph.projectOrders(List.of(), lateOrder);
         assertEquals(0, recommendationService.projectNextBatch());

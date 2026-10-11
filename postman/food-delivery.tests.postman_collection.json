@@ -301,6 +301,10 @@
     {
       "key": "usedRefreshToken",
       "value": ""
+    },
+    {
+      "key": "pollAttempt",
+      "value": ""
     }
   ],
   "item": [
@@ -2405,12 +2409,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
-                  "const p = pm.response.json();",
-                  "pm.test('Платёж привязан к заказу', () => {",
-                  "  pm.expect(p.orderId).to.eql(Number(pm.collectionVariables.get('orderId')));",
-                  "});",
-                  "pm.collectionVariables.set('paymentId', p.id);"
+                  "pm.test('202 Accepted: оплата запрошена, исход придёт асинхронно', () => pm.response.to.have.status(202));",
+                  "const o = pm.response.json();",
+                  "pm.test('Заказ ждёт ответа сервиса платежей', () => pm.expect(o.status).to.be.oneOf(['PAYMENT_PENDING', 'PAID']));",
+                  "pm.test('Ответ — тот же заказ', () => pm.expect(o.id).to.eql(Number(pm.collectionVariables.get('orderId'))));"
                 ]
               }
             }
@@ -2468,9 +2470,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Ответ успешный', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
-                  "pm.test('Возвращён тот же платёж, второго списания нет', () => {",
-                  "  pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('paymentId')));",
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "pm.test('Повтор не запустил вторую оплату: тот же заказ, не 409', () => {",
+                  "  pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('orderId')));",
                   "});"
                 ]
               }
@@ -2505,7 +2507,8 @@
                   "type": "string"
                 }
               ]
-            }
+            },
+            "description": "Сага оплаты: сервис заказов отправил команду в Kafka, сервис платежей списал деньги и ответил событием. Запрос повторяется, пока заказ не выйдет из PAYMENT_PENDING."
           },
           "event": [
             {
@@ -2513,8 +2516,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Заказ перешёл в PAID', () => pm.expect(pm.response.json().status).to.eql('PAID'));"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Заказ перешёл в PAID', () => pm.expect(body.status).to.eql('PAID'));",
+                  "}"
                 ]
               }
             }
@@ -3645,7 +3660,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
                 ]
               }
             }
@@ -3704,8 +3719,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
-                  "pm.test('Сообщение называет текущий статус', () => {",
-                  "  pm.expect(pm.response.json().message).to.include('PAID');",
+                  "pm.test('Сообщение говорит, что оплата уже запрошена', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('уже запрошена');",
                   "});"
                 ]
               }
@@ -3928,17 +3943,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
-                  "pm.test('Ответ передаёт причину отказа', () => {",
-                  "  pm.expect(pm.response.json().message).to.include('Оплата не прошла');",
-                  "});"
+                  "// Отказ банка больше не приходит в ответе: деньги списывает другой сервис, асинхронно.",
+                  "// Запрос принят, а исход виден дальше — в статусе заказа и в списке платежей.",
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Заказ после отказа остался неоплаченным",
+          "name": "Заказ после отказа отменён",
           "request": {
             "method": "GET",
             "header": [],
@@ -3974,17 +3988,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Статус остался CREATED', () => {",
-                  "  pm.expect(pm.response.json().status).to.eql('CREATED');",
-                  "});"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Сага отменила заказ: ждать больше нечего', () => pm.expect(body.status).to.eql('CANCELED'));",
+                  "}"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Платежей по заказу нет",
+          "name": "Неудачная попытка записана с причиной",
           "request": {
             "method": "GET",
             "header": [],
@@ -4020,12 +4044,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Неуспешная попытка не оставила платёж', () => {",
-                  "  const body = pm.response.json();",
-                  "  const list = Array.isArray(body) ? body : body.content;",
-                  "  pm.expect(list).to.be.an('array').that.is.empty;",
-                  "});"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока платёж не появился у сервиса платежей, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(Array.isArray(body) && body.length > 0) && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Платёж FAILED с причиной отказа', () => {",
+                  "      pm.expect(body).to.have.lengthOf(1);",
+                  "      pm.expect(body[0].status).to.eql('FAILED');",
+                  "      pm.expect(body[0].failureReason).to.include('Недостаточно средств');",
+                  "    });",
+                  "}"
                 ]
               }
             }
