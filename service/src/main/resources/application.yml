@@ -45,15 +45,6 @@ spring:
       leak-detection-threshold: 20000
 
   data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      # Небольшой таймаут намеренно. Кэш обязан быть быстрее базы; если Redis отвечает
-      # дольше, ждать его бессмысленно — быстрее сходить в PostgreSQL. Значение по умолчанию
-      # в Lettuce — минута, и при недоступном Redis каждый запрос витрины висел бы минуту.
-      timeout: 500ms
-      connect-timeout: 500ms
-
     # Отзывы о заказах. Клиент MongoDB соединение при создании не открывает, поэтому эти
     # настройки безобидны и при выключенном хранилище: бины автоконфигурации существуют,
     # но в базу никто не ходит — весь модуль отзывов включается отдельно, через
@@ -74,18 +65,21 @@ spring:
   mongodb:
     uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
 
-  # Поиск по витрине. Клиент так же ленив, как у MongoDB: HTTP-соединение открывается
-  # при первом запросе.
-  elasticsearch:
-    uris: http://${ELASTIC_HOST:localhost}:${ELASTIC_PORT:9200}
-    # Таймауты короткие по той же причине, что и у Redis: поиск обязан быть быстрым.
-    # Значение по умолчанию (минута на сокет) означало бы, что недоступный Elasticsearch
-    # подвешивает поисковый запрос на минуту вместо честной ошибки.
-    connection-timeout: 2s
-    socket-timeout: 5s
+  # Кэш витрины (Redis) и поиск (Elasticsearch) уехали вместе с каталогом в catalog-service.
 
-  cache:
-    type: redis
+  grpc:
+    server:
+      # Права на рестораны для каталога — см. RestaurantAccessGrpcService. Отдельный порт:
+      # gRPC живёт на HTTP/2. По умолчанию рассчитан на запуск из IDE рядом с остальными
+      # сервисами, в docker-compose переопределяется на 9090.
+      port: ${GRPC_PORT:7082}
+    client:
+      channels:
+        # Каталог: корзина спрашивает у него ресторан и блюдо.
+        catalog:
+          address: ${CATALOG_GRPC_ADDRESS:static://localhost:7084}
+          # Внутри сети сервисов без TLS. Следующий шаг — mTLS между сервисами.
+          negotiation-type: plaintext
 
   kafka:
     # По умолчанию — localhost:9094, внешний листенер брокера. Так приложение из IDE
@@ -170,6 +164,11 @@ spring:
       appSchema: ${APP_SCHEMA:food_app}
 
 app:
+  grpc:
+    catalog:
+      # Дедлайн вызова каталога. Без него у gRPC-вызова ожидание бесконечно.
+      deadline: ${CATALOG_GRPC_DEADLINE:PT2S}
+
   outbox:
     # Пауза между разборами очереди. Две секунды — компромисс: событие доезжает до
     # потребителя почти сразу, а пустых запросов к базе немного.
@@ -189,12 +188,12 @@ app:
       issuer: ${JWT_ISSUER:food-delivery-platform}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
 
-  # --- Пять дополнительных хранилищ ---------------------------------------------------------
+  # --- Дополнительные хранилища -------------------------------------------------------------
   #
-  # По умолчанию выключены все пять, и приложение стартует ровно так же, как стартовало
-  # до их появления: одним PostgreSQL, Redis и Kafka. Причина проста — вместе они просят
-  # около пяти гигабайт памяти, и держать их поднятыми ради модуля, который сегодня
-  # не трогают, незачем.
+  # MongoDB, Cassandra, Neo4j и ClickHouse; пятое, Elasticsearch, уехало с поиском в
+  # catalog-service. По умолчанию выключены все, и приложение стартует одним PostgreSQL
+  # и Kafka. Причина проста — вместе они просят несколько гигабайт памяти, и держать их
+  # поднятыми ради модуля, который сегодня не трогают, незачем.
   #
   # Включить: docker compose --profile stores up -d и STORE_*_ENABLED=true в .env.
   # Подробности каждого выключателя — в StoreToggles.
@@ -242,12 +241,6 @@ app:
       # Своя группа потребителей: тот же топик независимо читают уведомления.
       consumer-group: ${CLICKHOUSE_CONSUMER_GROUP:food-delivery-analytics}
 
-    # Поиск по витрине.
-    elasticsearch:
-      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
-      reindex-interval: ${ELASTIC_REINDEX_INTERVAL:PT5M}
-      reindex-enabled: ${ELASTIC_REINDEX_ENABLED:true}
-      max-results: ${ELASTIC_MAX_RESULTS:50}
 
 management:
   server:
@@ -278,7 +271,7 @@ management:
         # базы не нужно, а вот убрать его из балансировки — нужно.
         enabled: true
 
-  # Индикаторы здоровья MongoDB и Elasticsearch привязаны к тем же переменным окружения,
+  # Индикатор здоровья MongoDB привязан к тем же переменным окружения,
   # что и сами модули. Иначе выключенное хранилище утягивало бы общий статус в DOWN:
   # автоконфигурация создаёт индикатор по факту наличия клиента в classpath, а клиент
   # там есть всегда. Readiness-проба при этом отвечала бы «не готов» на совершенно
@@ -292,8 +285,6 @@ management:
     # включённым, минуту ждёт недоступный MongoDB и роняет общий статус в DOWN.
     mongodb:
       enabled: ${STORE_MONGO_ENABLED:false}
-    elasticsearch:
-      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
 
   metrics:
     tags:

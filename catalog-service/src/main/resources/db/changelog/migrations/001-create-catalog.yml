@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-catalog
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/001-create-catalog.sql
+            relativeToChangelogFile: true
+            splitStatements: true

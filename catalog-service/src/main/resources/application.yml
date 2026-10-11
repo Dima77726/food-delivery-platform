@@ -1,0 +1,127 @@
+spring:
+  application:
+    name: catalog-service
+
+  lifecycle:
+    # Согласовано с stop_grace_period в docker-compose.yml.
+    timeout-per-shutdown-phase: 20s
+
+  datasource:
+    # Своя база каталога (database-per-service). Рестораны и меню живут здесь и только здесь:
+    # монолит узнаёт о них по gRPC, а не запросом к таблицам.
+    url: jdbc:postgresql://${CATALOG_DB_HOST:localhost}:${CATALOG_DB_PORT:5432}/${CATALOG_DB_NAME:catalog}
+    username: ${CATALOG_DB_USER}
+    password: ${CATALOG_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: ${DB_POOL_SIZE:10}
+      connection-timeout: 3000
+      leak-detection-threshold: 20000
+
+  jpa:
+    # Диалект явно: Hibernate не лезет в базу на старте, чтобы его определить.
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      # Схемой владеет Liquibase. validate сверяет сущности с таблицами и падает при расхождении.
+      ddl-auto: validate
+    # Ленивые связи не должны подгружаться в контроллере после закрытия транзакции.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  liquibase:
+    change-log: classpath:/db/changelog/changelog.yml
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Кэш обязан быть быстрее базы: если Redis отвечает дольше, быстрее сходить в PostgreSQL.
+      timeout: 500ms
+      connect-timeout: 500ms
+
+  cache:
+    type: redis
+
+  elasticsearch:
+    uris: http://${ELASTIC_HOST:localhost}:${ELASTIC_PORT:9200}
+    connection-timeout: 2s
+    socket-timeout: 5s
+
+  grpc:
+    server:
+      # Отдельный порт под gRPC: он живёт на HTTP/2 и не смешивается с REST.
+      # По умолчанию рассчитан на запуск из IDE рядом с остальными сервисами,
+      # в docker-compose переопределяется на 9090.
+      port: ${GRPC_PORT:7084}
+    client:
+      channels:
+        # Владелец пользователей и прав на рестораны. Сейчас это монолит.
+        identity:
+          address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7082}
+          # Внутри сети сервисов без TLS. Следующий шаг — mTLS, см. CatalogGrpcService.
+          negotiation-type: plaintext
+
+app:
+  grpc:
+    identity:
+      deadline: ${IDENTITY_GRPC_DEADLINE:PT2S}
+
+  security:
+    jwt:
+      # Тот же секрет, которым монолит подписывает токены. Значения по умолчанию нет.
+      secret: ${JWT_SECRET}
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+
+  stores:
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
+      reindex-interval: ${ELASTIC_REINDEX_INTERVAL:PT5M}
+      reindex-enabled: ${ELASTIC_REINDEX_ENABLED:true}
+      max-results: ${ELASTIC_MAX_RESULTS:50}
+
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9084}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    # Индикатор привязан к выключателю: иначе выключенный поиск утягивал бы статус в DOWN.
+    elasticsearch:
+      enabled: ${STORE_ELASTICSEARCH_ENABLED:false}
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: ${SERVER_PORT:8084}
+  shutdown: graceful
+
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{correlationId:-},%X{userId:-}] "
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG

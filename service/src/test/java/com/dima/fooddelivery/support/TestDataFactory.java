@@ -147,13 +147,14 @@ public class TestDataFactory {
     public Long insertCartItem(Long cartId, Long menuItemId, int quantity, BigDecimal price) {
         return jdbcTemplate.queryForObject(
                 """
-                        INSERT INTO cart_item (cart_id, menu_item_id, quantity, price)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO cart_item (cart_id, menu_item_id, menu_item_name, quantity, price)
+                        VALUES (?, ?, ?, ?, ?)
                         RETURNING id
                         """,
                 Long.class,
                 cartId,
                 menuItemId,
+                "Test Item " + menuItemId,
                 quantity,
                 price
         );

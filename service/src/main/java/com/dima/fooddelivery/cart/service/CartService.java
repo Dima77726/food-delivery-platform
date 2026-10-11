@@ -9,9 +9,8 @@ import com.dima.fooddelivery.cart.domain.CartStatus;
 import com.dima.fooddelivery.cart.persistence.CartRepository;
 import com.dima.fooddelivery.common.exception.BusinessRuleViolationException;
 import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
-import com.dima.fooddelivery.menu.domain.MenuItemSnapshot;
-import com.dima.fooddelivery.menu.service.MenuService;
-import com.dima.fooddelivery.restaurant.service.RestaurantService;
+import com.dima.fooddelivery.catalog.CatalogClient;
+import com.dima.fooddelivery.catalog.CatalogItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,8 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
  * Модуль Cart.
  *
  * <p>Публичный вход для модуля Order — {@link #requireActiveCart(Long, Long)} и
- * {@link #checkout(Long)}. Сам модуль Cart в чужие таблицы не пишет: цену и доступность блюда
- * спрашивает у {@link MenuService}, статус ресторана — у {@link RestaurantService}.
+ * {@link #checkout(Long)}. Цену и доступность блюда, как и статус ресторана, корзина
+ * спрашивает у каталога через {@link CatalogClient} — каталог живёт в отдельном сервисе.
+ *
+ * <p>Вызов каталога стоит внутри транзакции корзины, и за это платится соединением с базой,
+ * занятым на время сетевого вызова. Плата терпимая: вызов короткий и ограничен дедлайном.
+ * Атомарности он при этом не даёт и дать не может — ресторан живёт в другой базе и вправе
+ * закрыться через миллисекунду после ответа. Ответ каталога — проверка на момент
+ * добавления, а не блокировка.
  */
 @Slf4j
 @Service
@@ -30,8 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CartService {
 
     private final CartRepository cartRepository;
-    private final MenuService menuService;
-    private final RestaurantService restaurantService;
+    private final CatalogClient catalogClient;
 
     @Transactional(readOnly = true)
     public CartResponse getActiveCart(Long customerId, Long restaurantId) {
@@ -40,11 +44,11 @@ public class CartService {
 
     @Transactional
     public CartResponse addItemToCart(Long customerId, Long restaurantId, AddCartItemRequest request) {
-        restaurantService.requireActiveRestaurant(restaurantId);
+        catalogClient.requireActiveRestaurant(restaurantId);
 
         // Цена фиксируется на момент добавления: если блюдо подорожает, в корзине останется
         // та цена, которую клиент видел. Пересчёт на checkout был бы неприятным сюрпризом.
-        MenuItemSnapshot menuItem = menuService.requireAvailableItem(restaurantId, request.menuItemId());
+        CatalogItem menuItem = catalogClient.requireAvailableItem(restaurantId, request.menuItemId());
 
         Long cartId = cartRepository.findActiveCartId(customerId, restaurantId)
                 .orElseGet(() -> {
@@ -53,7 +57,7 @@ public class CartService {
                     return created;
                 });
 
-        cartRepository.addOrIncreaseItem(cartId, menuItem.id(), request.quantity(), menuItem.price());
+        cartRepository.addOrIncreaseItem(cartId, menuItem.id(), menuItem.name(), request.quantity(), menuItem.price());
         cartRepository.touch(cartId);
 
         return getActiveCart(customerId, restaurantId);
@@ -66,7 +70,7 @@ public class CartService {
             Long cartItemId,
             UpdateCartItemQuantityRequest request
     ) {
-        restaurantService.requireActiveRestaurant(restaurantId);
+        catalogClient.requireActiveRestaurant(restaurantId);
 
         Long cartId = requireActiveCartId(customerId, restaurantId);
 
@@ -87,7 +91,7 @@ public class CartService {
 
     @Transactional
     public CartResponse removeCartItem(Long customerId, Long restaurantId, Long cartItemId) {
-        restaurantService.requireActiveRestaurant(restaurantId);
+        catalogClient.requireActiveRestaurant(restaurantId);
 
         Long cartId = requireActiveCartId(customerId, restaurantId);
 

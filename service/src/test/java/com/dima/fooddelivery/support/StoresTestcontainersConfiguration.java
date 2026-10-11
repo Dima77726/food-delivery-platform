@@ -6,22 +6,21 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.testcontainers.cassandra.CassandraContainer;
 import org.testcontainers.clickhouse.ClickHouseContainer;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.neo4j.Neo4jContainer;
 
 /**
- * Контейнеры пяти дополнительных хранилищ.
+ * Контейнеры дополнительных хранилищ монолита. Elasticsearch уехал с поиском в catalog-service.
  *
  * <p>Отдельная конфигурация, а не дополнение к {@link TestcontainersConfiguration}. Разница
  * принципиальная и стоит нескольких минут прогона: контекст Spring кэшируется по набору
- * своих настроек, и добавь мы эти пять контейнеров в общую конфигурацию — их поднимал бы
+ * своих настроек, и добавь мы эти контейнеры в общую конфигурацию — их поднимал бы
  * каждый интеграционный тест проекта, включая те, что проверяют SQL и не знают ни о каком
  * MongoDB. Так же поднимаются они ровно один раз и только для наследников
  * {@link AbstractStoresIntegrationTest}.
  *
- * <p><b>Два способа передать адрес приложению.</b> MongoDB и Elasticsearch подключаются
- * через {@link ServiceConnection}: их настройки разбирает автоконфигурация Spring Boot,
+ * <p><b>Два способа передать адрес приложению.</b> MongoDB подключается
+ * через {@link ServiceConnection}: его настройки разбирает автоконфигурация Spring Boot,
  * и она же умеет забрать адрес прямо из контейнера. Cassandra, Neo4j и ClickHouse настраиваются
  * нашими собственными свойствами {@code app.stores.*}, о которых Boot ничего не знает, —
  * их проставляет {@link DynamicPropertyRegistrar}.
@@ -38,19 +37,6 @@ public class StoresTestcontainersConfiguration {
     @ServiceConnection
     MongoDBContainer mongoContainer() {
         return new MongoDBContainer("mongo:8.0");
-    }
-
-    /**
-     * Elasticsearch без защиты — как и в docker compose. С включённым xpack контейнер
-     * поднимается по HTTPS с самоподписанным сертификатом, и тесту пришлось бы возиться
-     * с truststore ради проверки поиска.
-     */
-    @Bean
-    @ServiceConnection
-    ElasticsearchContainer elasticsearchContainer() {
-        return new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:9.2.0")
-                .withEnv("xpack.security.enabled", "false")
-                .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
     }
 
     /**

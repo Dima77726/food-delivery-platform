@@ -1,10 +1,10 @@
 package com.dima.fooddelivery.support;
 
-import com.redis.testcontainers.RedisContainer;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -34,22 +34,9 @@ public class TestcontainersConfiguration {
     }
 
     /**
-     * Настоящий Redis, а не подмена кэша на in-memory.
-     *
-     * <p>Замена {@code spring.cache.type=simple} в тестах прошла бы мимо всего, что в кэше
-     * может сломаться: сериализации доменных типов в JSON, TTL, поведения при недоступном
-     * сервере. Проверялись бы только аннотации, а они и так очевидны.
-     */
-    @Bean
-    @ServiceConnection
-    RedisContainer redisContainer() {
-        return new RedisContainer("redis:7-alpine");
-    }
-
-    /**
      * Настоящий брокер, а не заглушка.
      *
-     * <p>Здесь это принципиальнее, чем в случае с Redis: почти всё, что ломается в работе
+     * <p>Здесь это принципиально: почти всё, что ломается в работе
      * с Kafka, — это поведение брокера, а не код. Порядок внутри партиции, ребалансировка,
      * фиксация офсетов, повторная доставка — ничего из этого мок не воспроизведёт.
      *
@@ -69,6 +56,17 @@ public class TestcontainersConfiguration {
     @ServiceConnection
     ConfluentKafkaContainer kafkaContainer() {
         return new ConfluentKafkaContainer("confluentinc/cp-kafka:7.8.0");
+    }
+
+    /**
+     * Каталог вместо gRPC-клиента к catalog-service — см. {@link LegacyTablesCatalogClient}.
+     * {@code @Primary}, потому что настоящий {@code GrpcCatalogClient} в контексте тоже есть:
+     * его канал ленивый и ни к кому не подключается, пока его не вызвали.
+     */
+    @Bean
+    @Primary
+    LegacyTablesCatalogClient legacyTablesCatalogClient(JdbcTemplate jdbcTemplate) {
+        return new LegacyTablesCatalogClient(jdbcTemplate);
     }
 
     @Bean

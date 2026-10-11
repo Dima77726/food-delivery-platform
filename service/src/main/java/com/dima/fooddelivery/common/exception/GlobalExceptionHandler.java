@@ -368,6 +368,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
+    /**
+     * Сосед, без которого запрос не решить, не ответил — например, каталог при добавлении
+     * блюда в корзину. 503 говорит ровно это: монолит исправен, повторите позже.
+     */
+    @ExceptionHandler(UpstreamUnavailableException.class)
+    ResponseEntity<ApiErrorResponse> handleUpstreamUnavailable(
+            UpstreamUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        log.error("Зависимый сервис недоступен: path={}, message={}", request.getRequestURI(), exception.getMessage());
+
+        return response(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleExceptionAll(Exception exception, HttpServletRequest request) {
         log.error(

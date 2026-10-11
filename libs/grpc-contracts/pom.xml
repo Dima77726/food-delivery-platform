@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.dima</groupId>
+        <artifactId>food-delivery-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>grpc-contracts</artifactId>
+    <name>grpc-contracts</name>
+    <description>Контракты синхронных вызовов между сервисами: .proto и сгенерированные из них стабы</description>
+
+    <!--
+        Источник истины — файлы .proto в src/main/proto. Java-код целиком генерируется
+        на этапе generate-sources, рукописного кода в модуле нет и быть не должно: тогда
+        контракт и его Java-представление не могут разойтись.
+
+        Почему стабы собираются здесь, а не в каждом сервисе из общего каталога .proto.
+        Так все стороны гарантированно используют один и тот же сгенерированный код одной
+        версией protoc. Сгенерируй каждый сервис стабы сам, и клиент со старым плагином
+        однажды разошёлся бы с сервером на новом — без единой ошибки компиляции.
+
+        Зависимости — только рантайм gRPC и protobuf, без Spring. Каким способом сервис
+        поднимает сервер или канал, решает сам сервис.
+    -->
+
+    <dependencies>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                protoc и плагин grpc-java скачиваются из Maven Central под текущую платформу:
+                ставить их в систему не нужно, и версия у всех разработчиков и в CI одна.
+                Версии берутся из BOM spring-grpc, чтобы сгенерированный код совпадал
+                с рантаймом, который подтягивает Spring gRPC в сервисах.
+            -->
+            <plugin>
+                <groupId>io.github.ascopes</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>${protobuf-maven-plugin.version}</version>
+                <configuration>
+                    <protoc kind="binary-maven">
+                        <version>${protobuf-java.version}</version>
+                    </protoc>
+                    <plugins>
+                        <plugin kind="binary-maven">
+                            <groupId>io.grpc</groupId>
+                            <artifactId>protoc-gen-grpc-java</artifactId>
+                            <version>${grpc.version}</version>
+                        </plugin>
+                    </plugins>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

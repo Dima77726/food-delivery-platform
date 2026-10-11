@@ -9,7 +9,11 @@
 # Многоступенчатая сборка: инструменты сборки не должны попасть в рантайм-образ.
 # Maven и JDK весят сотни мегабайт и содержат компилятор, которому в проде делать нечего.
 
-FROM eclipse-temurin:21-jdk-alpine AS build
+# Сборочный образ — на glibc (Ubuntu), а не на Alpine, хотя рантайм остаётся Alpine.
+# Стабы gRPC генерирует protoc, который Maven скачивает готовым бинарником, а эти бинарники
+# собраны под glibc. На musl из Alpine protoc просто не запустится, и сборка любого сервиса,
+# зависящего от libs/grpc-contracts, падала бы на генерации кода.
+FROM eclipse-temurin:21-jdk AS build
 
 ARG MODULE=service
 
@@ -21,8 +25,10 @@ WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY libs/event-contracts/pom.xml libs/event-contracts/
+COPY libs/grpc-contracts/pom.xml libs/grpc-contracts/
 COPY service/pom.xml service/
 COPY notification-service/pom.xml notification-service/
+COPY catalog-service/pom.xml catalog-service/
 COPY api-gateway/pom.xml api-gateway/
 COPY client/pom.xml client/
 
@@ -33,12 +39,13 @@ COPY client/pom.xml client/
 RUN ./mvnw -B --no-transfer-progress -q -pl ${MODULE} -am dependency:go-offline \
         -DexcludeGroupIds=com.dima
 
-# Спецификация нужна монолиту до исходников: из неё генерируются интерфейсы, которые
+# Спецификация нужна каталогу до исходников: из неё генерируются интерфейсы, которые
 # он реализует. Остальным модулям она не мешает.
 COPY openapi/ openapi/
 COPY libs/ libs/
 COPY service/src/ service/src/
 COPY notification-service/src/ notification-service/src/
+COPY catalog-service/src/ catalog-service/src/
 COPY api-gateway/src/ api-gateway/src/
 
 # Тесты здесь не гоняются намеренно: интеграционные требуют Docker внутри Docker.
