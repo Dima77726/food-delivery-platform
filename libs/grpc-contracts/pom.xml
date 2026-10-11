@@ -3,16 +3,45 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <parent>
-        <groupId>com.dima</groupId>
-        <artifactId>food-delivery-platform</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
-        <relativePath>../../pom.xml</relativePath>
-    </parent>
-
+    <!--
+        Самостоятельный pom, без родителя платформы — намеренно. Контракт публикуется
+        и подключается отдельно от сервисов, и потребитель не должен тянуть за ним родительский
+        pom монолита со всеми его версиями. В общей сборке модуль участвует как модуль
+        агрегатора, но ничего от него не наследует.
+    -->
+    <groupId>com.dima</groupId>
     <artifactId>grpc-contracts</artifactId>
+    <!-- Своя версия контрактов; её же указывает contracts.version в pom платформы. -->
+    <version>1.0.0-SNAPSHOT</version>
     <name>grpc-contracts</name>
     <description>Контракты синхронных вызовов между сервисами: .proto и сгенерированные из них стабы</description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Версии совпадают с теми, что берёт Spring gRPC в сервисах: см. pom платформы. -->
+        <spring-grpc.version>1.0.3</spring-grpc.version>
+        <grpc.version>1.77.1</grpc.version>
+        <protobuf-java.version>4.33.4</protobuf-java.version>
+        <protobuf-maven-plugin.version>5.1.11</protobuf-maven-plugin.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.grpc</groupId>
+                <artifactId>spring-grpc-dependencies</artifactId>
+                <version>${spring-grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf-java.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <!--
         Источник истины — файлы .proto в src/main/proto. Java-код целиком генерируется
@@ -79,5 +108,18 @@
             </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/Dima77726/food-delivery-platform</url>
+        </repository>
+        <snapshotRepository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/Dima77726/food-delivery-platform</url>
+        </snapshotRepository>
+    </distributionManagement>
 
 </project>

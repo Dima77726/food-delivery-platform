@@ -61,6 +61,14 @@
             Релизный поезд Spring Cloud под Spring Boot 4.0. Нужен только шлюзу, но версия
             держится здесь: следующие сервисы (discovery, config, resilience) возьмут ту же.
         -->
+        <!--
+            Версия контрактов — своя, отдельно от версий сервисов. Контракт — это то, на что
+            завязаны все сервисы сразу, и меняется он по своим правилам: несовместимое изменение
+            поднимает мажорную версию (и пакет .proto — catalog.v2), совместимое — минорную.
+            Сервисы в монорепозитории берут контракты из той же сборки; после разделения
+            на репозитории они будут подключать опубликованную версию отсюда.
+        -->
+        <contracts.version>1.0.0-SNAPSHOT</contracts.version>
         <spring-cloud.version>2025.1.3</spring-cloud.version>
         <!--
             Spring gRPC 1.0 — линия под Spring Boot 4.0. Его BOM задаёт версии gRPC и protobuf
@@ -87,12 +95,12 @@
             <dependency>
                 <groupId>com.dima</groupId>
                 <artifactId>event-contracts</artifactId>
-                <version>${project.version}</version>
+                <version>${contracts.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.dima</groupId>
                 <artifactId>grpc-contracts</artifactId>
-                <version>${project.version}</version>
+                <version>${contracts.version}</version>
             </dependency>
             <!--
                 protobuf-java явно: BOM spring-grpc задаёт его версию свойством, но не управляет
