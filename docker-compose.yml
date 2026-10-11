@@ -366,6 +366,8 @@ services:
       # Закрытый ключ подписи токенов. Есть только у этого сервиса — в этом весь смысл RS256.
       - JWT_PRIVATE_KEY
       - JWT_KEY_ID
+      - JWT_ACCESS_TOKEN_TTL=${JWT_ACCESS_TOKEN_TTL:-PT15M}
+      - JWT_REFRESH_TOKEN_TTL=${JWT_REFRESH_TOKEN_TTL:-P30D}
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
       - TZ=${TZ}

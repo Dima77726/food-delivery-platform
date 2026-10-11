@@ -119,6 +119,22 @@
       "type": "string"
     },
     {
+      "key": "customerRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "ownerRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "courierRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "adminRefreshToken",
+      "value": ""
+    },
+    {
       "key": "customerId",
       "value": "",
       "type": "string"
@@ -378,6 +394,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('customerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('customerRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('customerId', b.user.id);",
                   "    console.log('customerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -434,6 +451,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('ownerRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('ownerId', b.user.id);",
                   "    console.log('ownerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -490,6 +508,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('courierToken', b.accessToken);",
+                  "    pm.collectionVariables.set('courierRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('courierId', b.user.id);",
                   "    console.log('courierToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -546,6 +565,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('customerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('customerRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('customerId', b.user.id);",
                   "    console.log('customerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -602,6 +622,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('ownerRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('ownerId', b.user.id);",
                   "    console.log('ownerToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -658,6 +679,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('courierToken', b.accessToken);",
+                  "    pm.collectionVariables.set('courierRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('courierId', b.user.id);",
                   "    console.log('courierToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -714,6 +736,7 @@
                   "if (ok) {",
                   "    const b = pm.response.json();",
                   "    pm.collectionVariables.set('adminToken', b.accessToken);",
+                  "    pm.collectionVariables.set('adminRefreshToken', b.refreshToken);",
                   "    pm.collectionVariables.set('adminId', b.user.id);",
                   "    console.log('adminToken сохранён, срок жизни', b.expiresInSeconds, 'с');",
                   "}"
@@ -763,9 +786,112 @@
               }
             }
           ]
+        },
+        {
+          "name": "Обновить токены: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Меняет refresh-токен на новую пару, без пароля. Старый refresh-токен после этого недействителен: его повторное предъявление считается кражей и завершает сессию целиком.\n\nОбе переменные — customerToken и customerRefreshToken — тест обновляет сам.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "    const b = pm.response.json();",
+                  "    pm.collectionVariables.set('customerToken', b.accessToken);",
+                  "    pm.collectionVariables.set('customerRefreshToken', b.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Выход: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Отзывает refresh-токен этой сессии; сессии на других устройствах остаются. Уже выданный access-токен доживает свои минуты — отозвать JWT нельзя, поэтому он и короткий.\n\nПосле выхода повторите «Вход: клиент», чтобы снова получить refresh-токен.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
         }
       ],
-      "description": "Начните отсюда: запросы сохраняют токены в переменные коллекции, и остальные папки берут их автоматически.\n\nТокен живёт час (JWT_ACCESS_TOKEN_TTL). Когда начнёт прилетать 401 — повторите нужный вход.",
+      "description": "Начните отсюда: запросы сохраняют токены в переменные коллекции, и остальные папки берут их автоматически.\n\nAccess-токен живёт 15 минут (JWT_ACCESS_TOKEN_TTL), refresh-токен — 30 дней (JWT_REFRESH_TOKEN_TTL). Когда начнёт прилетать 401 — выполните «Обновить токены» или повторите вход.",
       "auth": {
         "type": "noauth"
       }

@@ -293,6 +293,14 @@
       "key": "expectedMessage",
       "value": "email",
       "type": "string"
+    },
+    {
+      "key": "customerRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "usedRefreshToken",
+      "value": ""
     }
   ],
   "item": [
@@ -412,11 +420,13 @@
                   "pm.test('Схема ответа с токеном', () => {",
                   "  pm.response.to.have.jsonSchema({",
                   "    type: 'object',",
-                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'user'],",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'refreshToken', 'refreshExpiresInSeconds', 'user'],",
                   "    properties: {",
                   "      accessToken: { type: 'string', minLength: 20 },",
                   "      tokenType: { type: 'string' },",
                   "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      refreshToken: { type: 'string', minLength: 20 },",
+                  "      refreshExpiresInSeconds: { type: 'integer', minimum: 1 },",
                   "      user: { type: 'object', required: ['id', 'email'] }",
                   "    }",
                   "  });",
@@ -608,7 +618,164 @@
                   "pm.test('Тот же пользователь', () => {",
                   "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
                   "});",
-                  "pm.collectionVariables.set('customerToken', body.accessToken);"
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Обмен refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const old = pm.collectionVariables.get('customerRefreshToken');",
+                  "pm.test('Выдан новый refresh-токен', () => pm.expect(body.refreshToken).to.be.a('string').and.not.eql(old));",
+                  "pm.test('Тот же пользователь', () => {",
+                  "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "});",
+                  "pm.collectionVariables.set('usedRefreshToken', old);",
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повтор обменянного refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Обменянный токен одноразовый. Повтор — признак кражи: отклоняется он сам и вся цепочка.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{usedRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Цепочка отозвана целиком",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Токен, выданный при честном обмене, тоже недействителен после повтора старого. Access-токен при этом жив — дальнейшие запросы коллекции идут с ним.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
                 ]
               }
             }
