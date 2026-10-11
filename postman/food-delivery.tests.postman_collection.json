@@ -293,6 +293,18 @@
       "key": "expectedMessage",
       "value": "email",
       "type": "string"
+    },
+    {
+      "key": "customerRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "usedRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "pollAttempt",
+      "value": ""
     }
   ],
   "item": [
@@ -412,11 +424,13 @@
                   "pm.test('Схема ответа с токеном', () => {",
                   "  pm.response.to.have.jsonSchema({",
                   "    type: 'object',",
-                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'user'],",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'refreshToken', 'refreshExpiresInSeconds', 'user'],",
                   "    properties: {",
                   "      accessToken: { type: 'string', minLength: 20 },",
                   "      tokenType: { type: 'string' },",
                   "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      refreshToken: { type: 'string', minLength: 20 },",
+                  "      refreshExpiresInSeconds: { type: 'integer', minimum: 1 },",
                   "      user: { type: 'object', required: ['id', 'email'] }",
                   "    }",
                   "  });",
@@ -608,7 +622,164 @@
                   "pm.test('Тот же пользователь', () => {",
                   "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
                   "});",
-                  "pm.collectionVariables.set('customerToken', body.accessToken);"
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Обмен refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const old = pm.collectionVariables.get('customerRefreshToken');",
+                  "pm.test('Выдан новый refresh-токен', () => pm.expect(body.refreshToken).to.be.a('string').and.not.eql(old));",
+                  "pm.test('Тот же пользователь', () => {",
+                  "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "});",
+                  "pm.collectionVariables.set('usedRefreshToken', old);",
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повтор обменянного refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Обменянный токен одноразовый. Повтор — признак кражи: отклоняется он сам и вся цепочка.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{usedRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Цепочка отозвана целиком",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Токен, выданный при честном обмене, тоже недействителен после повтора старого. Access-токен при этом жив — дальнейшие запросы коллекции идут с ним.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
                 ]
               }
             }
@@ -729,50 +900,6 @@
                   "pm.test('Роль CUSTOMER', () => {",
                   "  const b = pm.response.json();",
                   "  pm.expect(JSON.stringify(b)).to.include('CUSTOMER');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Ping базы данных",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/db/ping",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "db",
-                "ping"
-              ]
-            },
-            "description": "Проверка отдельно от /ping: сервис отвечает и при недоступной базе. Маршрут закрыт токеном, поэтому идёт после входа, а не в дымовой папке.",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{customerToken}}",
-                  "type": "string"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('База отвечает', () => {",
-                  "  pm.expect(pm.response.json().status).to.eql('ok');",
                   "});"
                 ]
               }
@@ -2238,12 +2365,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
-                  "const p = pm.response.json();",
-                  "pm.test('Платёж привязан к заказу', () => {",
-                  "  pm.expect(p.orderId).to.eql(Number(pm.collectionVariables.get('orderId')));",
-                  "});",
-                  "pm.collectionVariables.set('paymentId', p.id);"
+                  "pm.test('202 Accepted: оплата запрошена, исход придёт асинхронно', () => pm.response.to.have.status(202));",
+                  "const o = pm.response.json();",
+                  "pm.test('Заказ ждёт ответа сервиса платежей', () => pm.expect(o.status).to.be.oneOf(['PAYMENT_PENDING', 'PAID']));",
+                  "pm.test('Ответ — тот же заказ', () => pm.expect(o.id).to.eql(Number(pm.collectionVariables.get('orderId'))));"
                 ]
               }
             }
@@ -2301,9 +2426,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Ответ успешный', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
-                  "pm.test('Возвращён тот же платёж, второго списания нет', () => {",
-                  "  pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('paymentId')));",
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "pm.test('Повтор не запустил вторую оплату: тот же заказ, не 409', () => {",
+                  "  pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('orderId')));",
                   "});"
                 ]
               }
@@ -2338,7 +2463,8 @@
                   "type": "string"
                 }
               ]
-            }
+            },
+            "description": "Сага оплаты: сервис заказов отправил команду в Kafka, сервис платежей списал деньги и ответил событием. Запрос повторяется, пока заказ не выйдет из PAYMENT_PENDING."
           },
           "event": [
             {
@@ -2346,8 +2472,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Заказ перешёл в PAID', () => pm.expect(pm.response.json().status).to.eql('PAID'));"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Заказ перешёл в PAID', () => pm.expect(body.status).to.eql('PAID'));",
+                  "}"
                 ]
               }
             }
@@ -3478,7 +3616,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
                 ]
               }
             }
@@ -3537,8 +3675,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
-                  "pm.test('Сообщение называет текущий статус', () => {",
-                  "  pm.expect(pm.response.json().message).to.include('PAID');",
+                  "pm.test('Сообщение говорит, что оплата уже запрошена', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('уже запрошена');",
                   "});"
                 ]
               }
@@ -3761,17 +3899,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
-                  "pm.test('Ответ передаёт причину отказа', () => {",
-                  "  pm.expect(pm.response.json().message).to.include('Оплата не прошла');",
-                  "});"
+                  "// Отказ банка больше не приходит в ответе: деньги списывает другой сервис, асинхронно.",
+                  "// Запрос принят, а исход виден дальше — в статусе заказа и в списке платежей.",
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Заказ после отказа остался неоплаченным",
+          "name": "Заказ после отказа отменён",
           "request": {
             "method": "GET",
             "header": [],
@@ -3807,17 +3944,27 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Статус остался CREATED', () => {",
-                  "  pm.expect(pm.response.json().status).to.eql('CREATED');",
-                  "});"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Сага отменила заказ: ждать больше нечего', () => pm.expect(body.status).to.eql('CANCELED'));",
+                  "}"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Платежей по заказу нет",
+          "name": "Неудачная попытка записана с причиной",
           "request": {
             "method": "GET",
             "header": [],
@@ -3853,12 +4000,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Неуспешная попытка не оставила платёж', () => {",
-                  "  const body = pm.response.json();",
-                  "  const list = Array.isArray(body) ? body : body.content;",
-                  "  pm.expect(list).to.be.an('array').that.is.empty;",
-                  "});"
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока платёж не появился у сервиса платежей, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(Array.isArray(body) && body.length > 0) && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Платёж FAILED с причиной отказа', () => {",
+                  "      pm.expect(body).to.have.lengthOf(1);",
+                  "      pm.expect(body[0].status).to.eql('FAILED');",
+                  "      pm.expect(body[0].failureReason).to.include('Недостаточно средств');",
+                  "    });",
+                  "}"
                 ]
               }
             }
@@ -4797,12 +4956,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('В журнале есть записи прогона', () => {",
-                  "  const body = pm.response.json();",
-                  "  const list = Array.isArray(body) ? body : body.content;",
-                  "  pm.expect(list.length).to.be.at.least(1);",
-                  "});"
+                  "// Сводный журнал живёт в ClickHouse insights-service и без него не включается: 404 — модуль выключен.",
+                  "// Записи приезжают асинхронно (публикатор раз в 5 секунд, потом потребитель), поэтому",
+                  "// записей именно этого прогона здесь не ждём — только форму ответа.",
+                  "if (pm.response.code === 404) {",
+                  "  console.log('Сводный журнал выключен (STORE_CLICKHOUSE_ENABLED=false) — проверки пропущены');",
+                  "} else {",
+                  "  pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "  pm.test('Журнал — список записей со всех сервисов', () => {",
+                  "    const list = pm.response.json();",
+                  "    pm.expect(list).to.be.an('array');",
+                  "    list.forEach(entry => pm.expect(entry).to.have.property('sourceService'));",
+                  "  });",
+                  "}"
                 ]
               }
             }

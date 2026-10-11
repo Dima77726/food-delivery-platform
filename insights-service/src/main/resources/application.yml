@@ -1,0 +1,253 @@
+spring:
+  application:
+    name: insights-service
+
+  lifecycle:
+    # Сколько ждать завершения текущей работы при graceful shutdown. По умолчанию 30 секунд,
+    # и это больше, чем ждёт Docker: он шлёт SIGKILL через 10 секунд после SIGTERM, так что
+    # штатное завершение просто не успевало бы закончиться. Двадцать секунд согласованы
+    # с stop_grace_period в docker-compose.yml — правьте их вместе.
+    timeout-per-shutdown-phase: 20s
+
+  data:
+    # Отзывы о заказах. Клиент MongoDB соединение при создании не открывает, поэтому эти
+    # настройки безобидны и при выключенном хранилище: бины автоконфигурации существуют,
+    # но в базу никто не ходит — весь модуль отзывов включается отдельно, через
+    # app.stores.mongo.enabled.
+    mongodb:
+      # Здесь остались только настройки Spring Data. Адрес соединения переехал
+      # в spring.mongodb.uri — см. ниже.
+      #
+      # Автоматическое создание индексов выключено намеренно: оно срабатывает при первом
+      # разборе доменного типа, то есть на старте приложения и без оглядки на выключатель.
+      # Индексы создаёт ReviewIndexes — см. комментарий там.
+      auto-index-creation: false
+
+  # Соединение с MongoDB. В Spring Boot 4 настройки подключения переехали из
+  # spring.data.mongodb.* в spring.mongodb.*: под старым префиксом uri молча игнорируется,
+  # клиент уходит на дефолтный mongodb://localhost/test, и отзывы пишутся не в ту базу,
+  # а в контейнере — вообще мимо сервера mongo.
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
+
+  graphql:
+    http:
+      path: /graphql
+    # Песочница для запросов в браузере. Доступна через шлюз: http://localhost:8080/graphiql
+    graphiql:
+      enabled: ${GRAPHIQL_ENABLED:true}
+    schema:
+      printer:
+        # GET /graphql/schema отдаёт схему текстом — для генераторов клиентов и для глаз.
+        enabled: true
+
+  grpc:
+    client:
+      channels:
+        # Каталог: название и город ресторана для GraphQL.
+        catalog:
+          address: ${CATALOG_GRPC_ADDRESS:static://localhost:7084}
+          negotiation-type: plaintext
+        # Сервис заказов: отзывы и рекомендации читают у него заказы.
+        orders:
+          address: ${ORDER_GRPC_ADDRESS:static://localhost:7086}
+          negotiation-type: plaintext
+        # Сервис пользователей: права на рестораны для аналитики ресторана.
+        identity:
+          address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7085}
+          negotiation-type: plaintext
+
+  kafka:
+    # По умолчанию — localhost:9094, внешний листенер брокера. Так приложение из IDE
+    # достучится до Kafka в контейнере без единой правки. Внутри compose переменная
+    # переопределяется на kafka:9092.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+
+    producer:
+      # acks=all — подтверждение только после записи на все синхронизированные реплики.
+      # Со значением 1 сообщение теряется при падении лидера сразу после подтверждения,
+      # а для событий заказа потеря недопустима.
+      acks: all
+      properties:
+        # Идемпотентный продюсер: при повторной отправке из-за таймаута брокер распознаёт
+        # дубликат по номеру последовательности и не пишет его второй раз.
+        enable.idempotence: true
+        # Больше пяти при включённой идемпотентности брокер не разрешает: иначе он не сможет
+        # восстановить порядок сообщений внутри партиции после повтора.
+        max.in.flight.requests.per.connection: 5
+
+    consumer:
+      # Прежнее имя группы монолита. Сама аналитика читает топик своей группой
+      # (app.stores.clickhouse.consumer-group); эта — для разбора DLT.
+      group-id: ${KAFKA_CONSUMER_GROUP:food-delivery-core}
+      # earliest, а не latest: новый экземпляр обязан прочитать всё, что накопилось,
+      # а не начать с текущего момента, потеряв события за время простоя.
+      auto-offset-reset: earliest
+      properties:
+        # Ограничивает объём работы между обращениями к брокеру. При слишком большой пачке
+        # обработка не укладывается в max.poll.interval.ms, и брокер исключает потребителя
+        # из группы, считая его зависшим.
+        max.poll.records: 50
+
+    listener:
+      # Офсет фиксируется после каждого сообщения. Дороже по количеству коммитов, зато
+      # при падении переобрабатывается одно сообщение, а не вся пачка.
+      ack-mode: record
+
+app:
+  grpc:
+    orders:
+      # Дедлайн вызова сервиса заказов. Без него у gRPC-вызова ожидание бесконечно.
+      deadline: ${ORDER_GRPC_DEADLINE:PT2S}
+    catalog:
+      deadline: ${CATALOG_GRPC_DEADLINE:PT2S}
+    identity:
+      deadline: ${IDENTITY_GRPC_DEADLINE:PT2S}
+
+  security:
+    jwt:
+      # Токены выпускает identity-service, здесь их только проверяют — открытым ключом из
+      # JWKS. Секрета подписи у сервиса нет, и подделать токен с его стороны невозможно.
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
+
+  graphql:
+    # Сколько полей в глубину может запросить клиент. GraphQL позволяет склеить в один запрос
+    # сколько угодно вложенности, и без предела один запрос можно сделать сколь угодно дорогим.
+    max-query-depth: ${GRAPHQL_MAX_DEPTH:6}
+
+  # --- Хранилища -----------------------------------------------------------------------------
+  #
+  # MongoDB, Neo4j и ClickHouse. Elasticsearch уехал с поиском в catalog-service, Cassandra —
+  # с треком курьера в tracking-service. По умолчанию выключены все, и сервис стартует одной
+  # Kafka — отзывы, рекомендации и аналитика при этом отвечают «модуль выключен». Причина проста — вместе они просят несколько гигабайт памяти, и держать их
+  # поднятыми ради модуля, который сегодня не трогают, незачем.
+  #
+  # Включить: docker compose --profile stores up -d и STORE_*_ENABLED=true в .env.
+  # Подробности каждого выключателя — в StoreToggles.
+  #
+  # Важное следствие: включённое хранилище обязано быть доступно. Схему свою модуль
+  # создаёт на старте и при недоступном сервере не даёт приложению подняться.
+  stores:
+    # Отзывы о заказах.
+    mongo:
+      enabled: ${STORE_MONGO_ENABLED:false}
+
+    # Рекомендации по графу заказов.
+    neo4j:
+      enabled: ${STORE_NEO4J_ENABLED:false}
+      uri: ${NEO4J_URI:bolt://localhost:7687}
+      username: ${NEO4J_USERNAME}
+      password: ${NEO4J_PASSWORD}
+      # Проекция циклически сверяет заказы пачками. Один такт — одна пачка;
+      # изменения старых заказов видны после следующего полного прохода.
+      projection-interval: ${NEO4J_PROJECTION_INTERVAL:PT30S}
+      projection-batch: ${NEO4J_PROJECTION_BATCH:200}
+      # Выключает только таймер, но не сам сервис: тесты запускают проекцию вручную,
+      # чтобы точно знать момент, когда она произошла.
+      projection-enabled: ${NEO4J_PROJECTION_ENABLED:true}
+
+    # Витрина аналитики заказов и сводный журнал аудита.
+    clickhouse:
+      enabled: ${STORE_CLICKHOUSE_ENABLED:false}
+      url: jdbc:clickhouse://${CLICKHOUSE_HOST:localhost}:${CLICKHOUSE_PORT:8123}/${CLICKHOUSE_DB:food_delivery}
+      username: ${CLICKHOUSE_USER}
+      password: ${CLICKHOUSE_PASSWORD}
+      pool-size: ${CLICKHOUSE_POOL_SIZE:4}
+      query-timeout: ${CLICKHOUSE_QUERY_TIMEOUT:PT10S}
+      # Своя группа потребителей: тот же топик независимо читают уведомления.
+      consumer-group: ${CLICKHOUSE_CONSUMER_GROUP:food-delivery-analytics}
+      # Сводный журнал аудита читает свой топик своей группой: его можно перечитать
+      # с начала, не трогая витрину заказов.
+      audit-consumer-group: ${CLICKHOUSE_AUDIT_CONSUMER_GROUP:food-delivery-audit}
+
+
+management:
+  server:
+    # Отдельный порт для служебных эндпоинтов — не косметика.
+    # В docker-compose он не публикуется наружу, поэтому метрики и health доступны
+    # только внутри сети, где живёт Prometheus. На одном порту с публичным API пришлось бы
+    # либо открывать /actuator/prometheus всему интернету, либо городить аутентификацию
+    # для скрейпера, у которого нет способа обновлять JWT.
+    #
+    # Значение по умолчанию рассчитано на запуск из IDE рядом с остальными сервисами:
+    # у каждого своя пара портов (шлюз 8080/9080, insights 8082/9082, уведомления 8083/9083).
+    # В docker-compose каждый живёт в своём контейнере и слушает 8080/8081.
+    port: ${MANAGEMENT_PORT:9082}
+
+  endpoints:
+    web:
+      exposure:
+        # Перечислены поимённо. Значение * открыло бы и heapdump с threaddump —
+        # дамп кучи содержит всё, что было в памяти, включая пароли из запросов.
+        include: health,info,prometheus
+
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        # Разделяет liveness и readiness: первый отвечает «процесс жив»,
+        # второй — «готов принимать трафик». Перезапускать под из-за недоступной
+        # базы не нужно, а вот убрать его из балансировки — нужно.
+        enabled: true
+
+  # Индикатор здоровья MongoDB привязан к тем же переменным окружения,
+  # что и сами модули. Иначе выключенное хранилище утягивало бы общий статус в DOWN:
+  # автоконфигурация создаёт индикатор по факту наличия клиента в classpath, а клиент
+  # там есть всегда. Readiness-проба при этом отвечала бы «не готов» на совершенно
+  # исправное приложение.
+  #
+  # Cassandra, Neo4j и ClickHouse в этом списке отсутствуют не по недосмотру: их клиенты
+  # создаются нашими конфигурациями, и автоматических индикаторов для них не появляется.
+  health:
+    # Ключ именно mongodb, а не mongo: в Spring Boot 4 старое имя объявлено удалённым.
+    # Ошибки при этом не возникает, значение просто игнорируется — индикатор остаётся
+    # включённым, минуту ждёт недоступный MongoDB и роняет общий статус в DOWN.
+    mongodb:
+      enabled: ${STORE_MONGO_ENABLED:false}
+
+  metrics:
+    tags:
+      # Общий тег на все метрики: без него метрики нескольких приложений
+      # в одном Prometheus невозможно различить.
+      application: ${spring.application.name}
+    distribution:
+      # Гистограммы по длительности HTTP-запросов, чтобы считались перцентили.
+      # Без них доступен только средний отклик, а он скрывает как раз то,
+      # что интересно: медленный хвост.
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  # 8080 занят шлюзом: снаружи все запросы идут через него. Монолит слушает свой порт
+  # и при запуске из IDE доступен напрямую — для отладки в обход шлюза.
+  port: ${SERVER_PORT:8082}
+
+  # Значение по умолчанию — immediate: при SIGTERM приложение обрывает всё на середине.
+  # Для этого сервиса это означает недообработанный запрос, слушателя Kafka, не успевшего
+  # зафиксировать офсет, и публикатор outbox, остановленный между отправкой в брокер
+  # и отметкой в базе. Dockerfile специально написан так, чтобы SIGTERM дошёл до JVM
+  # (форма exec в ENTRYPOINT) — без graceful это старание пропадает впустую.
+  shutdown: graceful
+
+logging:
+  # Отдельное свойство, а не переопределение всего шаблона: Boot подставляет correlation
+  # в стандартный формат сам, и остальная его часть — цвета, обрезка имени класса —
+  # остаётся нетронутой. Переписав шаблон целиком, это пришлось бы поддерживать руками.
+  #
+  # Прочерк вместо пустоты у обоих значений намеренный: строка лога из фонового потока
+  # не имеет метки запроса, и по прочерку это видно сразу, а не выглядит сбоем разметки.
+  pattern:
+    correlation: "[${spring.application.name:},%X{correlationId:-},%X{userId:-}] "
+
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG

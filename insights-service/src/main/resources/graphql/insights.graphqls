@@ -1,0 +1,114 @@
+"""
+Данные для экранов клиента из нескольких источников сразу: ресторан — из каталога (gRPC),
+рейтинг и отзывы — из MongoDB, блюда — из графа заказов в Neo4j, продажи — из ClickHouse.
+Клиент берёт одним запросом ровно те поля, которые нужны экрану, — и только они
+и вычисляются: незапрошенный рейтинг не читает MongoDB, незапрошенные блюда не ходят в граф.
+
+Деньги — строками в десятичной записи («450.00»), даты — строками ISO-8601 («2026-10-12»):
+так их не исказит ни один клиент.
+"""
+type Query {
+    "Ресторан в любом статусе. Нет такого — null."
+    restaurant(id: ID!): Restaurant
+
+    "Блюдо — точка входа в граф «с этим заказывают»."
+    dish(id: ID!): Dish!
+
+    "Рекомендации текущему пользователю по графу заказов. Нужен токен."
+    myRecommendations(limit: Int = 10): [RecommendedDish!]
+}
+
+type Restaurant {
+    id: ID!
+    name: String!
+    city: String!
+    "Принимает ли ресторан заказы прямо сейчас."
+    active: Boolean!
+
+    # Поля из других хранилищ — nullable намеренно. Ошибка в GraphQL поднимается до
+    # ближайшего поля, которое может быть null: будь они ненулевыми, отказ в правах на продажи
+    # или выключенный модуль отзывов обнулили бы весь ресторан вместе с публичными полями.
+
+    "Сводка оценок. Публичная."
+    rating: Rating
+
+    "Отзывы, новые первыми. Публичные."
+    reviews(page: Int = 0, size: Int = 10): ReviewPage
+
+    "Что в этом ресторане заказывают чаще всего. Публичное."
+    popularDishes(limit: Int = 5): [RecommendedDish!]
+
+    "Продажи по дням. Только управляющему ресторана и администратору."
+    sales(from: String!, to: String!): SalesReport
+}
+
+type Rating {
+    total: Int!
+    "Средняя оценка; 0, если отзывов ещё нет."
+    average: Float!
+    histogram: [RatingBucket!]!
+    topTags: [TagCount!]!
+}
+
+type RatingBucket {
+    stars: Int!
+    count: Int!
+}
+
+type TagCount {
+    tag: String!
+    count: Int!
+}
+
+type ReviewPage {
+    items: [Review!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+}
+
+type Review {
+    id: ID!
+    orderId: ID!
+    rating: Int!
+    comment: String
+    tags: [String!]!
+    dishes: [DishRating!]!
+    createdAt: String!
+}
+
+type DishRating {
+    menuItemId: ID!
+    menuItemName: String
+    rating: Int!
+}
+
+type Dish {
+    id: ID!
+    "Что заказывают в одном заказе с этим блюдом."
+    orderedTogether(limit: Int = 5): [RecommendedDish!]
+}
+
+type RecommendedDish {
+    menuItemId: ID!
+    name: String!
+    restaurantId: ID!
+    "Сколько заказов или людей подтвердили связь; нужен для порядка, а не для сравнения."
+    score: Int!
+}
+
+type SalesReport {
+    from: String!
+    to: String!
+    totalOrders: Int!
+    totalRevenue: String!
+    days: [DailySales!]!
+}
+
+type DailySales {
+    day: String!
+    orders: Int!
+    revenue: String!
+    averageCheck: String!
+}

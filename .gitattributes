@@ -2,3 +2,4 @@
 *.cmd text eol=crlf
 # Скрипты выполняются внутри Linux-контейнеров: CRLF там ломает shebang и каждую строку.
 *.sh text eol=lf
+**/rabbitmq/enabled_plugins text eol=lf

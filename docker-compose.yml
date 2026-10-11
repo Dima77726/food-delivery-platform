@@ -51,13 +51,20 @@ services:
       IDENTITY_DB_NAME: ${IDENTITY_DB_NAME:-identity}
       IDENTITY_DB_USER: ${IDENTITY_DB_USER:?задайте IDENTITY_DB_USER в .env}
       IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?задайте IDENTITY_DB_PASSWORD в .env}
+      ORDER_DB_NAME: ${ORDER_DB_NAME:-orders}
+      ORDER_DB_USER: ${ORDER_DB_USER:?задайте ORDER_DB_USER в .env}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?задайте ORDER_DB_PASSWORD в .env}
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
+      PAYMENT_DB_USER: ${PAYMENT_DB_USER:?задайте PAYMENT_DB_USER в .env}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?задайте PAYMENT_DB_PASSWORD в .env}
     volumes:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
 
   # Сертификаты для взаимного TLS между сервисами: свой CA и по сертификату на сервис.
-  # Одноразовый контейнер: выпускает их в общий том при первом запуске и больше ничего
-  # не трогает. Пересоздать — удалить том food_delivery_grpc_certs.
+  # Одноразовый контейнер: при первом запуске выпускает CA и все сертификаты, при следующих —
+  # только недостающие (например, для нового сервиса). Пересоздать всё — удалить том
+  # food_delivery_grpc_certs.
   #
   # Образ postgres:16 взят ради openssl, который в нём уже есть: отдельный образ ради одной
   # команды — ещё одна загрузка без пользы.
@@ -68,7 +75,31 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service"]
+
+  # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
+  # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
+  # и сохраняет идентификаторы. Повторный запуск безопасен:
+  #   docker compose --profile full up orders-data-migration
+  orders-data-migration:
+    profiles: ["full"]
+    image: postgres:16
+    container_name: food-delivery-orders-data-migration
+    restart: "no"
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
+      ORDER_DB_NAME: ${ORDER_DB_NAME:-orders}
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
+    volumes:
+      - ./docker/migrations/orders-from-monolith.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
 
   redis:
     image: redis:7-alpine
@@ -126,6 +157,33 @@ services:
     ports:
       - "${KAFKA_PORT:-9094}:9094"
 
+  # Брокер очередей. Kafka — журнал событий («что произошло»), RabbitMQ — очереди задач
+  # («сделай это»): подтверждение каждого сообщения, повтор через TTL и dead-letter exchange,
+  # приоритеты. Сейчас через него идёт рассылка уведомлений.
+  #
+  # Плагины — из docker/rabbitmq/enabled_plugins: интерфейс управления (порт 15672),
+  # метрики для Prometheus (15692) и STOMP — для трека курьера по WebSocket.
+  rabbitmq:
+    image: rabbitmq:4.1.4-management
+    container_name: food-delivery-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?задайте RABBITMQ_USER в .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?задайте RABBITMQ_PASSWORD в .env}
+      TZ: ${TZ}
+    volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - food_delivery_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_PORT:-15672}:15672"
+
   # Веб-интерфейс к брокеру: топики, партиции, лаг групп, чтение и отправка сообщений.
   #
   # Нужен ровно за тем же, зачем Grafana рядом с Prometheus. Kafka не отдаёт ничего
@@ -168,13 +226,17 @@ services:
   # Вместо dev можно взять sha конкретного коммита — так поднимается ровно та версия.
   #
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
-  #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
+  #   insights-service     — отзывы, аналитика, рекомендации, GraphQL (всё, что осталось от монолита);
   #   catalog-service      — рестораны, меню, поиск;
   #   identity-service     — пользователи, вход, выпуск токенов;
-  #   notification-service — уведомления.
+  #   notification-service — уведомления;
+  #   order-service        — корзина, заказ, доставка, оркестратор саги оплаты;
+  #   payment-service      — платежи: списания и возвраты по командам саги.
   #
   # Синхронные вызовы между сервисами — gRPC на порту 9090 внутри сети: корзина спрашивает
-  # у каталога ресторан и блюдо, каталог и монолит у identity-service — права на ресторан.
+  # у каталога ресторан и блюдо; каталог и сервис заказов у identity-service — права
+  # на ресторан; монолит у сервиса заказов — заказы и доставки для отзывов, рекомендаций
+  # и трека. Оплата — асинхронно, сагой через Kafka: команды и исходы.
   #
   # Токены подписывает только identity-service закрытым RSA-ключом. Остальные проверяют их
   # открытым ключом из его JWKS — общего секрета у сервисов больше нет.
@@ -193,15 +255,15 @@ services:
   # поедет в CI и на стенд. Поэтому не удалён, а спрятан:
   #   docker compose up -d                        — только инфраструктура
   #   docker compose --profile full up -d --build — весь стек
-  core:
+  insights-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-core:${IMAGE_TAG:-local}
+    image: ghcr.io/dima77726/food-delivery-insights-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        MODULE: service
-    container_name: food-delivery-core
+        MODULE: insights-service
+    container_name: food-delivery-insights-service
     restart: unless-stopped
     # По умолчанию Docker добивает контейнер через 10 секунд после SIGTERM. Приложение
     # завершается штатно и ждёт текущую работу до 20 секунд (spring.lifecycle
@@ -212,11 +274,6 @@ services:
       grpc-certs:
         condition: service_completed_successfully
       kafka:
-        condition: service_healthy
-      postgres:
-        # Именно service_healthy, а не service_started: контейнер с Postgres поднимается
-        # за долю секунды, а принимать соединения начинает позже. Со service_started
-        # Liquibase падал бы на старте примерно в половине запусков.
         condition: service_healthy
     # Список, а не отображение: только в этой форме запись вида `- NEO4J_PASSWORD` без значения
     # означает «пробросить переменную, если она задана, и не задавать её иначе».
@@ -234,22 +291,18 @@ services:
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
-      # Внутри сети compose обращение идёт по имени сервиса и всегда на порт 5432 —
-      # проброс на хост здесь ни при чём.
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # Основной базы у сервиса нет: отзывы — в MongoDB, граф — в Neo4j, витрина — в ClickHouse.
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      # gRPC-клиенты: каталог (ресторан и блюдо) и сервис пользователей (права на ресторан).
+      # gRPC-клиенты: каталог (название ресторана для GraphQL), сервис заказов (заказ для отзыва
+      # и графа) и сервис пользователей (права на ресторан для аналитики).
       - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
+      - ORDER_GRPC_ADDRESS=static://order-service:9090
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
-      # Взаимный TLS на gRPC: свой сертификат (CN=core) и CA, которому верить.
+      # Взаимный TLS на gRPC: свой сертификат (CN=insights-service) и CA, которому верить.
       - SPRING_PROFILES_ACTIVE=grpc-tls
-      - GRPC_TLS_CERTIFICATE=file:/certs/core.crt
-      - GRPC_TLS_PRIVATE_KEY=file:/certs/core.key
+      - GRPC_TLS_CERTIFICATE=file:/certs/insights-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/insights-service.key
       - GRPC_TLS_CA=file:/certs/ca.crt
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
@@ -257,7 +310,7 @@ services:
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
-      # Адреса пяти дополнительных хранилищ. Проставлены всегда, а работают только вместе
+      # Адреса трёх хранилищ сервиса. Проставлены всегда, а работают только вместе
       # с соответствующим STORE_*_ENABLED — сами по себе они ничего не включают.
       #
       # depends_on на эти сервисы намеренно нет: Compose отказывается стартовать, если
@@ -266,7 +319,6 @@ services:
       # инфраструктуру, потом приложение.
       - MONGO_HOST=mongo
       - MONGO_PORT=27017
-      - CASSANDRA_CONTACT_POINTS=cassandra:9042
       - NEO4J_URI=bolt://neo4j:7687
       - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PORT=8123
@@ -274,7 +326,6 @@ services:
       # Выключатели и секреты хранилищ пробрасываются без значений: не заданы в .env —
       # применится значение по умолчанию из application.yml, то есть выключено.
       - STORE_MONGO_ENABLED
-      - STORE_CASSANDRA_ENABLED
       - STORE_NEO4J_ENABLED
       - STORE_CLICKHOUSE_ENABLED
       - NEO4J_USERNAME
@@ -282,7 +333,7 @@ services:
       - CLICKHOUSE_DB
       - CLICKHOUSE_USER
       - CLICKHOUSE_PASSWORD
-    # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза монолит
+    # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза insights-service
     # удобнее запускать из IDE — там он слушает localhost:8082.
 
   catalog-service:
@@ -347,6 +398,10 @@ services:
         condition: service_completed_successfully
       postgres-provision:
         condition: service_completed_successfully
+      # Журнал аудита уезжает в Kafka. Вход в систему от брокера не зависит — журнал
+      # копится в таблице, — но стартовать без него незачем: в стеке он есть всегда.
+      kafka:
+        condition: service_healthy
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
@@ -366,9 +421,124 @@ services:
       # Закрытый ключ подписи токенов. Есть только у этого сервиса — в этом весь смысл RS256.
       - JWT_PRIVATE_KEY
       - JWT_KEY_ID
+      - JWT_ACCESS_TOKEN_TTL=${JWT_ACCESS_TOKEN_TTL:-PT15M}
+      - JWT_REFRESH_TOKEN_TTL=${JWT_REFRESH_TOKEN_TTL:-P30D}
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
+
+  order-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-order-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: order-service
+    container_name: food-delivery-order-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      postgres-provision:
+        condition: service_completed_successfully
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - GRPC_PORT=9090
+      # gRPC-клиенты: каталог (ресторан и блюдо для корзины) и сервис пользователей (права на ресторан).
+      - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      # Взаимный TLS на gRPC: свой сертификат (CN=order-service) и CA, которому верить.
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/order-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/order-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      - ORDER_DB_HOST=postgres
+      - ORDER_DB_PORT=5432
+      - ORDER_DB_NAME=${ORDER_DB_NAME:-orders}
+      - ORDER_DB_USER
+      - ORDER_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
+      - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  payment-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-payment-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: payment-service
+    container_name: food-delivery-payment-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Ни одного синхронного соседа: команды приходят из Kafka, исходы уходят туда же.
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - PAYMENT_DB_HOST=postgres
+      - PAYMENT_DB_PORT=5432
+      - PAYMENT_DB_NAME=${PAYMENT_DB_NAME:-payments}
+      - PAYMENT_DB_USER
+      - PAYMENT_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  tracking-service:
+    profiles: ["full"]
+    image: ghcr.io/dima77726/food-delivery-tracking-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: tracking-service
+    container_name: food-delivery-tracking-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
+      cassandra:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      # Чей заказ и чья доставка — спрашивает у сервиса заказов по gRPC.
+      - ORDER_GRPC_ADDRESS=static://order-service:9090
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/tracking-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/tracking-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+      # Живой трек: подписки держит RabbitMQ через свой STOMP-плагин, а не память процесса.
+      - TRACKING_RELAY_ENABLED=true
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_STOMP_PORT=61613
+      - RABBITMQ_USER
+      - RABBITMQ_PASSWORD
+      - TRACKING_ALLOWED_ORIGINS=${TRACKING_ALLOWED_ORIGINS:-http://localhost:*}
+      - TZ=${TZ}
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
   notification-service:
     profiles: ["full"]
@@ -384,6 +554,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       postgres-provision:
         # База сервиса существует только после того, как отработал провижининг.
         condition: service_completed_successfully
@@ -396,6 +568,11 @@ services:
       - NOTIFICATION_DB_USER
       - NOTIFICATION_DB_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Рассылка идёт через очереди RabbitMQ: по очереди на канал, повторы через TTL.
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER
+      - RABBITMQ_PASSWORD
       - TZ=${TZ}
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
@@ -417,10 +594,14 @@ services:
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      - CORE_SERVICE_URL=http://core:8080
+      - INSIGHTS_SERVICE_URL=http://insights-service:8080
       - CATALOG_SERVICE_URL=http://catalog-service:8080
       - IDENTITY_SERVICE_URL=http://identity-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
+      - ORDER_SERVICE_URL=http://order-service:8080
+      - PAYMENT_SERVICE_URL=http://payment-service:8080
+      - TRACKING_SERVICE_URL=http://tracking-service:8080
+      - TRACKING_WS_URL=ws://tracking-service:8080
       - TZ=${TZ}
     ports:
       # Единственный опубликованный порт приложения. Служебный 8081 остаётся внутри сети
@@ -463,8 +644,10 @@ services:
     ports:
       - "${MONGO_PORT:-27017}:27017"
 
+  # Трек курьера. Единственное хранилище tracking-service и обязательное для него, поэтому
+  # поднимается и с профилем full, а не только с stores.
   cassandra:
-    profiles: ["stores"]
+    profiles: ["stores", "full"]
     image: cassandra:5.0
     container_name: food-delivery-cassandra
     restart: unless-stopped
@@ -620,6 +803,7 @@ services:
 volumes:
   food_delivery_postgres_data:
   food_delivery_kafka_data:
+  food_delivery_rabbitmq_data:
   food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:

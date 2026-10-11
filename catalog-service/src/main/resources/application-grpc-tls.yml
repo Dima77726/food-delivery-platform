@@ -33,5 +33,5 @@ app:
   grpc:
     security:
       mtls: true
-      # CatalogService нужен только корзине монолита.
-      allowed-clients: core
+      # Корзине (сервис заказов) — ресторан и блюдо, insights-service — название ресторана для GraphQL.
+      allowed-clients: order-service,insights-service

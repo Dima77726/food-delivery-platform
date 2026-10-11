@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 003-add-restaurant-description
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/003-add-restaurant-description.sql
-            relativeToChangelogFile: true
-            splitStatements: true

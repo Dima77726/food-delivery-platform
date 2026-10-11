@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 029-drop-moved-tables
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/029-drop-moved-tables.sql
-            relativeToChangelogFile: true
-            splitStatements: true

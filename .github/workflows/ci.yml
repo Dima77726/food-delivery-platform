@@ -46,10 +46,12 @@ jobs:
             libs/grpc-contracts:
               - *build
               - 'libs/grpc-contracts/**'
-            service:
+            insights-service:
               - *build
               - 'libs/**'
-              - 'service/**'
+              - 'openapi/**'
+              - 'client/**'
+              - 'insights-service/**'
             notification-service:
               - *build
               - 'libs/event-contracts/**'
@@ -64,13 +66,26 @@ jobs:
               - *build
               - 'libs/grpc-contracts/**'
               - 'identity-service/**'
+            order-service:
+              - *build
+              - 'libs/**'
+              - 'order-service/**'
+            payment-service:
+              - *build
+              - 'libs/event-contracts/**'
+              - 'payment-service/**'
+            tracking-service:
+              - *build
+              - 'libs/grpc-contracts/**'
+              - 'openapi/**'
+              - 'client/**'
+              - 'tracking-service/**'
             api-gateway:
               - *build
               - 'api-gateway/**'
             client:
               - *build
               - 'openapi/**'
-              - 'service/**'
               - 'client/**'
 
   build:

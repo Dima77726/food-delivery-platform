@@ -33,13 +33,19 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            service: &build
-              - 'pom.xml'
-              - 'mvnw'
-              - '.mvn/**'
-              - 'Dockerfile'
-              - 'libs/**'
-              - 'service/**'
+            # Якорь — на вложенном списке общих файлов, а не на списке шлюза целиком:
+            # иначе правка шлюза пересобирала бы образы всех сервисов.
+            api-gateway:
+              - &build
+                - 'pom.xml'
+                - 'mvnw'
+                - '.mvn/**'
+                - 'Dockerfile'
+                - 'libs/**'
+              - 'api-gateway/**'
+            insights-service:
+              - *build
+              - 'insights-service/**'
             notification-service:
               - *build
               - 'notification-service/**'
@@ -50,9 +56,15 @@ jobs:
             identity-service:
               - *build
               - 'identity-service/**'
-            api-gateway:
+            order-service:
               - *build
-              - 'api-gateway/**'
+              - 'order-service/**'
+            payment-service:
+              - *build
+              - 'payment-service/**'
+            tracking-service:
+              - *build
+              - 'tracking-service/**'
 
   image:
     name: Образ ${{ matrix.service }}
@@ -82,7 +94,6 @@ jobs:
         run: |
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           service="${{ matrix.service }}"
-          [ "$service" = "service" ] && service="core"
           echo "image=ghcr.io/${owner}/food-delivery-${service}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6

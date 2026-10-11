@@ -5,6 +5,8 @@ import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.grpc.catalog.v1.CatalogServiceGrpc;
 import com.dima.fooddelivery.grpc.catalog.v1.GetActiveRestaurantRequest;
 import com.dima.fooddelivery.grpc.catalog.v1.GetAvailableMenuItemRequest;
+import com.dima.fooddelivery.grpc.catalog.v1.GetRestaurantRequest;
+import com.dima.fooddelivery.grpc.catalog.v1.RestaurantInfo;
 import com.dima.fooddelivery.grpc.catalog.v1.MenuItemSnapshot;
 import com.dima.fooddelivery.grpc.catalog.v1.RestaurantSummary;
 import com.dima.fooddelivery.menu.service.MenuService;
@@ -52,6 +54,20 @@ public class CatalogGrpcService extends CatalogServiceGrpc.CatalogServiceImplBas
                     .setId(restaurant.getId())
                     .setName(restaurant.getName())
                     .setCity(restaurant.getCity())
+                    .build();
+        });
+    }
+
+    @Override
+    public void getRestaurant(GetRestaurantRequest request, StreamObserver<RestaurantInfo> responseObserver) {
+        respond(responseObserver, () -> {
+            Restaurant restaurant = restaurantService.requireRestaurant(request.getRestaurantId());
+
+            return RestaurantInfo.newBuilder()
+                    .setId(restaurant.getId())
+                    .setName(restaurant.getName())
+                    .setCity(restaurant.getCity())
+                    .setActive(restaurant.isActive())
                     .build();
         });
     }
