@@ -68,17 +68,16 @@ spring:
   # Кэш витрины (Redis) и поиск (Elasticsearch) уехали вместе с каталогом в catalog-service.
 
   grpc:
-    server:
-      # Права на рестораны для каталога — см. RestaurantAccessGrpcService. Отдельный порт:
-      # gRPC живёт на HTTP/2. По умолчанию рассчитан на запуск из IDE рядом с остальными
-      # сервисами, в docker-compose переопределяется на 9090.
-      port: ${GRPC_PORT:7082}
     client:
       channels:
         # Каталог: корзина спрашивает у него ресторан и блюдо.
         catalog:
           address: ${CATALOG_GRPC_ADDRESS:static://localhost:7084}
           # Внутри сети сервисов без TLS. Следующий шаг — mTLS между сервисами.
+          negotiation-type: plaintext
+        # Сервис пользователей: права на рестораны для заказов ресторана, доставки, аналитики.
+        identity:
+          address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7085}
           negotiation-type: plaintext
 
   kafka:
@@ -168,6 +167,8 @@ app:
     catalog:
       # Дедлайн вызова каталога. Без него у gRPC-вызова ожидание бесконечно.
       deadline: ${CATALOG_GRPC_DEADLINE:PT2S}
+    identity:
+      deadline: ${IDENTITY_GRPC_DEADLINE:PT2S}
 
   outbox:
     # Пауза между разборами очереди. Две секунды — компромисс: событие доезжает до
@@ -176,17 +177,11 @@ app:
     publish-enabled: ${OUTBOX_PUBLISH_ENABLED:true}
 
   security:
-    # Первый администратор. Пустые значения по умолчанию — намеренно: без переменных окружения
-    # учётка не создаётся вовсе, и в репозитории не оказывается ни одного пароля.
-    bootstrap-admin:
-      email: ${APP_ADMIN_EMAIL:}
-      password: ${APP_ADMIN_PASSWORD:}
     jwt:
-      # Значения по умолчанию нет намеренно: секрет подписи токенов не должен лежать
-      # в репозитории даже в виде «только для разработки». Длину проверяет JwtSecretValidator.
-      secret: ${JWT_SECRET}
+      # Токены выпускает identity-service, монолит их только проверяет — открытым ключом из
+      # JWKS. Секрета подписи у монолита нет, и подделать токен с его стороны невозможно.
       issuer: ${JWT_ISSUER:food-delivery-platform}
-      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
 
   # --- Дополнительные хранилища -------------------------------------------------------------
   #

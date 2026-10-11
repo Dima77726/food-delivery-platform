@@ -20,8 +20,9 @@
         </dependency>
 
         <!--
-            gRPC в обе стороны. Клиент — к каталогу: корзина спрашивает ресторан и блюдо.
-            Сервер — для каталога: права на рестораны остались у владельца пользователей.
+            gRPC — только клиент. К каталогу: корзина спрашивает ресторан и блюдо. К сервису
+            пользователей: права на ресторан. Своего gRPC-сервера у монолита больше нет —
+            права на рестораны уехали вместе с пользователями в identity-service.
         -->
         <dependency>
             <groupId>com.dima</groupId>
@@ -30,7 +31,7 @@
 
         <dependency>
             <groupId>org.springframework.grpc</groupId>
-            <artifactId>spring-grpc-spring-boot-starter</artifactId>
+            <artifactId>spring-grpc-client-spring-boot-starter</artifactId>
         </dependency>
 
         <dependency>

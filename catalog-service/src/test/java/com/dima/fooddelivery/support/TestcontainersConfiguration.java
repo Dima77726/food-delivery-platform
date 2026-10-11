@@ -6,6 +6,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -41,8 +42,19 @@ public class TestcontainersConfiguration {
     }
 
     @Bean
-    TestJwt testJwt(org.springframework.core.env.Environment environment) {
-        return new TestJwt(environment.getRequiredProperty("app.security.jwt.secret"));
+    TestJwt testJwt() {
+        return new TestJwt();
+    }
+
+    /**
+     * Декодер с открытым ключом {@link TestJwt} вместо JWKS сервиса пользователей — его в тестах
+     * нет. {@code @Primary}: настоящий декодер в контексте тоже есть, но JWKS он скачивает лениво
+     * и до первого токена никуда не ходит.
+     */
+    @Bean
+    @Primary
+    JwtDecoder testJwtDecoder() {
+        return TestJwt.decoder();
     }
 
     @Bean

@@ -60,9 +60,9 @@ spring:
       port: ${GRPC_PORT:7084}
     client:
       channels:
-        # Владелец пользователей и прав на рестораны. Сейчас это монолит.
+        # Владелец пользователей и прав на рестораны — identity-service.
         identity:
-          address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7082}
+          address: ${IDENTITY_GRPC_ADDRESS:static://localhost:7085}
           # Внутри сети сервисов без TLS. Следующий шаг — mTLS, см. CatalogGrpcService.
           negotiation-type: plaintext
 
@@ -73,9 +73,9 @@ app:
 
   security:
     jwt:
-      # Тот же секрет, которым монолит подписывает токены. Значения по умолчанию нет.
-      secret: ${JWT_SECRET}
+      # Открытые ключи сервиса пользователей. Секрета подписи у каталога нет.
       issuer: ${JWT_ISSUER:food-delivery-platform}
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
 
   stores:
     elasticsearch:

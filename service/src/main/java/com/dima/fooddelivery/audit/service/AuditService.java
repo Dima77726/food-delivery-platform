@@ -5,8 +5,6 @@ import com.dima.fooddelivery.audit.domain.AuditOutcome;
 import com.dima.fooddelivery.audit.persistence.AuditLogRepository;
 import com.dima.fooddelivery.common.security.CurrentUser;
 import com.dima.fooddelivery.common.web.RequestContext;
-import com.dima.fooddelivery.user.domain.AppUser;
-import com.dima.fooddelivery.user.persistence.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,7 +25,6 @@ import java.util.List;
 public class AuditService {
 
     private final AuditLogRepository auditLogRepository;
-    private final AppUserRepository appUserRepository;
     private final CurrentUser currentUser;
 
     @Transactional
@@ -40,11 +37,11 @@ public class AuditService {
     ) {
         Long actorId = currentUser.id().orElse(null);
 
-        // E-mail сохраняется на момент действия. Джойнить app_user при чтении журнала нельзя:
-        // пользователя могут удалить, а запись обязана остаться читаемой.
-        String actorEmail = actorId == null
-                ? null
-                : appUserRepository.findById(actorId).map(AppUser::getEmail).orElse(null);
+        // E-mail сохраняется на момент действия: пользователя могут переименовать или удалить,
+        // а запись обязана остаться читаемой. Берётся из токена — пользователи живут в другом
+        // сервисе, и спрашивать его на каждую запись журнала значило бы добавить сетевой вызов
+        // на пути каждого заказа.
+        String actorEmail = actorId == null ? null : currentUser.email().orElse(null);
 
         // Метка берётся из контекста, а не из аргументов — по той же причине, что и актор:
         // переданная вручную, она рано или поздно окажется не от того запроса.

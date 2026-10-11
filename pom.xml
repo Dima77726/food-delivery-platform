@@ -13,6 +13,7 @@
           service              — монолит (core): всё, что ещё не вынесено;
           notification-service — уведомления, первый вынесенный сервис;
           catalog-service      — рестораны, меню и поиск;
+          identity-service     — пользователи, вход, выпуск токенов (RS256 + JWKS);
           api-gateway          — единая точка входа, маршрутизирует запросы по сервисам;
           libs/event-contracts — контракты событий Kafka, общие для продюсера и потребителей;
           libs/grpc-contracts  — контракты синхронных вызовов между сервисами (gRPC);
@@ -44,6 +45,7 @@
         <module>service</module>
         <module>notification-service</module>
         <module>catalog-service</module>
+        <module>identity-service</module>
         <module>api-gateway</module>
         <module>client</module>
     </modules>
@@ -91,6 +93,15 @@
                 <groupId>com.dima</groupId>
                 <artifactId>grpc-contracts</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <!--
+                protobuf-java явно: BOM spring-grpc задаёт его версию свойством, но не управляет
+                артефактом, и библиотека контрактов без этой строки не знала бы, какую версию взять.
+            -->
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf-java.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springframework.grpc</groupId>

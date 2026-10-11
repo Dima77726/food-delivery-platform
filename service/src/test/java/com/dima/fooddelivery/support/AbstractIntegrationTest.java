@@ -36,4 +36,7 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected TestDataFactory testData;
+
+    @Autowired
+    protected TestJwt jwt;
 }

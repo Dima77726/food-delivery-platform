@@ -38,6 +38,14 @@ scrape_configs:
         labels:
           service: catalog-service
 
+  - job_name: identity-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['identity-service:8081', 'host.docker.internal:9085']
+        labels:
+          service: identity-service
+
   - job_name: notification-service
     metrics_path: /actuator/prometheus
     scrape_interval: 5s

@@ -11,7 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -20,18 +20,16 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-
 /**
- * Каталог — resource server: проверяет токены, выпущенные монолитом, сам.
+ * Каталог — resource server: проверяет токены, выпущенные identity-service, сам.
  *
  * <p>Почему не только шлюз — см. такой же класс в notification-service: до сервиса можно
- * достучаться в обход шлюза. Почему HS256 временно — там же.
+ * достучаться в обход шлюза. Токены подписаны RS256, открытый ключ — из JWKS
+ * identity-service.
  *
  * <p>В отличие от сервиса уведомлений, здесь нужны роли: создавать рестораны могут только
  * владельцы и администраторы. Роли берутся из claim {@code roles} с префиксом {@code ROLE_} —
- * ровно так их кладёт в токен монолит.
+ * ровно так их кладёт в токен сервис пользователей.
  *
  * <p>Права на конкретный ресторан проверяет {@link ResourceAccessGuard} через gRPC: в токене
  * их нет, и правильно — список ресторанов владельца меняется чаще, чем живёт токен.
@@ -44,9 +42,6 @@ public class SecurityConfig {
 
     static final String ROLES_CLAIM = "roles";
     static final String ROLE_PREFIX = "ROLE_";
-
-    /** HS256 требует ключ не короче 256 бит. */
-    static final int MIN_SECRET_LENGTH_BYTES = 32;
 
     /** Витрина и поиск видны без входа: это чтение публичного каталога. */
     private static final String[] PUBLIC_GET_PATHS = {
@@ -94,10 +89,15 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * Проверка подписи по JWKS сервиса пользователей и издателя. JWKS скачивается лениво,
+     * при первом токене, и перечитывается на незнакомый {@code kid} — смена ключа
+     * не требует перезапуска. Принимается только RS256.
+     */
     @Bean
     JwtDecoder jwtDecoder() {
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(secretKey())
-                .macAlgorithm(MacAlgorithm.HS256)
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwtProperties.jwkSetUri())
+                .jwsAlgorithm(SignatureAlgorithm.RS256)
                 .build();
 
         decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(jwtProperties.issuer()));
@@ -115,19 +115,5 @@ public class SecurityConfig {
         converter.setJwtGrantedAuthoritiesConverter(authoritiesConverter);
 
         return converter;
-    }
-
-    private SecretKeySpec secretKey() {
-        String secret = jwtProperties.secret();
-
-        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_LENGTH_BYTES) {
-            throw new IllegalStateException(
-                    "JWT_SECRET должен быть задан и быть не короче " + MIN_SECRET_LENGTH_BYTES
-                            + " байт: этого требует HS256. Значение обязано совпадать с тем, "
-                            + "которым монолит подписывает токены"
-            );
-        }
-
-        return new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
     }
 }

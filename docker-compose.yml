@@ -48,6 +48,9 @@ services:
       CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
       CATALOG_DB_USER: ${CATALOG_DB_USER:?задайте CATALOG_DB_USER в .env}
       CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?задайте CATALOG_DB_PASSWORD в .env}
+      IDENTITY_DB_NAME: ${IDENTITY_DB_NAME:-identity}
+      IDENTITY_DB_USER: ${IDENTITY_DB_USER:?задайте IDENTITY_DB_USER в .env}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?задайте IDENTITY_DB_PASSWORD в .env}
     volumes:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
@@ -76,6 +79,26 @@ services:
       CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
     volumes:
       - ./docker/migrations/catalog-from-monolith.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+
+  # Тот же одноразовый перенос — для пользователей: app_user, роли и права на рестораны
+  # из базы монолита в базу identity-service, с сохранением идентификаторов.
+  identity-data-migration:
+    image: postgres:16
+    container_name: food-delivery-identity-data-migration
+    restart: "no"
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      MONOLITH_DB_NAME: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
+      MONOLITH_SCHEMA: ${APP_SCHEMA:-food_app}
+      IDENTITY_DB_NAME: ${IDENTITY_DB_NAME:-identity}
+    volumes:
+      - ./docker/migrations/identity-from-monolith.sh:/migrate.sh:ro
     entrypoint: ["sh", "/migrate.sh"]
 
   redis:
@@ -171,10 +194,14 @@ services:
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
   #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
   #   catalog-service      — рестораны, меню, поиск;
+  #   identity-service     — пользователи, вход, выпуск токенов;
   #   notification-service — уведомления.
   #
-  # Монолит и каталог разговаривают друг с другом по gRPC на порту 9090 внутри сети:
-  # корзина спрашивает у каталога ресторан и блюдо, каталог у монолита — права на ресторан.
+  # Синхронные вызовы между сервисами — gRPC на порту 9090 внутри сети: корзина спрашивает
+  # у каталога ресторан и блюдо, каталог и монолит у identity-service — права на ресторан.
+  #
+  # Токены подписывает только identity-service закрытым RSA-ключом. Остальные проверяют их
+  # открытым ключом из его JWKS — общего секрета у сервисов больше нет.
   #
   # Внутри сети все слушают 8080 (API) и 8081 (actuator): у каждого контейнера своё сетевое
   # пространство, и одинаковые порты не конфликтуют. Различные порты по умолчанию в их
@@ -212,14 +239,14 @@ services:
         # за долю секунды, а принимать соединения начинает позже. Со service_started
         # Liquibase падал бы на старте примерно в половине запусков.
         condition: service_healthy
-    # Список, а не отображение: только в этой форме запись вида `- JWT_SECRET` без значения
+    # Список, а не отображение: только в этой форме запись вида `- NEO4J_PASSWORD` без значения
     # означает «пробросить переменную, если она задана, и не задавать её иначе».
     # Значение Compose берёт из .env или из окружения оболочки.
     #
-    # Запись `JWT_SECRET: ${JWT_SECRET:-}` выглядит равнозначной, но ведёт себя иначе:
+    # Запись `NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}` выглядит равнозначной, но ведёт себя иначе:
     # она всегда передаёт переменную, подставляя пустую строку. Для Spring пустая строка —
     # это заданное значение, и вместо понятной ошибки о незаданной переменной приложение
-    # упало бы на пустом ключе подписи.
+    # упало бы на пустом пароле.
     #
     # Форму ${VAR:?...} здесь применять нельзя: Compose разбирает весь файл целиком,
     # до отбора по профилям, и обязательная переменная сервиса под профилем full ломала бы
@@ -235,17 +262,14 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      # gRPC: свой сервер (права на рестораны) и адрес каталога.
-      - GRPC_PORT=9090
+      # gRPC-клиенты: каталог (ресторан и блюдо) и сервис пользователей (права на ресторан).
       - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
-      # Обязательная переменная: без неё приложение не стартует. Держится в .env,
-      # в репозитории её нет и быть не должно.
-      - JWT_SECRET
-      - APP_ADMIN_EMAIL
-      - APP_ADMIN_PASSWORD
+      # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
       # Адреса пяти дополнительных хранилищ. Проставлены всегда, а работают только вместе
       # с соответствующим STORE_*_ENABLED — сами по себе они ничего не включают.
@@ -294,8 +318,8 @@ services:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
-      # Права на рестораны знает монолит — каталог спрашивает его по gRPC.
-      - IDENTITY_GRPC_ADDRESS=static://core:9090
+      # Права на рестораны знает сервис пользователей — каталог спрашивает его по gRPC.
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
       - CATALOG_DB_HOST=postgres
       - CATALOG_DB_PORT=5432
       - CATALOG_DB_NAME=${CATALOG_DB_NAME:-catalog}
@@ -307,7 +331,37 @@ services:
       - ELASTIC_HOST=elasticsearch
       - ELASTIC_PORT=9200
       - STORE_ELASTICSEARCH_ENABLED
-      - JWT_SECRET
+      - TZ=${TZ}
+      # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  identity-service:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: identity-service
+    container_name: food-delivery-identity-service
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - GRPC_PORT=9090
+      - IDENTITY_DB_HOST=postgres
+      - IDENTITY_DB_PORT=5432
+      - IDENTITY_DB_NAME=${IDENTITY_DB_NAME:-identity}
+      - IDENTITY_DB_USER
+      - IDENTITY_DB_PASSWORD
+      # Закрытый ключ подписи токенов. Есть только у этого сервиса — в этом весь смысл RS256.
+      - JWT_PRIVATE_KEY
+      - JWT_KEY_ID
+      - APP_ADMIN_EMAIL
+      - APP_ADMIN_PASSWORD
       - TZ=${TZ}
 
   notification-service:
@@ -335,9 +389,9 @@ services:
       - NOTIFICATION_DB_USER
       - NOTIFICATION_DB_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      # Тот же секрет, что у монолита: сервис проверяет выпущенные им токены.
-      - JWT_SECRET
       - TZ=${TZ}
+      # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
   api-gateway:
     profiles: ["full"]
@@ -357,6 +411,7 @@ services:
       - MANAGEMENT_PORT=8081
       - CORE_SERVICE_URL=http://core:8080
       - CATALOG_SERVICE_URL=http://catalog-service:8080
+      - IDENTITY_SERVICE_URL=http://identity-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
       - TZ=${TZ}
     ports:

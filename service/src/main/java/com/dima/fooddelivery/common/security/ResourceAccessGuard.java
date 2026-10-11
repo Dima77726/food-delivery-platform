@@ -1,7 +1,5 @@
 package com.dima.fooddelivery.common.security;
 
-import com.dima.fooddelivery.user.domain.UserRole;
-import com.dima.fooddelivery.user.persistence.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -20,14 +18,20 @@ import org.springframework.stereotype.Component;
  * клиент подставил бы чужой {@code customerId} и прочитал чужие заказы. Роль CUSTOMER
  * у него при этом есть, так что {@code hasRole} тут не спасает — нужно сверять
  * идентификатор из пути с идентификатором из токена.
+ *
+ * <p>{@link #isSelf} и {@link #isAdmin} решаются по токену, без сетевых вызовов.
+ * {@link #managesRestaurant} — вопрос к сервису пользователей по gRPC: список ресторанов
+ * владельца меняется чаще, чем живёт токен, и класть его в токен нельзя.
  */
 @Slf4j
 @Component("access")
 @RequiredArgsConstructor
 public class ResourceAccessGuard {
 
+    private static final String ADMIN_AUTHORITY = SecurityConfig.ROLE_PREFIX + SecurityConfig.ADMIN_ROLE;
+
     private final CurrentUser currentUser;
-    private final AppUserRepository appUserRepository;
+    private final RestaurantAccessClient restaurantAccessClient;
 
     /** Пользователь запрашивает собственные данные (или это администратор). */
     public boolean isSelf(Long userId) {
@@ -55,7 +59,7 @@ public class ResourceAccessGuard {
         }
 
         return currentUser.id()
-                .map(userId -> appUserRepository.managesRestaurant(userId, restaurantId))
+                .map(userId -> restaurantAccessClient.managesRestaurant(userId, restaurantId))
                 .orElse(false);
     }
 
@@ -68,6 +72,6 @@ public class ResourceAccessGuard {
 
         return authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(UserRole.ADMIN.authority()::equals);
+                .anyMatch(ADMIN_AUTHORITY::equals);
     }
 }
