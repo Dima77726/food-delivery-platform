@@ -398,6 +398,10 @@ services:
         condition: service_completed_successfully
       postgres-provision:
         condition: service_completed_successfully
+      # Журнал аудита уезжает в Kafka. Вход в систему от брокера не зависит — журнал
+      # копится в таблице, — но стартовать без него незачем: в стеке он есть всегда.
+      kafka:
+        condition: service_healthy
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
@@ -421,6 +425,7 @@ services:
       - JWT_REFRESH_TOKEN_TTL=${JWT_REFRESH_TOKEN_TTL:-P30D}
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
 
   order-service:

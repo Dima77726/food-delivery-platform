@@ -2877,7 +2877,7 @@
           ]
         },
         {
-          "name": "Журнал аудита",
+          "name": "Сводный журнал аудита",
           "request": {
             "method": "GET",
             "header": [],
@@ -2900,7 +2900,7 @@
                 }
               ]
             },
-            "description": ""
+            "description": "Действия со всех сервисов: заказы из order-service, администрирование пользователей из identity-service. Отдаёт insights-service; работает при STORE_CLICKHOUSE_ENABLED=true. Записи приезжают с задержкой в несколько секунд."
           },
           "response": [],
           "event": [
@@ -2921,7 +2921,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/admin/audit/resources/{{resourceType}}/{{resourceId}}?limit=100",
+              "raw": "{{baseUrl}}/api/v1/admin/audit?resourceType={{resourceType}}&resourceId={{resourceId}}&limit=100",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2929,12 +2929,30 @@
                 "api",
                 "v1",
                 "admin",
-                "audit",
-                "resources",
-                "{{resourceType}}",
-                "{{resourceId}}"
+                "audit"
               ],
               "query": [
+                {
+                  "key": "service",
+                  "value": "order-service",
+                  "description": "order-service или identity-service",
+                  "disabled": true
+                },
+                {
+                  "key": "resourceType",
+                  "value": "{{resourceType}}",
+                  "description": "ORDER или USER"
+                },
+                {
+                  "key": "resourceId",
+                  "value": "{{resourceId}}"
+                },
+                {
+                  "key": "actorId",
+                  "value": "1",
+                  "description": "Кто выполнил действие",
+                  "disabled": true
+                },
                 {
                   "key": "limit",
                   "value": "100",
@@ -2942,7 +2960,7 @@
                 }
               ]
             },
-            "description": "resourceType — например ORDER или USER, resourceId — его идентификатор."
+            "description": "История ресурса по всем сервисам, свежие сверху. Фильтры service и actorId включаются отдельно и сочетаются с остальными."
           },
           "response": [],
           "event": [

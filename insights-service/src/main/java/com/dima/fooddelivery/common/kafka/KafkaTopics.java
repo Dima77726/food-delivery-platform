@@ -1,5 +1,6 @@
 package com.dima.fooddelivery.common.kafka;
 
+import com.dima.fooddelivery.contracts.audit.AuditTopics;
 import com.dima.fooddelivery.contracts.order.OrderEventTopics;
 
 /**
@@ -29,6 +30,12 @@ public final class KafkaTopics {
      * в собственный DLT и разбирает их сам.
      */
     public static final String ORDER_EVENTS_DLT = ORDER_EVENTS + ".DLT";
+
+    /**
+     * Журнал аудита order-service и identity-service — сырьё сводного журнала. Топика разбора
+     * у него нет: почему — в {@code AuditKafkaConfig}.
+     */
+    public static final String AUDIT_EVENTS = AuditTopics.AUDIT_EVENTS;
 
     private KafkaTopics() {
     }

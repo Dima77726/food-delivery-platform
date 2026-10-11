@@ -40,6 +40,15 @@ public class KafkaConfig {
                 .build();
     }
 
+    /** Журнал аудита. Объявляют его и пишущие сервисы — кто стартует первым, тот и создаст. */
+    @Bean
+    NewTopic auditEventsTopic() {
+        return TopicBuilder.name(KafkaTopics.AUDIT_EVENTS)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
     @Bean
     NewTopic orderEventsDltTopic() {
         return TopicBuilder.name(KafkaTopics.ORDER_EVENTS_DLT)

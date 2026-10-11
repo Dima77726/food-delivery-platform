@@ -147,7 +147,7 @@ app:
       # чтобы точно знать момент, когда она произошла.
       projection-enabled: ${NEO4J_PROJECTION_ENABLED:true}
 
-    # Витрина аналитики заказов.
+    # Витрина аналитики заказов и сводный журнал аудита.
     clickhouse:
       enabled: ${STORE_CLICKHOUSE_ENABLED:false}
       url: jdbc:clickhouse://${CLICKHOUSE_HOST:localhost}:${CLICKHOUSE_PORT:8123}/${CLICKHOUSE_DB:food_delivery}
@@ -157,6 +157,9 @@ app:
       query-timeout: ${CLICKHOUSE_QUERY_TIMEOUT:PT10S}
       # Своя группа потребителей: тот же топик независимо читают уведомления.
       consumer-group: ${CLICKHOUSE_CONSUMER_GROUP:food-delivery-analytics}
+      # Сводный журнал аудита читает свой топик своей группой: его можно перечитать
+      # с начала, не трогая витрину заказов.
+      audit-consumer-group: ${CLICKHOUSE_AUDIT_CONSUMER_GROUP:food-delivery-audit}
 
 
 management:
