@@ -35,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "app.notification.dispatch-enabled=false",
                 // 0 — случайный свободный порт: фиксированный 8081 конфликтовал бы
                 // с локально запущенным приложением и делал сборку зависимой от машины.
                 "management.server.port=0",

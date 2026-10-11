@@ -1,7 +1,7 @@
 package com.dima.fooddelivery.order.service;
 
 import com.dima.fooddelivery.order.domain.OrderStatusChangedEvent;
-import com.dima.fooddelivery.order.integration.OrderIntegrationEvent;
+import com.dima.fooddelivery.contracts.order.OrderIntegrationEvent;
 import com.dima.fooddelivery.common.web.RequestContext;
 import com.dima.fooddelivery.order.persistence.OutboxRepository;
 import lombok.RequiredArgsConstructor;

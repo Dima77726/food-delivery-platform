@@ -7,16 +7,36 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: food-delivery
-    # Actuator отдаёт метрики не по корню, а по своему пути.
+  # По заданию на сервис: у каждого свой набор метрик и свой график падений, а метка job
+  # позволяет фильтровать по сервису без регулярных выражений по адресу.
+  #
+  # Targets парами: в режиме full сервис работает в контейнере (имя:8081), при запуске
+  # из IDE — на хосте, на своём служебном порту. Один из двух будет DOWN, и для локальной
+  # конфигурации это ожидаемо.
+  - job_name: api-gateway
     metrics_path: /actuator/prometheus
     scrape_interval: 5s
     static_configs:
-      # В режиме full работает app:8081; при запуске из IDE — host.docker.internal:8081.
-      # Один из двух targets будет DOWN, и для локальной конфигурации это ожидаемо.
-      - targets: ['app:8081', 'host.docker.internal:8081']
+      - targets: ['api-gateway:8081', 'host.docker.internal:9080']
+        labels:
+          service: api-gateway
+
+  - job_name: food-delivery
+    # Монолит. Имя задания прежнее, чтобы не ломать дашборды, построенные на нём.
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['core:8081', 'host.docker.internal:9082']
         labels:
           service: food-delivery-platform
+
+  - job_name: notification-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['notification-service:8081', 'host.docker.internal:9083']
+        labels:
+          service: notification-service
 
   # Prometheus снимает метрики и с самого себя — полезно, когда непонятно,
   # кто именно тормозит: приложение или сборщик метрик.

@@ -16,8 +16,11 @@ spring:
     # Хост вынесен в переменную: локально это localhost, внутри docker-compose — имя сервиса
     # postgres. Без этого приложение в контейнере искало бы базу внутри самого себя.
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:food_delivery}?currentSchema=${APP_SCHEMA:food_app},public
-    username: ${POSTGRES_USER:food_user}
-    password: ${POSTGRES_PASSWORD:food_password}
+    # Учётные данные без значений по умолчанию: переменная не задана — приложение
+    # не стартует и говорит, какой именно переменной не хватает. Значения живут
+    # в .env (он в .gitignore), образец — в .env.example.
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
     hikari:
@@ -56,11 +59,20 @@ spring:
     # но в базу никто не ходит — весь модуль отзывов включается отдельно, через
     # app.stores.mongo.enabled.
     mongodb:
-      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
+      # Здесь остались только настройки Spring Data. Адрес соединения переехал
+      # в spring.mongodb.uri — см. ниже.
+      #
       # Автоматическое создание индексов выключено намеренно: оно срабатывает при первом
       # разборе доменного типа, то есть на старте приложения и без оглядки на выключатель.
       # Индексы создаёт ReviewIndexes — см. комментарий там.
       auto-index-creation: false
+
+  # Соединение с MongoDB. В Spring Boot 4 настройки подключения переехали из
+  # spring.data.mongodb.* в spring.mongodb.*: под старым префиксом uri молча игнорируется,
+  # клиент уходит на дефолтный mongodb://localhost/test, и отзывы пишутся не в ту базу,
+  # а в контейнере — вообще мимо сервера mongo.
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:food_delivery}
 
   # Поиск по витрине. Клиент так же ленив, как у MongoDB: HTTP-соединение открывается
   # при первом запросе.
@@ -95,7 +107,11 @@ spring:
         max.in.flight.requests.per.connection: 5
 
     consumer:
-      group-id: ${KAFKA_CONSUMER_GROUP:food-delivery-notifications}
+      # Группа монолита. Прежнее значение, food-delivery-notifications, теперь принадлежит
+      # notification-service: он унаследовал её вместе с офсетами и продолжил чтение с того
+      # места, где остановился потребитель уведомлений в монолите. Оставь монолит то же имя —
+      # и два процесса делили бы партиции одной группы, получая каждый лишь часть событий.
+      group-id: ${KAFKA_CONSUMER_GROUP:food-delivery-core}
       # earliest, а не latest: новый экземпляр обязан прочитать всё, что накопилось,
       # а не начать с текущего момента, потеряв события за время простоя.
       auto-offset-reset: earliest
@@ -167,9 +183,9 @@ app:
       email: ${APP_ADMIN_EMAIL:}
       password: ${APP_ADMIN_PASSWORD:}
     jwt:
-      # ВНИМАНИЕ: значение по умолчанию — только для локальной разработки.
-      # JwtSecretValidator не даст приложению стартовать с ним под любым профилем, кроме dev/test.
-      secret: ${JWT_SECRET:dev-only-insecure-secret-change-me-in-any-real-environment}
+      # Значения по умолчанию нет намеренно: секрет подписи токенов не должен лежать
+      # в репозитории даже в виде «только для разработки». Длину проверяет JwtSecretValidator.
+      secret: ${JWT_SECRET}
       issuer: ${JWT_ISSUER:food-delivery-platform}
       access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
 
@@ -205,8 +221,8 @@ app:
     neo4j:
       enabled: ${STORE_NEO4J_ENABLED:false}
       uri: ${NEO4J_URI:bolt://localhost:7687}
-      username: ${NEO4J_USERNAME:neo4j}
-      password: ${NEO4J_PASSWORD:food_delivery_neo4j}
+      username: ${NEO4J_USERNAME}
+      password: ${NEO4J_PASSWORD}
       # Проекция циклически сверяет заказы пачками. Один такт — одна пачка;
       # изменения старых заказов видны после следующего полного прохода.
       projection-interval: ${NEO4J_PROJECTION_INTERVAL:PT30S}
@@ -219,8 +235,8 @@ app:
     clickhouse:
       enabled: ${STORE_CLICKHOUSE_ENABLED:false}
       url: jdbc:clickhouse://${CLICKHOUSE_HOST:localhost}:${CLICKHOUSE_PORT:8123}/${CLICKHOUSE_DB:food_delivery}
-      username: ${CLICKHOUSE_USER:default}
-      password: ${CLICKHOUSE_PASSWORD:}
+      username: ${CLICKHOUSE_USER}
+      password: ${CLICKHOUSE_PASSWORD}
       pool-size: ${CLICKHOUSE_POOL_SIZE:4}
       query-timeout: ${CLICKHOUSE_QUERY_TIMEOUT:PT10S}
       # Своя группа потребителей: тот же топик независимо читают уведомления.
@@ -240,7 +256,11 @@ management:
     # только внутри сети, где живёт Prometheus. На одном порту с публичным API пришлось бы
     # либо открывать /actuator/prometheus всему интернету, либо городить аутентификацию
     # для скрейпера, у которого нет способа обновлять JWT.
-    port: ${MANAGEMENT_PORT:8081}
+    #
+    # Значение по умолчанию рассчитано на запуск из IDE рядом с остальными сервисами:
+    # у каждого своя пара портов (шлюз 8080/9080, монолит 8082/9082, уведомления 8083/9083).
+    # В docker-compose каждый живёт в своём контейнере и слушает 8080/8081.
+    port: ${MANAGEMENT_PORT:9082}
 
   endpoints:
     web:
@@ -296,7 +316,9 @@ springdoc:
     path: /v3/api-docs
 
 server:
-  port: 8080
+  # 8080 занят шлюзом: снаружи все запросы идут через него. Монолит слушает свой порт
+  # и при запуске из IDE доступен напрямую — для отладки в обход шлюза.
+  port: ${SERVER_PORT:8082}
 
   # Значение по умолчанию — immediate: при SIGTERM приложение обрывает всё на середине.
   # Для этого сервиса это означает недообработанный запрос, слушателя Kafka, не успевшего

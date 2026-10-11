@@ -22,9 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
  * первый файл с этим именем, и настройки datasource с Liquibase просто исчезли бы.
  */
 @SpringBootTest(properties = {
-        // Фоновая рассылка уведомлений в тестах не нужна: она лезет в базу посреди чужого
-        // теста и шумит в логах ошибками отката.
-        "app.notification.dispatch-enabled=false",
         // Публикацию outbox тесты запускают сами, когда им нужно: с работающим таймером
         // момент отправки был бы неизвестен, и проверки состояния очереди стали бы гонкой.
         "app.outbox.publish-enabled=false",

@@ -123,7 +123,7 @@ class RequestCorrelationIT extends AbstractIntegrationTest {
 
         String foreignId = String.valueOf(ownId + 1000);
 
-        MvcResult result = mockMvc.perform(get("/api/v1/notifications/me")
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/me")
                         .header("Authorization", "Bearer " + token)
                         .header(RequestContext.USER_ID_HEADER, foreignId))
                 .andExpect(status().isOk())

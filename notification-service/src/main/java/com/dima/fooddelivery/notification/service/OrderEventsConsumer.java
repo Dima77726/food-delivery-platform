@@ -1,9 +1,9 @@
 package com.dima.fooddelivery.notification.service;
 
-import com.dima.fooddelivery.common.kafka.KafkaTopics;
-import com.dima.fooddelivery.common.web.RequestContext;
+import com.dima.fooddelivery.contracts.order.OrderEventTopics;
+import com.dima.fooddelivery.contracts.order.OrderIntegrationEvent;
 import com.dima.fooddelivery.notification.domain.NotificationChannel;
-import com.dima.fooddelivery.order.integration.OrderIntegrationEvent;
+import com.dima.fooddelivery.notification.web.RequestContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -20,14 +20,16 @@ import java.util.Map;
 /**
  * Уведомления клиенту, порождённые событиями из Kafka.
  *
- * <p>Раньше это делал внутрипроцессный слушатель. Переезд на топик — не украшение:
- * теперь отдельный сервис уведомлений может подписаться на тот же топик и забрать эту
- * работу себе, а модуль Order об этом даже не узнает. Внутреннее событие такой возможности
- * не давало — оно живёт в памяти одного процесса.
+ * <p>Этот потребитель жил в монолите, и переезд в отдельный сервис не потребовал от монолита
+ * ни строчки: он как публиковал события в топик, так и публикует, а кто их читает — его
+ * не касается. Ровно ради этого уведомления в своё время и перевели с внутрипроцессного
+ * события на Kafka.
  *
- * <p>Аудит и метрики намеренно остались на внутреннем событии. Журнал аудита — собственная
- * запись приложения о том, что оно сделало, и она обязана фиксироваться в одной транзакции
- * с изменением. Уведомление — сообщение наружу, и его задержка на секунду никого не смущает.
+ * <p><b>Группа потребителей сохранена прежней</b> — {@code food-delivery-notifications}.
+ * Это и есть бесшовный переезд: офсеты группы хранит брокер, а не процесс, поэтому сервис
+ * продолжает читать ровно с того места, где остановился потребитель в монолите. С новой
+ * группой и {@code earliest} он перечитал бы топик с начала и разослал бы уведомления
+ * по давно доставленным заказам.
  *
  * <p><b>Идемпотентность.</b> Outbox доставляет «хотя бы один раз», значит дубли будут.
  * Защита — уникальный индекс по {@code event_id} в таблице уведомлений: повторная обработка
@@ -55,7 +57,7 @@ public class OrderEventsConsumer {
     private final ObjectMapper objectMapper;
 
     @KafkaListener(
-            topics = KafkaTopics.ORDER_EVENTS,
+            topics = OrderEventTopics.ORDER_EVENTS,
             groupId = "${spring.kafka.consumer.group-id}"
     )
     public void onOrderEvent(ConsumerRecord<String, String> record) {

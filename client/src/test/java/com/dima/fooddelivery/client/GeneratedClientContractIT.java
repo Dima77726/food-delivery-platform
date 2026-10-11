@@ -53,7 +53,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         classes = FoodDeliveryPlatformApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "app.notification.dispatch-enabled=false",
                 "app.outbox.publish-enabled=false",
                 "spring.kafka.admin.auto-create=false",
                 "spring.kafka.listener.auto-startup=false",

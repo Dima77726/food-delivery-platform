@@ -1,6 +1,6 @@
 package com.dima.fooddelivery.notification.api;
 
-import com.dima.fooddelivery.common.security.CurrentUser;
+import com.dima.fooddelivery.notification.config.CurrentUser;
 import com.dima.fooddelivery.notification.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;

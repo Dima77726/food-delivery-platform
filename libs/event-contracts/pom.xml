@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.dima</groupId>
+        <artifactId>food-delivery-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>event-contracts</artifactId>
+    <name>event-contracts</name>
+    <description>Контракты событий, которыми сервисы обмениваются через Kafka</description>
+
+    <!--
+        Библиотека контрактов: формы сообщений и имена топиков, и больше ничего.
+
+        Зависимостей нет ни одной, и это правило, а не случайность. Контракт подключают
+        все сервисы, и любая зависимость отсюда навязывалась бы каждому из них — вплоть
+        до конфликта версий Spring в сервисе, который обновляется по своему графику.
+        Записи Java сериализуются Jackson без единой аннотации, так что обходиться
+        без зависимостей получается без жертв.
+
+        Логики здесь тоже не должно появляться. Общая библиотека с кодом — это
+        распределённый монолит: правка в ней требует синхронного релиза всех сервисов,
+        то есть отнимает ровно ту независимость, ради которой их разделяли.
+    -->
+
+</project>

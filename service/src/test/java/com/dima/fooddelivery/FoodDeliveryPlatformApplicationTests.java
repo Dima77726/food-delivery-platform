@@ -19,7 +19,6 @@ import org.springframework.boot.test.context.SpringBootTest;
         "spring.liquibase.enabled=false",
         "preliquibase.enabled=false",
         "spring.sql.init.mode=never",
-        "app.notification.dispatch-enabled=false",
         "app.outbox.publish-enabled=false",
         "spring.kafka.admin.auto-create=false",
         "spring.kafka.listener.auto-startup=false",

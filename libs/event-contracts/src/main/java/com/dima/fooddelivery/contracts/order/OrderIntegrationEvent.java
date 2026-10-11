@@ -1,4 +1,4 @@
-package com.dima.fooddelivery.order.integration;
+package com.dima.fooddelivery.contracts.order;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;

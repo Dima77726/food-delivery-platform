@@ -1,27 +1,50 @@
+# Один Dockerfile на все сервисы: какой собирать, задаёт аргумент MODULE.
+#
+#   docker build --build-arg MODULE=notification-service -t notification-service .
+#
+# Отдельный Dockerfile в каждом модуле дал бы несколько почти одинаковых файлов, которые
+# расходятся при первой же правке: в одном забудут непривилегированного пользователя,
+# в другом — форму exec у ENTRYPOINT. Сервисы разные, а способ их упаковки — один.
+#
 # Многоступенчатая сборка: инструменты сборки не должны попасть в рантайм-образ.
 # Maven и JDK весят сотни мегабайт и содержат компилятор, которому в проде делать нечего.
 
 FROM eclipse-temurin:21-jdk-alpine AS build
 
+ARG MODULE=service
+
 WORKDIR /build
 
 # Сначала только описания сборки. Слой с зависимостями пересобирается лишь при правке pom,
-# а не при каждом изменении исходников — иначе Maven тянул бы полтерабайта Spring Boot
-# на каждый коммит.
+# а не при каждом изменении исходников. Копируются pom всех модулей реактора: без любого
+# из них Maven не прочитает родительский pom со списком модулей.
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
+COPY libs/event-contracts/pom.xml libs/event-contracts/
 COPY service/pom.xml service/
+COPY notification-service/pom.xml notification-service/
+COPY api-gateway/pom.xml api-gateway/
 COPY client/pom.xml client/
 
-RUN ./mvnw -B --no-transfer-progress -q dependency:go-offline
+# Зависимости только нужного модуля и того, от чего он зависит (-am). go-offline по всему
+# реактору тянул бы в образ шлюза драйверы пяти баз монолита. Библиотеку контрактов
+# собирать на этом шаге нечем — исходников ещё нет, — поэтому она исключена из разрешения:
+# Maven искал бы её в удалённом репозитории, где её нет.
+RUN ./mvnw -B --no-transfer-progress -q -pl ${MODULE} -am dependency:go-offline \
+        -DexcludeGroupIds=com.dima
 
-# Спецификация нужна до исходников: из неё генерируются интерфейсы, которые они реализуют.
+# Спецификация нужна монолиту до исходников: из неё генерируются интерфейсы, которые
+# он реализует. Остальным модулям она не мешает.
 COPY openapi/ openapi/
+COPY libs/ libs/
 COPY service/src/ service/src/
+COPY notification-service/src/ notification-service/src/
+COPY api-gateway/src/ api-gateway/src/
 
 # Тесты здесь не гоняются намеренно: интеграционные требуют Docker внутри Docker.
 # Их место в CI, до сборки образа.
-RUN ./mvnw -B --no-transfer-progress -q -pl service -am package -DskipTests
+RUN ./mvnw -B --no-transfer-progress -q -pl ${MODULE} -am package -DskipTests \
+    && cp ${MODULE}/target/*-exec.jar /build/app.jar
 
 
 FROM eclipse-temurin:21-jre-alpine AS runtime
@@ -33,8 +56,8 @@ RUN addgroup -S app && adduser -S -G app app
 WORKDIR /app
 
 # Именно -exec.jar: обычный jar модуля — это библиотека без встроенного запуска.
-# Классификатор появился, чтобы модуль client мог подключить service зависимостью.
-COPY --from=build --chown=app:app /build/service/target/*-exec.jar app.jar
+# Классификатор exec у всех сервисов, чтобы этот шаг был одинаковым для каждого.
+COPY --from=build --chown=app:app /build/app.jar app.jar
 
 USER app
 
