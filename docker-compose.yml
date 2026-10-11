@@ -75,7 +75,7 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "core", "catalog-service", "identity-service", "order-service", "tracking-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service"]
 
   # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
   # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
@@ -226,7 +226,7 @@ services:
   # Вместо dev можно взять sha конкретного коммита — так поднимается ровно та версия.
   #
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
-  #   core                 — монолит: всё, что ещё не вынесено в отдельные сервисы;
+  #   insights-service     — отзывы, аналитика, рекомендации, GraphQL (всё, что осталось от монолита);
   #   catalog-service      — рестораны, меню, поиск;
   #   identity-service     — пользователи, вход, выпуск токенов;
   #   notification-service — уведомления;
@@ -255,15 +255,15 @@ services:
   # поедет в CI и на стенд. Поэтому не удалён, а спрятан:
   #   docker compose up -d                        — только инфраструктура
   #   docker compose --profile full up -d --build — весь стек
-  core:
+  insights-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-core:${IMAGE_TAG:-local}
+    image: ghcr.io/dima77726/food-delivery-insights-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        MODULE: service
-    container_name: food-delivery-core
+        MODULE: insights-service
+    container_name: food-delivery-insights-service
     restart: unless-stopped
     # По умолчанию Docker добивает контейнер через 10 секунд после SIGTERM. Приложение
     # завершается штатно и ждёт текущую работу до 20 секунд (spring.lifecycle
@@ -274,11 +274,6 @@ services:
       grpc-certs:
         condition: service_completed_successfully
       kafka:
-        condition: service_healthy
-      postgres:
-        # Именно service_healthy, а не service_started: контейнер с Postgres поднимается
-        # за долю секунды, а принимать соединения начинает позже. Со service_started
-        # Liquibase падал бы на старте примерно в половине запусков.
         condition: service_healthy
     # Список, а не отображение: только в этой форме запись вида `- NEO4J_PASSWORD` без значения
     # означает «пробросить переменную, если она задана, и не задавать её иначе».
@@ -296,22 +291,18 @@ services:
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
-      # Внутри сети compose обращение идёт по имени сервиса и всегда на порт 5432 —
-      # проброс на хост здесь ни при чём.
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # Основной базы у сервиса нет: отзывы — в MongoDB, граф — в Neo4j, витрина — в ClickHouse.
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      # gRPC-клиенты: сервис заказов (заказы и доставки) и сервис пользователей (права на ресторан).
+      # gRPC-клиенты: каталог (название ресторана для GraphQL), сервис заказов (заказ для отзыва
+      # и графа) и сервис пользователей (права на ресторан для аналитики).
+      - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
       - ORDER_GRPC_ADDRESS=static://order-service:9090
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
-      # Взаимный TLS на gRPC: свой сертификат (CN=core) и CA, которому верить.
+      # Взаимный TLS на gRPC: свой сертификат (CN=insights-service) и CA, которому верить.
       - SPRING_PROFILES_ACTIVE=grpc-tls
-      - GRPC_TLS_CERTIFICATE=file:/certs/core.crt
-      - GRPC_TLS_PRIVATE_KEY=file:/certs/core.key
+      - GRPC_TLS_CERTIFICATE=file:/certs/insights-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/insights-service.key
       - GRPC_TLS_CA=file:/certs/ca.crt
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
@@ -319,7 +310,7 @@ services:
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
-      # Адреса пяти дополнительных хранилищ. Проставлены всегда, а работают только вместе
+      # Адреса трёх хранилищ сервиса. Проставлены всегда, а работают только вместе
       # с соответствующим STORE_*_ENABLED — сами по себе они ничего не включают.
       #
       # depends_on на эти сервисы намеренно нет: Compose отказывается стартовать, если
@@ -342,7 +333,7 @@ services:
       - CLICKHOUSE_DB
       - CLICKHOUSE_USER
       - CLICKHOUSE_PASSWORD
-    # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза монолит
+    # Портов наружу нет: запросы приходят через шлюз. Для отладки в обход шлюза insights-service
     # удобнее запускать из IDE — там он слушает localhost:8082.
 
   catalog-service:
@@ -598,7 +589,7 @@ services:
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
-      - CORE_SERVICE_URL=http://core:8080
+      - INSIGHTS_SERVICE_URL=http://insights-service:8080
       - CATALOG_SERVICE_URL=http://catalog-service:8080
       - IDENTITY_SERVICE_URL=http://identity-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080

@@ -3,34 +3,20 @@ package com.dima.fooddelivery.support;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * База для тестов пяти дополнительных хранилищ.
+ * База для тестов модулей на MongoDB, Neo4j и ClickHouse.
  *
- * <p>Восемь контейнеров на один контекст: PostgreSQL, Redis и Kafka нужны самому приложению,
- * остальные пять — модулям, которые здесь проверяются. Контекст один на все такие тесты
- * и кэшируется, поэтому цена платится однажды за сборку.
+ * <p>Контейнеров больше, чем у {@link AbstractIntegrationTest}, поэтому и контекст отдельный:
+ * тестам без хранилищ незачем их поднимать. Контекст кэшируется, цена платится один раз.
  *
- * <p><b>Почему это отдельная база, а не свойства в {@link AbstractIntegrationTest}.</b>
- * Иначе тяжёлые контейнеры поднимались бы и для тестов SQL, которым они не нужны,
- * и быстрая обратная связь по основной логике исчезла бы.
+ * <p>Транзакций нет, и хранилища между тестами не очищаются. Поэтому каждый тест работает
+ * с уникальными идентификаторами — см. {@link TestDataFactory}.
  *
- * <p><b>{@link Transactional} здесь работает только наполовину, и об этом важно помнить.</b>
- * Откат после теста возвращает в исходное состояние PostgreSQL — и только его. Ни MongoDB,
- * ни ClickHouse, ни Neo4j о транзакции приложения не знают
- * и записанное не отменят. Поэтому каждый тест обязан либо работать с уникальными
- * идентификаторами, либо убирать за собой сам. Первое надёжнее: идентификаторы заказов
- * и ресторанов приходят из последовательностей PostgreSQL, а те откатом не сбрасываются,
- * то есть уникальны и между тестами.
- *
- * <p>Фоновые задачи выключены все до единой. Проекция графа по таймеру
- * означала бы, что состояние хранилища меняется посреди проверки, — тесты запускают
- * её вручную.
+ * <p>Фоновые задачи выключены. Проекция графа по таймеру меняла бы состояние посреди
+ * проверки — тесты запускают её вручную.
  */
 @SpringBootTest(properties = {
-        "app.outbox.publish-enabled=false",
-
         "app.stores.mongo.enabled=true",
         "app.stores.neo4j.enabled=true",
         "app.stores.clickhouse.enabled=true",
@@ -42,13 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
         // проверить, что при поднятых хранилищах приложение считает себя здоровым.
         "management.health.mongodb.enabled=true",
 
-        "logging.level.liquibase=WARN",
-        "logging.level.net.lbruun.springboot.preliquibase=WARN",
         "logging.level.org.testcontainers=WARN",
         "logging.level.com.zaxxer.hikari=WARN"
 })
 @Import({TestcontainersConfiguration.class, StoresTestcontainersConfiguration.class})
-@Transactional
 public abstract class AbstractStoresIntegrationTest {
 
     @Autowired

@@ -259,41 +259,6 @@
           ]
         },
         {
-          "name": "Ping базы данных",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/db/ping",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "db",
-                "ping"
-              ]
-            },
-            "description": "Проверка соединения с PostgreSQL.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "Actuator health",
           "request": {
             "method": "GET",
@@ -3744,6 +3709,164 @@
           ]
         }
       ]
+    },
+    {
+      "name": "17. GraphQL (insights-service)",
+      "item": [
+        {
+          "name": "Экран ресторана одним запросом",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Название — из каталога (gRPC), рейтинг и отзывы — из MongoDB, популярные блюда — из графа Neo4j. Уберите поле из запроса — и соответствующее хранилище не будет затронуто.\n\nВыключенный модуль (STORE_*_ENABLED) даёт null на своём поле и запись в errors, остальные поля приходят.",
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query Restaurant($id: ID!) {\n  restaurant(id: $id) {\n    name\n    city\n    active\n    rating { average total topTags { tag count } }\n    reviews(size: 5) { totalElements items { rating comment createdAt } }\n    popularDishes(limit: 3) { name score }\n  }\n}",
+                "variables": "{\n  \"id\": \"{{restaurantId}}\"\n}"
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.errors) { console.log('Ошибки полей:', JSON.stringify(b.errors)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Продажи ресторана (управляющему)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Поле sales закрыто: только управляющий ресторана и администратор. С токеном клиента придёт name и ошибка FORBIDDEN на sales.",
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query Sales($id: ID!) {\n  restaurant(id: $id) {\n    name\n    sales(from: \"2026-01-01\", to: \"2026-12-31\") { totalOrders totalRevenue days { day orders revenue } }\n  }\n}",
+                "variables": "{\n  \"id\": \"{{restaurantId}}\"\n}"
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.errors) { console.log('Ошибки полей:', JSON.stringify(b.errors)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Мои рекомендации",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Нужен токен: без него — ошибка UNAUTHORIZED.",
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query {\n  myRecommendations(limit: 5) { name restaurantId score }\n}",
+                "variables": "{\n  \"id\": \"{{restaurantId}}\"\n}"
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.errors) { console.log('Ошибки полей:', JSON.stringify(b.errors)); }"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Один адрес — POST /graphql. Песочница — {{baseUrl}}/graphiql, схема — GET {{baseUrl}}/graphql/schema."
     }
   ]
 }

@@ -122,6 +122,20 @@ public class RecommendationGraph {
             LIMIT $limit
             """;
 
+    /**
+     * Самые заказываемые блюда ресторана — по числу заказов, а не по количеству порций:
+     * одна компания, взявшая десять пицц, не должна перевешивать десять разных клиентов.
+     */
+    private static final String POPULAR_IN_RESTAURANT = """
+            MATCH (:Customer)-[o:ORDERED]->(d:Dish {restaurantId: $restaurantId})
+            RETURN d.id                     AS menuItemId,
+                   d.name                   AS name,
+                   d.restaurantId           AS restaurantId,
+                   count(DISTINCT o.orderId) AS score
+            ORDER BY score DESC, name
+            LIMIT $limit
+            """;
+
     private final Driver driver;
 
     /**
@@ -225,6 +239,10 @@ public class RecommendationGraph {
 
     public List<RecommendedItem> orderedTogetherWith(Long menuItemId, int limit) {
         return query(ORDERED_TOGETHER, Map.of("menuItemId", menuItemId, "limit", limit));
+    }
+
+    public List<RecommendedItem> popularInRestaurant(Long restaurantId, int limit) {
+        return query(POPULAR_IN_RESTAURANT, Map.of("restaurantId", restaurantId, "limit", limit));
     }
 
     private List<RecommendedItem> query(String cypher, Map<String, Object> parameters) {

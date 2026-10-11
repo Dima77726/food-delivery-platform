@@ -905,50 +905,6 @@
               }
             }
           ]
-        },
-        {
-          "name": "Ping базы данных",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/db/ping",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "db",
-                "ping"
-              ]
-            },
-            "description": "Проверка отдельно от /ping: сервис отвечает и при недоступной базе. Маршрут закрыт токеном, поэтому идёт после входа, а не в дымовой папке.",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{customerToken}}",
-                  "type": "string"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('База отвечает', () => {",
-                  "  pm.expect(pm.response.json().status).to.eql('ok');",
-                  "});"
-                ]
-              }
-            }
-          ]
         }
       ],
       "description": "Три роли, на которых держится весь остальной прогон. Токены и идентификаторы сохраняются в переменные коллекции."

@@ -15,7 +15,7 @@
 # зависящего от libs/grpc-contracts, падала бы на генерации кода.
 FROM eclipse-temurin:21-jdk AS build
 
-ARG MODULE=service
+ARG MODULE=api-gateway
 
 WORKDIR /build
 
@@ -26,7 +26,7 @@ COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY libs/event-contracts/pom.xml libs/event-contracts/
 COPY libs/grpc-contracts/pom.xml libs/grpc-contracts/
-COPY service/pom.xml service/
+COPY insights-service/pom.xml insights-service/
 COPY notification-service/pom.xml notification-service/
 COPY catalog-service/pom.xml catalog-service/
 COPY identity-service/pom.xml identity-service/
@@ -47,7 +47,7 @@ RUN ./mvnw -B --no-transfer-progress -q -pl ${MODULE} -am dependency:go-offline 
 # он реализует. Остальным модулям она не мешает.
 COPY openapi/ openapi/
 COPY libs/ libs/
-COPY service/src/ service/src/
+COPY insights-service/src/ insights-service/src/
 COPY notification-service/src/ notification-service/src/
 COPY catalog-service/src/ catalog-service/src/
 COPY identity-service/src/ identity-service/src/

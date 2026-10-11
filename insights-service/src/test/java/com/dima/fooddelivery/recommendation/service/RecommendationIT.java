@@ -125,6 +125,24 @@ class RecommendationIT extends AbstractStoresIntegrationTest {
     }
 
     /** Отменённый заказ ничего не говорит о вкусах и в граф попадать не должен. */
+    /** Популярность считается заказами: два заказа одного блюда весят больше одного. */
+    @Test
+    void shouldRankPopularDishesOfRestaurantByOrders() {
+        Long restaurantId = testData.insertRestaurant();
+        Long pizza = testData.insertMenuItem(restaurantId, PRICE);
+        Long soup = testData.insertMenuItem(restaurantId, PRICE);
+
+        placeOrder(testData.insertCustomer(), restaurantId, List.of(pizza, soup));
+        placeOrder(testData.insertCustomer(), restaurantId, List.of(pizza));
+
+        projectEverything();
+
+        List<RecommendedItem> popular = recommendationService.popularInRestaurant(restaurantId, 10);
+
+        assertEquals(List.of(pizza, soup), popular.stream().map(RecommendedItem::menuItemId).toList());
+        assertEquals(2L, popular.get(0).score());
+    }
+
     @Test
     void shouldIgnoreCanceledOrders() {
         Long restaurantId = testData.insertRestaurant();

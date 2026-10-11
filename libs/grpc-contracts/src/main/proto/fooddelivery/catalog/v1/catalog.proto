@@ -29,6 +29,25 @@ service CatalogService {
   // а не успех. Иначе в корзину пиццерии можно было бы положить суши по цене пиццы.
   // Снятое с продажи или архивное блюдо — FAILED_PRECONDITION.
   rpc GetAvailableMenuItem(GetAvailableMenuItemRequest) returns (MenuItemSnapshot);
+
+  // Ресторан в любом статусе — для экранов, которые показывают его историю, а не принимают
+  // заказ: отзывы и рейтинг закрытого ресторана читать можно. Несуществующий — NOT_FOUND.
+  //
+  // Добавлен вместе с insights-service. Добавление метода совместимо: старые клиенты его
+  // просто не вызывают.
+  rpc GetRestaurant(GetRestaurantRequest) returns (RestaurantInfo);
+}
+
+message GetRestaurantRequest {
+  int64 restaurant_id = 1;
+}
+
+message RestaurantInfo {
+  int64 id = 1;
+  string name = 2;
+  string city = 3;
+  // Принимает ли сейчас заказы.
+  bool active = 4;
 }
 
 message GetActiveRestaurantRequest {

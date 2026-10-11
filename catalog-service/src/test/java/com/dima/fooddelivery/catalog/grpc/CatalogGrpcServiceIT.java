@@ -2,6 +2,8 @@ package com.dima.fooddelivery.catalog.grpc;
 
 import com.dima.fooddelivery.grpc.catalog.v1.CatalogServiceGrpc;
 import com.dima.fooddelivery.grpc.catalog.v1.GetActiveRestaurantRequest;
+import com.dima.fooddelivery.grpc.catalog.v1.GetRestaurantRequest;
+import com.dima.fooddelivery.grpc.catalog.v1.RestaurantInfo;
 import com.dima.fooddelivery.grpc.catalog.v1.GetAvailableMenuItemRequest;
 import com.dima.fooddelivery.grpc.catalog.v1.MenuItemSnapshot;
 import com.dima.fooddelivery.grpc.catalog.v1.RestaurantSummary;
@@ -81,6 +83,29 @@ class CatalogGrpcServiceIT extends AbstractIntegrationTest {
 
         assertStatus(Status.Code.FAILED_PRECONDITION, () -> catalog.getActiveRestaurant(
                 GetActiveRestaurantRequest.newBuilder().setRestaurantId(restaurantId).build()
+        ));
+    }
+
+    /** Для экранов истории закрытый ресторан — не ошибка: его отзывы читать можно. */
+    @Test
+    void shouldReturnRestaurantInAnyStatus() {
+        Long restaurantId = testData.insertRestaurant(false);
+
+        RestaurantInfo info = catalog.getRestaurant(
+                GetRestaurantRequest.newBuilder().setRestaurantId(restaurantId).build()
+        );
+
+        assertAll(
+                () -> assertEquals(restaurantId, info.getId()),
+                () -> assertEquals("Moscow", info.getCity()),
+                () -> assertEquals(false, info.getActive())
+        );
+    }
+
+    @Test
+    void shouldAnswerNotFoundForUnknownRestaurantInAnyStatus() {
+        assertStatus(Status.Code.NOT_FOUND, () -> catalog.getRestaurant(
+                GetRestaurantRequest.newBuilder().setRestaurantId(Long.MAX_VALUE).build()
         ));
     }
 

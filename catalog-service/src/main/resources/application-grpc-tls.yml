@@ -33,5 +33,5 @@ app:
   grpc:
     security:
       mtls: true
-      # CatalogService нужен только корзине — она переехала в сервис заказов.
-      allowed-clients: order-service
+      # Корзине (сервис заказов) — ресторан и блюдо, insights-service — название ресторана для GraphQL.
+      allowed-clients: order-service,insights-service

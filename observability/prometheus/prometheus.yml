@@ -21,14 +21,13 @@ scrape_configs:
         labels:
           service: api-gateway
 
-  - job_name: food-delivery
-    # Монолит. Имя задания прежнее, чтобы не ломать дашборды, построенные на нём.
+  - job_name: insights-service
     metrics_path: /actuator/prometheus
     scrape_interval: 5s
     static_configs:
-      - targets: ['core:8081', 'host.docker.internal:9082']
+      - targets: ['insights-service:8081', 'host.docker.internal:9082']
         labels:
-          service: food-delivery-platform
+          service: insights-service
 
   - job_name: catalog-service
     metrics_path: /actuator/prometheus

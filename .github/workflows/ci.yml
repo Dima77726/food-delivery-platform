@@ -46,10 +46,12 @@ jobs:
             libs/grpc-contracts:
               - *build
               - 'libs/grpc-contracts/**'
-            service:
+            insights-service:
               - *build
               - 'libs/**'
-              - 'service/**'
+              - 'openapi/**'
+              - 'client/**'
+              - 'insights-service/**'
             notification-service:
               - *build
               - 'libs/event-contracts/**'
@@ -75,6 +77,8 @@ jobs:
             tracking-service:
               - *build
               - 'libs/grpc-contracts/**'
+              - 'openapi/**'
+              - 'client/**'
               - 'tracking-service/**'
             api-gateway:
               - *build
@@ -82,7 +86,6 @@ jobs:
             client:
               - *build
               - 'openapi/**'
-              - 'service/**'
               - 'client/**'
 
   build:

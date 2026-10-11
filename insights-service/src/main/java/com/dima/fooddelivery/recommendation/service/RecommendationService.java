@@ -57,6 +57,10 @@ public class RecommendationService {
         return recommendationGraph.orderedTogetherWith(menuItemId, limit);
     }
 
+    public List<RecommendedItem> popularInRestaurant(Long restaurantId, int limit) {
+        return recommendationGraph.popularInRestaurant(restaurantId, limit);
+    }
+
     /**
      * Догоняет граф на одну пачку заказов.
      *
