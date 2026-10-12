@@ -1,0 +1,38 @@
+# Tempo и Loki связаны друг с другом: от строки лога — к трассе, от спана — к логам сервиса.
+
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      derivedFields:
+        # Формат строки: [сервис,traceId,spanId,correlationId,userId]. traceId — 32 шестнадцатеричных
+        # символа; ссылка из этого поля открывает трассу в Tempo.
+        - name: traceId
+          matcherRegex: '\[[^,\]]*,([0-9a-f]{32}),'
+          url: '$${__value.raw}'
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # От спана — к логам того же сервиса в окне спана. Метка service в Loki берётся
+      # из имени сервиса в compose и совпадает с именем приложения (service.name в трассе).
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1m'
+        spanEndTimeShift: '1m'
+        tags:
+          - key: service.name
+            value: service
+        filterByTraceID: true
+        filterBySpanID: false

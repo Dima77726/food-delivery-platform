@@ -1,0 +1,65 @@
+[
+  {
+    "caseName": "пустой e-mail",
+    "caseEmail": "",
+    "casePassword": "password123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "CUSTOMER",
+    "expectedStatus": 400,
+    "expectedMessage": "email"
+  },
+  {
+    "caseName": "e-mail без собаки",
+    "caseEmail": "not-an-email",
+    "casePassword": "password123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "CUSTOMER",
+    "expectedStatus": 400,
+    "expectedMessage": "email"
+  },
+  {
+    "caseName": "пароль короче восьми символов",
+    "caseEmail": "__UNIQUE__",
+    "casePassword": "123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "CUSTOMER",
+    "expectedStatus": 400,
+    "expectedMessage": "password"
+  },
+  {
+    "caseName": "пустое имя",
+    "caseEmail": "__UNIQUE__",
+    "casePassword": "password123",
+    "caseFullName": "",
+    "caseRole": "CUSTOMER",
+    "expectedStatus": 400,
+    "expectedMessage": ""
+  },
+  {
+    "caseName": "занятый e-mail",
+    "caseEmail": "__DUPLICATE__",
+    "casePassword": "password123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "CUSTOMER",
+    "expectedStatus": 409,
+    "expectedMessage": "уже зарегистрирован"
+  },
+  {
+    "caseName": "роль ADMIN через регистрацию",
+    "caseEmail": "__UNIQUE__",
+    "casePassword": "password123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "ADMIN",
+    "expectedStatus": 409,
+    "expectedMessage": "ADMIN"
+  },
+  {
+    "caseName": "несуществующая роль",
+    "caseEmail": "__UNIQUE__",
+    "casePassword": "password123",
+    "caseFullName": "Автотест Валидация",
+    "caseRole": "SUPERUSER",
+    "expectedStatus": 400,
+    "expectedMessage": ""
+  }
+]

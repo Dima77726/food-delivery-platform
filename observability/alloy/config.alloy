@@ -1,0 +1,50 @@
+// Alloy собирает логи контейнеров compose-проекта и отправляет их в Loki.
+//
+// Сервисы пишут в stdout — так их логи читает и `docker compose logs`. Alloy берёт те же
+// строки через сокет Docker, поэтому приложениям не нужен ни агент, ни драйвер логирования,
+// ни знание о Loki.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  // Только контейнеры этого проекта: на машине бывают и чужие.
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Имя сервиса из compose — по нему в Grafana фильтруют логи одного сервиса.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  forward_to    = [loki.process.recent.receiver]
+  relabel_rules = discovery.relabel.containers.rules
+}
+
+// При первом старте Alloy читает всю накопленную историю контейнеров — недели и месяцы.
+// Loki отвергает записи, отставшие от головы потока больше чем на час, так что без отсечения лог Alloy
+// заполнился бы ошибками, а настоящие сбои потерялись среди них.
+loki.process "recent" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.drop {
+    older_than          = "30m"
+    drop_counter_reason = "too_old"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

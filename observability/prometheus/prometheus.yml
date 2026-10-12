@@ -7,16 +7,83 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: food-delivery
-    # Actuator отдаёт метрики не по корню, а по своему пути.
+  # По заданию на сервис: у каждого свой набор метрик и свой график падений, а метка job
+  # позволяет фильтровать по сервису без регулярных выражений по адресу.
+  #
+  # Targets парами: в режиме full сервис работает в контейнере (имя:8081), при запуске
+  # из IDE — на хосте, на своём служебном порту. Один из двух будет DOWN, и для локальной
+  # конфигурации это ожидаемо.
+  - job_name: api-gateway
     metrics_path: /actuator/prometheus
     scrape_interval: 5s
     static_configs:
-      # В режиме full работает app:8081; при запуске из IDE — host.docker.internal:8081.
-      # Один из двух targets будет DOWN, и для локальной конфигурации это ожидаемо.
-      - targets: ['app:8081', 'host.docker.internal:8081']
+      - targets: ['api-gateway:8081', 'host.docker.internal:9080']
         labels:
-          service: food-delivery-platform
+          service: api-gateway
+
+  - job_name: insights-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['insights-service:8081', 'host.docker.internal:9082']
+        labels:
+          service: insights-service
+
+  - job_name: catalog-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['catalog-service:8081', 'host.docker.internal:9084']
+        labels:
+          service: catalog-service
+
+  - job_name: identity-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['identity-service:8081', 'host.docker.internal:9085']
+        labels:
+          service: identity-service
+
+  - job_name: order-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['order-service:8081', 'host.docker.internal:9086']
+        labels:
+          service: order-service
+
+  - job_name: payment-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['payment-service:8081', 'host.docker.internal:9087']
+        labels:
+          service: payment-service
+
+  - job_name: tracking-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['tracking-service:8081', 'host.docker.internal:9088']
+        labels:
+          service: tracking-service
+
+  - job_name: notification-service
+    metrics_path: /actuator/prometheus
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['notification-service:8081', 'host.docker.internal:9083']
+        labels:
+          service: notification-service
+
+  # Брокер очередей: глубина очередей, скорость публикации и подтверждений. Плагин
+  # rabbitmq_prometheus отдаёт метрики на отдельном порту 15692.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']
+        labels:
+          service: rabbitmq
 
   # Prometheus снимает метрики и с самого себя — полезно, когда непонятно,
   # кто именно тормозит: приложение или сборщик метрик.

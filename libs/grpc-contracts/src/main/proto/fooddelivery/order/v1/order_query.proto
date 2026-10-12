@@ -1,0 +1,77 @@
+// Заказы и доставки — для чтения другими сервисами.
+//
+// Сервис заказов владеет заказом целиком, но читать его нужно и остальным: отзыв можно оставить
+// только о своём доставленном заказе, граф рекомендаций строится по позициям заказов, трек
+// курьера пишется только по его доставке. Всё это — вопросы «как сейчас обстоят дела»,
+// на которые ответ нужен синхронно, поэтому gRPC, а не события.
+//
+// Контракт только читающий. Менять заказ другие сервисы не вправе: статусы переводит
+// сервис заказов сам — по запросам клиента, ресторана и курьера или по исходам саги оплаты.
+//
+// Статусы — строками, по тем же причинам, что в событиях Kafka: новый статус не должен ломать
+// клиента, собранного до его появления.
+syntax = "proto3";
+
+package fooddelivery.order.v1;
+
+option java_multiple_files = true;
+option java_package = "com.dima.fooddelivery.grpc.order.v1";
+option java_outer_classname = "OrderQueryProto";
+
+service OrderQueryService {
+  // Заказ с позициями и доставкой. Нет такого заказа — NOT_FOUND.
+  rpc GetOrder(GetOrderRequest) returns (OrderView);
+
+  // Заказы с идентификатором больше заданного, по возрастанию — для построителей производных
+  // моделей (граф рекомендаций). Пустой ответ — конец списка.
+  rpc ListOrdersAfter(ListOrdersAfterRequest) returns (ListOrdersAfterResponse);
+
+  // Доставка по её идентификатору. Нет такой доставки — NOT_FOUND.
+  rpc GetDelivery(GetDeliveryRequest) returns (DeliveryView);
+}
+
+message GetOrderRequest {
+  int64 order_id = 1;
+}
+
+message ListOrdersAfterRequest {
+  int64 after_order_id = 1;
+  int32 limit = 2;
+}
+
+message ListOrdersAfterResponse {
+  repeated OrderView orders = 1;
+}
+
+message GetDeliveryRequest {
+  int64 delivery_id = 1;
+}
+
+message OrderView {
+  int64 id = 1;
+  int64 customer_id = 2;
+  int64 restaurant_id = 3;
+  string status = 4;
+  // Деньги — строкой в десятичной записи, как и в каталоге.
+  string total_amount = 5;
+  // ISO-8601 со смещением, например 2026-10-11T18:30:00+03:00.
+  string created_at = 6;
+  repeated OrderItemView items = 7;
+  // Доставки может ещё не быть: тогда поле не заполнено.
+  optional DeliveryView delivery = 8;
+}
+
+message OrderItemView {
+  int64 menu_item_id = 1;
+  string menu_item_name = 2;
+  int32 quantity = 3;
+  string price = 4;
+}
+
+message DeliveryView {
+  int64 id = 1;
+  int64 order_id = 2;
+  // Курьер ещё не назначен — поле не заполнено.
+  optional int64 courier_id = 3;
+  string status = 4;
+}

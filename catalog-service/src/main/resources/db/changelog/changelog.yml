@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: migrations/001-create-catalog.yml
+      relativeToChangelogFile: true
+  - include:
+      file: migrations/002-seed-demo-catalog.yml
+      relativeToChangelogFile: true

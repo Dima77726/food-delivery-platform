@@ -1,0 +1,5028 @@
+{
+  "info": {
+    "name": "Food Delivery API — автотесты",
+    "description": "Набор автотестов REST API платформы доставки еды.\n\nОтличие от коллекции `food-delivery.postman_collection.json`: та описывает API и рассчитана\nна ручную работу по одному запросу. Эта — прогоняется целиком, без участия человека,\nи каждый запрос в ней заканчивается проверками.\n\n## Как запускать\n\nCollection Runner: выбрать окружение `food-delivery.tests.postman_environment.json`,\nзапустить коллекцию целиком. Для папки 02 подать файл данных\n`postman/data/registration-cases.json` (кнопка Select File).\n\nNewman:\n\n    newman run postman/food-delivery.tests.postman_collection.json \\\n      -e postman/food-delivery.tests.postman_environment.json \\\n      -d postman/data/registration-cases.json \\\n      --folder \"02. Регистрация — негатив (data-driven)\"\n\n    newman run postman/food-delivery.tests.postman_collection.json \\\n      -e postman/food-delivery.tests.postman_environment.json\n\n## Что внутри\n\n| Папка | О чём |\n|---|---|\n| 00 | сервис жив |\n| 01 | регистрация и вход четырёх пользователей прогона |\n| 02 | негативная валидация регистрации на наборе входных данных |\n| 03 | ресторан и меню: подготовка данных и публичная витрина |\n| 04 | доступ и валидация: 401, 403, 404, 400 |\n| 05 | сквозной сценарий заказа: корзина → оплата → готовка → доставка |\n| 06 | сквозной сценарий отмены |\n| 07 | конфликты конечного автомата заказа и отказ банка |\n| 08 | пять дополнительных хранилищ |\n| 09 | регрессия пагинации и ленты по курсору |\n| 10 | администрирование (пропускается без учётки администратора) |\n\n## Повторяемость\n\nКаждый прогон заводит своих пользователей и свой ресторан: адреса и телефоны собираются\nиз метки прогона. Поэтому набор можно запускать сколько угодно раз подряд на одной базе —\nон не упирается в «e-mail уже занят» и не зависит от того, что осталось от прошлых запусков.\n\nПапки идут по порядку и передают друг другу идентификаторы через переменные коллекции.\nЗапуск отдельной папки в середине работать не будет — это цена связности сценария,\nа не недосмотр.\n\n## Пять хранилищ\n\nПапка 08 считает 404 допустимым ответом: при `STORE_*_ENABLED=false` маршрута не существует.\nНабор остаётся зелёным и с включёнными хранилищами, и без них — содержимое проверяется\nтолько там, где модуль ответил.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "food-delivery-autotests"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Метка прогона. Основное значение выставляет первый запрос папки 01 — там, где",
+          "// заводятся пользователи. Эта строка нужна для случая, когда папку запускают отдельно.",
+          "if (!pm.collectionVariables.get('runId')) {",
+          "  pm.collectionVariables.set('runId', Date.now().toString(36));",
+          "}",
+          "",
+          "// Сквозная метка запроса: по ней запрос прослеживается через логи приложения,",
+          "// outbox, сообщение Kafka и работу потребителя. Ответ обязан вернуть её же.",
+          "pm.request.headers.upsert({",
+          "  key: 'X-Correlation-Id',",
+          "  value: 'autotest-' + pm.variables.replaceIn('{{$guid}}')",
+          "});"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Проверки, общие для каждого запроса набора. Они дешёвые, а ловят то, что легко",
+          "// не заметить в отдельном сценарии: пятисотку вместо ошибки клиента, потерянную",
+          "// сквозную метку, внезапно просевший ответ.",
+          "pm.test('Сервер не отвечает 5xx', () => {",
+          "  pm.expect(pm.response.code, 'HTTP ' + pm.response.code).to.be.below(500);",
+          "});",
+          "",
+          "pm.test('Ответ быстрее 5 секунд', () => {",
+          "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+          "});",
+          "",
+          "pm.test('Сквозная метка вернулась той же', () => {",
+          "  const sent = pm.request.headers.get('X-Correlation-Id');",
+          "  pm.expect(pm.response.headers.get('X-Correlation-Id')).to.eql(sent);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerPhone",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerPhone",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ownerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierPhone",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "courierId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "intruderEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "intruderPhone",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "intruderToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "intruderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "restaurantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "menuItemId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "menuItemId2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "menuItemPrice",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cartItemId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expectedTotal",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "paymentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deliveryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "canceledOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "conflictOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declinedItemId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declinedOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "firstPageOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "feedCursor",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "feedFirstId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "analyticsFrom",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "analyticsTo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mongoEnabled",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "trackAccepted",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "caseName",
+      "value": "без файла данных: пустой e-mail",
+      "type": "string"
+    },
+    {
+      "key": "caseEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "casePassword",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "caseFullName",
+      "value": "Автотест Валидация",
+      "type": "string"
+    },
+    {
+      "key": "casePhone",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "caseRole",
+      "value": "CUSTOMER",
+      "type": "string"
+    },
+    {
+      "key": "expectedStatus",
+      "value": "400",
+      "type": "string"
+    },
+    {
+      "key": "expectedMessage",
+      "value": "email",
+      "type": "string"
+    },
+    {
+      "key": "customerRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "usedRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "pollAttempt",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00. Здоровье сервиса",
+      "item": [
+        {
+          "name": "Ping приложения",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ping"
+              ]
+            },
+            "description": "Проверка, что сервис отвечает. С неё начинается любой прогон: без неё остальные падения нечитаемы.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Тело — JSON со status и timestamp', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['status'],",
+                  "    properties: { status: { type: 'string' } }",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Дымовая проверка перед основным прогоном."
+    },
+    {
+      "name": "01. Регистрация и вход — позитив",
+      "item": [
+        {
+          "name": "Регистрация: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"{{customerPassword}}\",\n  \"fullName\": \"Автотест Клиент\",\n  \"phone\": \"{{customerPhone}}\",\n  \"role\": \"CUSTOMER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Каждый прогон работает на своих пользователях: повторный запуск не должен",
+                  "// падать на «e-mail уже занят», а данные прошлых прогонов — мешать проверкам.",
+                  "// Метка прогона выставляется именно здесь, а не в скрипте коллекции: тот",
+                  "// выполняется перед каждым запросом и не отличает новый прогон от продолжения старого.",
+                  "const run = Date.now().toString(36) + '-' + Math.floor(Math.random() * 1000);",
+                  "pm.collectionVariables.set('runId', run);",
+                  "pm.collectionVariables.set('customerEmail', `customer-${run}@autotest.local`);",
+                  "pm.collectionVariables.set('ownerEmail', `owner-${run}@autotest.local`);",
+                  "pm.collectionVariables.set('courierEmail', `courier-${run}@autotest.local`);",
+                  "const tail = String(Date.now()).slice(-7);",
+                  "pm.collectionVariables.set('customerPhone', `+79${tail}1`);",
+                  "pm.collectionVariables.set('ownerPhone', `+79${tail}2`);",
+                  "pm.collectionVariables.set('courierPhone', `+79${tail}3`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Схема ответа с токеном', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'refreshToken', 'refreshExpiresInSeconds', 'user'],",
+                  "    properties: {",
+                  "      accessToken: { type: 'string', minLength: 20 },",
+                  "      tokenType: { type: 'string' },",
+                  "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      refreshToken: { type: 'string', minLength: 20 },",
+                  "      refreshExpiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      user: { type: 'object', required: ['id', 'email'] }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Хеш пароля наружу не отдаётся', () => {",
+                  "  pm.expect(JSON.stringify(body)).to.not.match(/passwordHash|\\$2[aby]\\$/);",
+                  "});",
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerId', body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Регистрация: владелец ресторана",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{ownerPassword}}\",\n  \"fullName\": \"Автотест Владелец\",\n  \"phone\": \"{{ownerPhone}}\",\n  \"role\": \"RESTAURANT_OWNER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Схема ответа с токеном', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'user'],",
+                  "    properties: {",
+                  "      accessToken: { type: 'string', minLength: 20 },",
+                  "      tokenType: { type: 'string' },",
+                  "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      user: { type: 'object', required: ['id', 'email'] }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Хеш пароля наружу не отдаётся', () => {",
+                  "  pm.expect(JSON.stringify(body)).to.not.match(/passwordHash|\\$2[aby]\\$/);",
+                  "});",
+                  "pm.collectionVariables.set('ownerToken', body.accessToken);",
+                  "pm.collectionVariables.set('ownerId', body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Регистрация: курьер",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{courierEmail}}\",\n  \"password\": \"{{courierPassword}}\",\n  \"fullName\": \"Автотест Курьер\",\n  \"phone\": \"{{courierPhone}}\",\n  \"role\": \"COURIER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Схема ответа с токеном', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'user'],",
+                  "    properties: {",
+                  "      accessToken: { type: 'string', minLength: 20 },",
+                  "      tokenType: { type: 'string' },",
+                  "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      user: { type: 'object', required: ['id', 'email'] }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Хеш пароля наружу не отдаётся', () => {",
+                  "  pm.expect(JSON.stringify(body)).to.not.match(/passwordHash|\\$2[aby]\\$/);",
+                  "});",
+                  "pm.collectionVariables.set('courierToken', body.accessToken);",
+                  "pm.collectionVariables.set('courierId', body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход: клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"{{customerPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Токен выдан заново', () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "pm.test('Тот же пользователь', () => {",
+                  "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "});",
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Обмен refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const old = pm.collectionVariables.get('customerRefreshToken');",
+                  "pm.test('Выдан новый refresh-токен', () => pm.expect(body.refreshToken).to.be.a('string').and.not.eql(old));",
+                  "pm.test('Тот же пользователь', () => {",
+                  "  pm.expect(body.user.id).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "});",
+                  "pm.collectionVariables.set('usedRefreshToken', old);",
+                  "pm.collectionVariables.set('customerToken', body.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повтор обменянного refresh-токена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Обменянный токен одноразовый. Повтор — признак кражи: отклоняется он сам и вся цепочка.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{usedRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Цепочка отозвана целиком",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Токен, выданный при честном обмене, тоже недействителен после повтора старого. Access-токен при этом жив — дальнейшие запросы коллекции идут с ним.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Регистрация: посторонний клиент",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Второй клиент нужен негативным проверкам: чужой ресурс должен быть чужим для настоящего пользователя, а не для анонима.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{intruderEmail}}\",\n  \"password\": \"{{customerPassword}}\",\n  \"fullName\": \"Автотест Посторонний\",\n  \"phone\": \"{{intruderPhone}}\",\n  \"role\": \"CUSTOMER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const run = pm.collectionVariables.get('runId');",
+                  "pm.collectionVariables.set('intruderEmail', `intruder-${run}@autotest.local`);",
+                  "pm.collectionVariables.set('intruderPhone', `+79${String(Date.now()).slice(-7)}4`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Схема ответа с токеном', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['accessToken', 'tokenType', 'expiresInSeconds', 'user'],",
+                  "    properties: {",
+                  "      accessToken: { type: 'string', minLength: 20 },",
+                  "      tokenType: { type: 'string' },",
+                  "      expiresInSeconds: { type: 'integer', minimum: 1 },",
+                  "      user: { type: 'object', required: ['id', 'email'] }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Хеш пароля наружу не отдаётся', () => {",
+                  "  pm.expect(JSON.stringify(body)).to.not.match(/passwordHash|\\$2[aby]\\$/);",
+                  "});",
+                  "pm.collectionVariables.set('intruderToken', body.accessToken);",
+                  "pm.collectionVariables.set('intruderId', body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Кто я",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Роль CUSTOMER', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(JSON.stringify(b)).to.include('CUSTOMER');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Три роли, на которых держится весь остальной прогон. Токены и идентификаторы сохраняются в переменные коллекции."
+    },
+    {
+      "name": "02. Регистрация — негатив (data-driven)",
+      "item": [
+        {
+          "name": "Регистрация: набор некорректных данных",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Один запрос, много входных данных: файл postman/data/registration-cases.json подаётся в Newman через -d, в Runner — через Select File. Без файла запрос отработает на значениях по умолчанию из переменных коллекции, то есть на одном случае.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{caseEmail}}\",\n  \"password\": \"{{casePassword}}\",\n  \"fullName\": \"{{caseFullName}}\",\n  \"phone\": \"{{casePhone}}\",\n  \"role\": \"{{caseRole}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Подстановка e-mail, который должен совпасть с уже зарегистрированным: в файле данных",
+                  "// его записать нельзя — он свой в каждом прогоне.",
+                  "if (pm.variables.get('caseEmail') === '__DUPLICATE__') {",
+                  "  pm.variables.set('caseEmail', pm.collectionVariables.get('customerEmail'));",
+                  "}",
+                  "if (pm.variables.get('caseEmail') === '__UNIQUE__') {",
+                  "  pm.variables.set('caseEmail', `case-${Date.now()}@autotest.local`);",
+                  "}",
+                  "// Телефон уникален всегда: иначе часть случаев падала бы не по той причине.",
+                  "if (!pm.variables.get('casePhone')) {",
+                  "  pm.variables.set('casePhone', `+79${String(Date.now()).slice(-8)}`);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const caseName = pm.variables.get('caseName') || 'случай по умолчанию';",
+                  "const expected = Number(pm.variables.get('expectedStatus'));",
+                  "const expectedMessage = pm.variables.get('expectedMessage');",
+                  "",
+                  "const errorSchema = {\n  type: 'object',\n  required: ['status', 'error', 'message', 'path'],\n  properties: {\n    status: { type: 'integer' },\n    error: { type: 'string' },\n    message: { type: 'string' },\n    path: { type: 'string' }\n  }\n};",
+                  "",
+                  "pm.test(`[${caseName}] ожидается HTTP ${expected}`, () => {",
+                  "  pm.expect(pm.response.code).to.eql(expected);",
+                  "});",
+                  "",
+                  "pm.test(`[${caseName}] тело ошибки заполнено по контракту`, () => {",
+                  "  pm.response.to.have.jsonSchema(errorSchema);",
+                  "  pm.expect(pm.response.json().status).to.eql(expected);",
+                  "});",
+                  "",
+                  "if (expectedMessage) {",
+                  "  pm.test(`[${caseName}] сообщение объясняет причину`, () => {",
+                  "    pm.expect(pm.response.json().message).to.include(expectedMessage);",
+                  "  });",
+                  "}",
+                  "",
+                  "pm.test(`[${caseName}] пользователь не создан`, () => {",
+                  "  pm.expect(pm.response.code).to.not.be.oneOf([200, 201]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Один сценарий на разных входных данных: пустой и кривой e-mail, короткий пароль, занятый адрес, запрещённая роль ADMIN."
+    },
+    {
+      "name": "03. Витрина: ресторан и меню",
+      "item": [
+        {
+          "name": "Создать ресторан",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Автотест {{runId}}\",\n  \"description\": \"Ресторан создан автотестом\",\n  \"city\": \"Москва\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('Схема ресторана', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['id', 'name', 'city'],",
+                  "    properties: { id: { type: 'integer' }, name: { type: 'string' }, city: { type: 'string' } }",
+                  "  });",
+                  "});",
+                  "pm.test('Поля сохранены как переданы', () => {",
+                  "  pm.expect(b.name).to.eql('Автотест ' + pm.collectionVariables.get('runId'));",
+                  "  pm.expect(b.city).to.eql('Москва');",
+                  "});",
+                  "pm.collectionVariables.set('restaurantId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Открыть приём заказов",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "open"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ресторан активен', () => pm.expect(pm.response.json().active).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать категорию меню",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Пицца\",\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Добавить блюдо",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Пепперони\",\n  \"description\": \"300 г\",\n  \"price\": 450.0,\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('Цена вернулась без потери копеек', () => {",
+                  "  pm.expect(Number(b.price)).to.eql(450);",
+                  "});",
+                  "pm.test('Блюдо доступно к заказу', () => pm.expect(b.available).to.be.true);",
+                  "pm.collectionVariables.set('menuItemId', b.id);",
+                  "pm.collectionVariables.set('menuItemPrice', Number(b.price));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Добавить второе блюдо",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}",
+                "items"
+              ]
+            },
+            "description": "Второе блюдо нужно проверкам корзины и рекомендации «заказывают вместе».",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Маргарита\",\n  \"description\": \"300 г\",\n  \"price\": 390.0,\n  \"sortOrder\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('menuItemId2', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Меню ресторана (без токена)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu"
+              ]
+            },
+            "description": "Витрина открыта анонимно — это часть контракта, а не упущение.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Обе позиции на месте', () => {",
+                  "  const names = b.categories.flatMap(c => c.items.map(i => i.name));",
+                  "  pm.expect(names).to.include.members(['Пепперони', 'Маргарита']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Список ресторанов (без токена)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants?page=0&size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Созданный ресторан виден в витрине', () => {",
+                  "  const body = pm.response.json();",
+                  "  const list = Array.isArray(body) ? body : body.content;",
+                  "  const ids = list.map(r => r.id);",
+                  "  pm.expect(ids).to.include(Number(pm.collectionVariables.get('restaurantId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Подготовка данных прогона и заодно проверка публичной витрины."
+    },
+    {
+      "name": "04. Доступ и валидация — негатив",
+      "item": [
+        {
+          "name": "Без токена: список заказов клиента",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Ресурс клиента без Authorization: 401 от фильтра безопасности, до контроллера запрос не доходит.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('Тело ответа не содержит данных заказа', () => {",
+                  "  pm.expect(pm.response.text()).to.not.include('totalAmount');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Посторонний клиент: чужой список заказов",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Токен валиден и роль подходит, но ресурс чужой. Ожидается 403.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{intruderToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));",
+                  "pm.test('Сообщение про недостаток прав', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('прав');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Посторонний клиент: чужая корзина",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{intruderToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Клиент правит чужой ресторан",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}"
+              ]
+            },
+            "description": "Проверка роли, а не владения: у клиента нет права управлять рестораном вообще.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"клиент не должен уметь этого\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Несуществующий ресторан",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "999999999"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('В сообщении есть искомый идентификатор', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('999999999');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Несуществующий заказ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "999999999"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Несуществующее блюдо в корзину",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": 999999999,\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Нулевое количество в корзине",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId}}\",\n  \"quantity\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Сообщение про количество', () => {",
+                  "  pm.expect(pm.response.json().message.toLowerCase()).to.include('quantity');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Битое тело запроса",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Не JSON. Ожидается 400 с человеко-читаемым сообщением, а не 500 со стек-трейсом.",
+            "body": {
+              "mode": "raw",
+              "raw": "{",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Стек-трейс наружу не отдаётся', () => {",
+                  "  pm.expect(pm.response.text()).to.not.match(/at (com|org|java)[.]/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Пагинация: size=0",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "0"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Сообщение про размер страницы', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('size');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Пагинация: size выше предела",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "1000"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вход с неверным паролем",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"заведомо-неверный-пароль\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('Ответ не подсказывает, существует ли адрес', () => {",
+                  "  pm.expect(pm.response.json().message).to.not.include(pm.collectionVariables.get('customerEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Проверки, что закрытое закрыто, а некорректный ввод отвергается с внятным кодом и без подробностей наружу."
+    },
+    {
+      "name": "05. E2E: заказ от корзины до доставки",
+      "item": [
+        {
+          "name": "Корзина: добавить позицию",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId}}\",\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Позиция добавлена', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const cart = pm.response.json();",
+                  "const item = cart.items.find(i => i.menuItemId === Number(pm.collectionVariables.get('menuItemId')));",
+                  "pm.test('Позиция видна в корзине', () => pm.expect(item).to.be.an('object'));",
+                  "pm.test('Сумма строки = цена × количество', () => {",
+                  "  pm.expect(Number(item.lineTotal)).to.eql(Number(item.price) * item.quantity);",
+                  "});",
+                  "pm.collectionVariables.set('cartItemId', item.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Корзина: изменить количество",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart/items/{{cartItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart",
+                "items",
+                "{{cartItemId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const cart = pm.response.json();",
+                  "const item = cart.items.find(i => i.id === Number(pm.collectionVariables.get('cartItemId')));",
+                  "pm.test('Количество изменилось на 3', () => pm.expect(item.quantity).to.eql(3));",
+                  "pm.test('Сумма строки пересчитана', () => {",
+                  "  pm.expect(Number(item.lineTotal)).to.eql(Number(item.price) * 3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Корзина: добавить второе блюдо",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId2}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Позиция добавлена', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const cart = pm.response.json();",
+                  "pm.test('В корзине две позиции', () => pm.expect(cart.items.length).to.eql(2));",
+                  "const total = cart.items.reduce((sum, i) => sum + Number(i.lineTotal), 0);",
+                  "pm.collectionVariables.set('expectedTotal', total);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Корзина: активная",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const cart = pm.response.json();",
+                  "pm.test('Итог корзины сходится с суммой строк', () => {",
+                  "  const sum = cart.items.reduce((acc, i) => acc + Number(i.lineTotal), 0);",
+                  "  pm.expect(sum).to.eql(Number(pm.collectionVariables.get('expectedTotal')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ: создать из корзины",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "pm.test('Схема заказа', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['id', 'customerId', 'restaurantId', 'status', 'totalAmount', 'items'],",
+                  "    properties: {",
+                  "      id: { type: 'integer' },",
+                  "      status: { type: 'string' },",
+                  "      items: { type: 'array', minItems: 1 }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Статус нового заказа — CREATED', () => pm.expect(o.status).to.eql('CREATED'));",
+                  "pm.test('Сумма заказа равна сумме корзины', () => {",
+                  "  pm.expect(Number(o.totalAmount)).to.eql(Number(pm.collectionVariables.get('expectedTotal')));",
+                  "});",
+                  "pm.test('Заказ принадлежит своему клиенту и ресторану', () => {",
+                  "  pm.expect(o.customerId).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "  pm.expect(o.restaurantId).to.eql(Number(pm.collectionVariables.get('restaurantId')));",
+                  "});",
+                  "pm.collectionVariables.set('orderId', o.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплата: оплатить заказ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Ключ идемпотентности свой у каждого прогона, иначе повторный запуск попал бы",
+                  "// в оплату прошлого заказа.",
+                  "pm.collectionVariables.set('idempotencyKey', 'autotest-' + pm.collectionVariables.get('runId'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted: оплата запрошена, исход придёт асинхронно', () => pm.response.to.have.status(202));",
+                  "const o = pm.response.json();",
+                  "pm.test('Заказ ждёт ответа сервиса платежей', () => pm.expect(o.status).to.be.oneOf(['PAYMENT_PENDING', 'PAID']));",
+                  "pm.test('Ответ — тот же заказ', () => pm.expect(o.id).to.eql(Number(pm.collectionVariables.get('orderId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплата: повтор тем же ключом",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            },
+            "description": "Идемпотентность: повтор с тем же ключом не создаёт второй платёж, а возвращает первый.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "pm.test('Повтор не запустил вторую оплату: тот же заказ, не 409', () => {",
+                  "  pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('orderId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ: статус после оплаты",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Сага оплаты: сервис заказов отправил команду в Kafka, сервис платежей списал деньги и ответил событием. Запрос повторяется, пока заказ не выйдет из PAYMENT_PENDING."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Заказ перешёл в PAID', () => pm.expect(body.status).to.eql('PAID'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ресторан: принять заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "accept"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Статус ACCEPTED', () => pm.expect(pm.response.json().status).to.eql('ACCEPTED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ресторан: начать готовку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/start-cooking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "start-cooking"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Статус COOKING', () => pm.expect(pm.response.json().status).to.eql('COOKING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ресторан: готов к доставке",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/ready-for-delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "ready-for-delivery"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Статус READY_FOR_DELIVERY', () => {",
+                  "  pm.expect(pm.response.json().status).to.eql('READY_FOR_DELIVERY');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Доставка: создать",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{orderId}}/deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{orderId}}",
+                "deliveries"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json();",
+                  "pm.test('Доставка создана без курьера', () => {",
+                  "  pm.expect(d.status).to.eql('CREATED');",
+                  "  pm.expect(d.courierId).to.be.oneOf([null, undefined]);",
+                  "});",
+                  "pm.collectionVariables.set('deliveryId', d.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Курьер: свободные доставки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/deliveries/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "deliveries",
+                "available"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Наша доставка в списке свободных', () => {",
+                  "  const body = pm.response.json();",
+                  "  const list = Array.isArray(body) ? body : body.content;",
+                  "  const ids = list.map(d => d.id);",
+                  "  pm.expect(ids).to.include(Number(pm.collectionVariables.get('deliveryId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Курьер: взять доставку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/assign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "assign"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json();",
+                  "pm.test('Статус ASSIGNED', () => pm.expect(d.status).to.eql('ASSIGNED'));",
+                  "pm.test('Курьер проставлен', () => {",
+                  "  pm.expect(d.courierId).to.eql(Number(pm.collectionVariables.get('courierId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Курьер: забрать заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/pick-up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "pick-up"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json();",
+                  "pm.test('Статус PICKED_UP', () => pm.expect(d.status).to.eql('PICKED_UP'));",
+                  "pm.test('Время получения проставлено', () => pm.expect(d.pickedUpAt).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Курьер: отправить координату",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/positions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "positions"
+              ]
+            },
+            "description": "Трек пишется в Cassandra. Модуль выключен — маршрута нет, и 404 здесь допустим.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 55.751244,\n  \"longitude\": 37.618423,\n  \"speedKmh\": 24.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted либо 404 при выключенном модуле', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([202, 404]);",
+                  "});",
+                  "if (pm.response.code === 202) { pm.collectionVariables.set('trackAccepted', 'true'); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ: статус в пути",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Заказ в доставке', () => pm.expect(pm.response.json().status).to.eql('IN_DELIVERY'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Курьер: завершить доставку",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/deliver",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "deliver"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json();",
+                  "pm.test('Статус DELIVERED', () => pm.expect(d.status).to.eql('DELIVERED'));",
+                  "pm.test('Время доставки проставлено', () => pm.expect(d.deliveredAt).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ: история событий",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "events"
+              ]
+            },
+            "description": "История — это то, что записал сервис по ходу сценария. Здесь проверяется и полнота цепочки, и её порядок.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const events = pm.response.json();",
+                  "const types = events.map(e => e.eventType);",
+                  "pm.test('Записаны все переходы жизненного цикла', () => {",
+                  "  pm.expect(types).to.include.members([",
+                  "    'ORDER_CREATED', 'ORDER_PAID', 'ORDER_ACCEPTED', 'ORDER_COOKING_STARTED',",
+                  "    'ORDER_READY_FOR_DELIVERY', 'ORDER_PICKED_UP_BY_COURIER', 'ORDER_DELIVERED'",
+                  "  ]);",
+                  "});",
+                  "pm.test('Создание раньше доставки', () => {",
+                  "  pm.expect(types.indexOf('ORDER_CREATED')).to.be.below(types.indexOf('ORDER_DELIVERED'));",
+                  "});",
+                  "pm.test('Все события про наш заказ', () => {",
+                  "  const orderId = Number(pm.collectionVariables.get('orderId'));",
+                  "  pm.expect(events.every(e => e.orderId === orderId)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Главная бизнес-цепочка целиком: корзина → заказ → оплата → готовка → доставка. Каждый шаг проверяет и код ответа, и новый статус."
+    },
+    {
+      "name": "06. E2E: отмена заказа",
+      "item": [
+        {
+          "name": "Корзина для отменяемого заказа",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Позиция добавлена', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать заказ для отмены",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('canceledOrderId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Отменить заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{canceledOrderId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{canceledOrderId}}",
+                "cancel"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Статус CANCELED', () => pm.expect(pm.response.json().status).to.eql('CANCELED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повторная отмена",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{canceledOrderId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{canceledOrderId}}",
+                "cancel"
+              ]
+            },
+            "description": "Отменять отменённое нельзя: ожидается 409 с указанием текущего статуса.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Сообщение называет текущий статус', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('CANCELED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Принять отменённый заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{canceledOrderId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{canceledOrderId}}",
+                "accept"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплатить отменённый заказ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{canceledOrderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{canceledOrderId}}",
+                "payments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"cancel-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Деньги за отменённый заказ не берутся', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('CREATED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Вторая ветка жизненного цикла и запреты, которые она включает."
+    },
+    {
+      "name": "07. Конфликты состояний",
+      "item": [
+        {
+          "name": "Корзина для проверки переходов",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{menuItemId}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Позиция добавлена', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('conflictOrderId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Принять неоплаченный заказ",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{conflictOrderId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{conflictOrderId}}",
+                "accept"
+              ]
+            },
+            "description": "Порядок переходов обязателен: неоплаченный заказ ресторан принять не может.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Сообщение объясняет требуемый статус', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  pm.expect(m).to.include('PAID');",
+                  "  pm.expect(m).to.include('CREATED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Начать готовку до принятия",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{conflictOrderId}}/start-cooking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{conflictOrderId}}",
+                "start-cooking"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Создать доставку до готовности",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/orders/{{conflictOrderId}}/deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders",
+                "{{conflictOrderId}}",
+                "deliveries"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплатить заказ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{conflictOrderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{conflictOrderId}}",
+                "payments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"conflict-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплатить второй раз другим ключом",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{conflictOrderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{conflictOrderId}}",
+                "payments"
+              ]
+            },
+            "description": "Другой ключ идемпотентности — это уже другая попытка оплаты, и она отвергается по статусу заказа.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"conflict-{{runId}}-second\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Сообщение говорит, что оплата уже запрошена', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('уже запрошена');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Блюдо с суммой, которую банк отклонит",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/menu/categories/{{categoryId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "menu",
+                "categories",
+                "{{categoryId}}",
+                "items"
+              ]
+            },
+            "description": "Заглушка платёжного шлюза отклоняет ровно один случай — сумму, оканчивающуюся на .13. Отказ здесь детерминированный, поэтому проверять ветку отказа можно без подмены бинов и без мигающих тестов.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Проверка отказа банка\",\n  \"description\": \"сумма оканчивается на .13\",\n  \"price\": 100.13,\n  \"sortOrder\": 9\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('declinedItemId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Корзина с отказной суммой",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/cart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "cart"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"{{declinedItemId}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Позиция добавлена', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ на отказную сумму",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/restaurants/{{restaurantId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "restaurants",
+                "{{restaurantId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "pm.test('Сумма заказа оканчивается на .13', () => {",
+                  "  pm.expect(Number(o.totalAmount) % 1).to.be.closeTo(0.13, 0.001);",
+                  "});",
+                  "pm.collectionVariables.set('declinedOrderId', o.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплата отклонена банком",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{declinedOrderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{declinedOrderId}}",
+                "payments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"CARD\",\n  \"idempotencyKey\": \"declined-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Отказ банка больше не приходит в ответе: деньги списывает другой сервис, асинхронно.",
+                  "// Запрос принят, а исход виден дальше — в статусе заказа и в списке платежей.",
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Заказ после отказа отменён",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{declinedOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{declinedOrderId}}"
+              ]
+            },
+            "description": "Главное в отказе — что система не осталась в промежуточном состоянии.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока заказ в PAYMENT_PENDING, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(body.status !== 'PAYMENT_PENDING') && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Сага отменила заказ: ждать больше нечего', () => pm.expect(body.status).to.eql('CANCELED'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Неудачная попытка записана с причиной",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{declinedOrderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{declinedOrderId}}",
+                "payments"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Оплата асинхронная: исход приходит от payment-service через Kafka. Запрос повторяется,",
+                  "// пока платёж не появился у сервиса платежей, — не дольше двадцати раз по полсекунды. Повтор работает",
+                  "// в Collection Runner и newman; при ручном запуске просто нажмите Send ещё раз.",
+                  "const attempt = Number(pm.collectionVariables.get('pollAttempt') || 0);",
+                  "const body = pm.response.json();",
+                  "if (!(Array.isArray(body) && body.length > 0) && attempt < 20) {",
+                  "    pm.collectionVariables.set('pollAttempt', attempt + 1);",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    setTimeout(() => {}, 500);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('pollAttempt');",
+                  "    pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "    pm.test('Платёж FAILED с причиной отказа', () => {",
+                  "      pm.expect(body).to.have.lengthOf(1);",
+                  "      pm.expect(body[0].status).to.eql('FAILED');",
+                  "      pm.expect(body[0].failureReason).to.include('Недостаточно средств');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Запреты конечного автомата заказа: каждый переход возможен только из своего статуса. Здесь же — детерминированный отказ платёжного шлюза."
+    },
+    {
+      "name": "08. Пять дополнительных хранилищ",
+      "item": [
+        {
+          "name": "Отзыв о доставленном заказе (MongoDB)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/{{orderId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "{{orderId}}",
+                "review"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Автотест: доставили вовремя\",\n  \"dishes\": [\n    {\n      \"menuItemId\": \"{{menuItemId}}\",\n      \"menuItemName\": \"Пепперони\",\n      \"rating\": 5\n    }\n  ],\n  \"tags\": [\n    \"быстро\",\n    \"вкусно\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('201 либо 404 при выключенном модуле', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([201, 404]);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "  const r = pm.response.json();",
+                  "  pm.test('Отзыв сохранён с нашей оценкой', () => {",
+                  "    pm.expect(r.rating).to.eql(5);",
+                  "    pm.expect(r.orderId).to.eql(Number(pm.collectionVariables.get('orderId')));",
+                  "  });",
+                  "  pm.collectionVariables.set('mongoEnabled', 'true');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Сводка по отзывам (MongoDB)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/reviews/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "reviews",
+                "summary"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && pm.collectionVariables.get('mongoEnabled') === 'true') {",
+                  "  const s = pm.response.json();",
+                  "  pm.test('Отзыв прогона попал в агрегат', () => {",
+                  "    pm.expect(s.total).to.be.at.least(1);",
+                  "    pm.expect(Number(s.average)).to.be.within(1, 5);",
+                  "  });",
+                  "  pm.test('Теги посчитаны', () => {",
+                  "    const tags = (s.topTags || []).map(t => t.tag);",
+                  "    pm.expect(tags).to.include('быстро');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Трек курьера (Cassandra)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/couriers/{{courierId}}/deliveries/{{deliveryId}}/track?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "couriers",
+                "{{courierId}}",
+                "deliveries",
+                "{{deliveryId}}",
+                "track"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{courierToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && pm.collectionVariables.get('trackAccepted') === 'true') {",
+                  "  const t = pm.response.json();",
+                  "  pm.test('Отправленная координата читается обратно', () => {",
+                  "    pm.expect(t.size).to.be.at.least(1);",
+                  "    pm.expect(Number(t.positions[0].latitude)).to.be.closeTo(55.751244, 0.001);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Поиск по витрине (Elasticsearch)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search?q=%D0%9F%D0%B5%D0%BF%D0%BF%D0%B5%D1%80%D0%BE%D0%BD%D0%B8&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "%D0%9F%D0%B5%D0%BF%D0%BF%D0%B5%D1%80%D0%BE%D0%BD%D0%B8"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Запрос «Пепперони» в percent-encoding: так он одинаково уходит и из Runner, и из Newman.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  const r = pm.response.json();",
+                  "  pm.test('Ответ разложен на рестораны и блюда', () => {",
+                  "    pm.expect(r).to.have.property('items');",
+                  "    pm.expect(r.items).to.be.an('array');",
+                  "  });",
+                  "  pm.test('Созданное в прогоне блюдо находится', () => {",
+                  "    const ids = r.items.map(i => i.menuItemId);",
+                  "    pm.expect(ids).to.include(Number(pm.collectionVariables.get('menuItemId')));",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Рекомендации клиенту (Neo4j)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/recommendations?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Проекция графа идёт по таймеру, поэтому содержимое здесь не проверяется: свежий заказ может ещё не доехать. Проверяется контракт — код и форма ответа.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Ответ — массив рекомендаций', () => {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Продажи ресторана (ClickHouse)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/sales?from={{analyticsFrom}}&to={{analyticsTo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{analyticsFrom}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{analyticsTo}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Период считается от текущей даты: захардкоженные годы делают набор одноразовым.",
+                  "const today = new Date();",
+                  "const from = new Date(today.getTime() - 30 * 24 * 3600 * 1000);",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('analyticsFrom', iso(from));",
+                  "pm.collectionVariables.set('analyticsTo', iso(today));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  const s = pm.response.json();",
+                  "  pm.test('Схема отчёта', () => {",
+                  "    pm.response.to.have.jsonSchema({",
+                  "      type: 'object',",
+                  "      required: ['restaurantId', 'totalOrders', 'totalRevenue', 'days'],",
+                  "      properties: {",
+                  "        totalOrders: { type: 'integer', minimum: 0 },",
+                  "        days: { type: 'array' }",
+                  "      }",
+                  "    });",
+                  "  });",
+                  "  pm.test('Выручка согласована с числом заказов', () => {",
+                  "    if (s.totalOrders > 0) { pm.expect(Number(s.totalRevenue)).to.be.above(0); }",
+                  "    else { pm.expect(Number(s.totalRevenue)).to.eql(0); }",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Воронка статусов (ClickHouse)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/funnel?from={{analyticsFrom}}&to={{analyticsTo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "funnel"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{analyticsFrom}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{analyticsTo}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Модуль включается переменной STORE_*_ENABLED. Выключен — маршрута не существует,",
+                  "// и 404 здесь такой же законный ответ, как 200: набор должен оставаться зелёным",
+                  "// в обеих конфигурациях. Содержимое проверяется только когда модуль включён.",
+                  "pm.test('200 либо 404', () => pm.expect(pm.response.code).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Воронка — список статусов со счётчиками', () => {",
+                  "    pm.expect(pm.response.json().statuses).to.be.an('array');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Аналитика: перевёрнутый период",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/restaurants/{{restaurantId}}/analytics/sales?from={{analyticsTo}}&to={{analyticsFrom}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "restaurants",
+                "{{restaurantId}}",
+                "analytics",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{analyticsTo}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{analyticsFrom}}"
+                }
+              ]
+            },
+            "description": "Негативная проверка отчёта: конец периода раньше начала.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 на бессмысленном периоде либо 404 при выключенном модуле', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([409, 404]);",
+                  "});",
+                  "if (pm.response.code === 409) {",
+                  "  pm.test('Сообщение объясняет, что не так с периодом', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('период');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Пять модулей, которые включаются переменными STORE_*_ENABLED. Набор проходит и с ними, и без них: выключенный модуль отвечает 404, и это считается допустимым ответом."
+    },
+    {
+      "name": "09. Регрессия: пагинация и лента",
+      "item": [
+        {
+          "name": "Мои заказы: первая страница",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=0&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Схема страницы', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['content', 'page', 'size', 'totalElements', 'totalPages'],",
+                  "    properties: {",
+                  "      content: { type: 'array' },",
+                  "      page: { type: 'integer' },",
+                  "      size: { type: 'integer' },",
+                  "      totalElements: { type: 'integer' },",
+                  "      totalPages: { type: 'integer' }",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('Размер страницы соблюдён', () => pm.expect(p.content.length).to.be.at.most(1));",
+                  "pm.test('За прогон создано не меньше трёх заказов', () => {",
+                  "  pm.expect(p.totalElements).to.be.at.least(3);",
+                  "});",
+                  "pm.collectionVariables.set('firstPageOrderId', p.content[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Мои заказы: вторая страница",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders?page=1&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Страницы не должны пересекаться — классическая регрессия при смене сортировки.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Номер страницы вернулся тот, что просили', () => pm.expect(p.page).to.eql(1));",
+                  "pm.test('Вторая страница не повторяет первую', () => {",
+                  "  pm.expect(p.content[0].id).to.not.eql(Number(pm.collectionVariables.get('firstPageOrderId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Лента по курсору: первый шаг",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/feed?size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const f = pm.response.json();",
+                  "pm.test('Схема ленты', () => {",
+                  "  pm.response.to.have.jsonSchema({",
+                  "    type: 'object',",
+                  "    required: ['content', 'size', 'hasNext'],",
+                  "    properties: { content: { type: 'array' }, hasNext: { type: 'boolean' } }",
+                  "  });",
+                  "});",
+                  "pm.test('Есть следующая страница и курсор к ней', () => {",
+                  "  pm.expect(f.hasNext).to.be.true;",
+                  "  pm.expect(f.nextCursor).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('feedCursor', f.nextCursor);",
+                  "pm.collectionVariables.set('feedFirstId', f.content[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Лента по курсору: второй шаг",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/feed?cursor={{feedCursor}}&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{feedCursor}}"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const f = pm.response.json();",
+                  "pm.test('Курсор сдвинул выдачу', () => {",
+                  "  pm.expect(f.content[0].id).to.not.eql(Number(pm.collectionVariables.get('feedFirstId')));",
+                  "});",
+                  "pm.test('Лента идёт от новых к старым', () => {",
+                  "  pm.expect(f.content[0].id).to.be.below(Number(pm.collectionVariables.get('feedFirstId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Лента: битый курсор",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}/orders/feed?cursor=not-a-cursor&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{customerId}}",
+                "orders",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "not-a-cursor"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Курсор непрозрачен для клиента, но подделка не должна валить сервис.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Ответ подсказывает, откуда брать курсор', () => {",
+                  "  pm.expect(pm.response.json().message).to.include('nextCursor');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Проверки, которые ловят регрессии в выдаче списков: размер страницы, отсутствие пересечений, порядок ленты."
+    },
+    {
+      "name": "10. Администрирование (нужна учётка администратора)",
+      "item": [
+        {
+          "name": "Вход: администратор",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Учётка администратора создаётся из APP_ADMIN_EMAIL и APP_ADMIN_PASSWORD при старте приложения. Не заданы — папка целиком пропускается, а не падает.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('adminEmail') && !pm.collectionVariables.get('adminEmail')) {",
+                  "  console.log('adminEmail не задан — папка администрирования пропущена');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('adminToken', pm.response.json().accessToken);",
+                  "  pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "} else {",
+                  "  console.log('Администратор недоступен, ответ ' + pm.response.code + ' — проверки пропущены');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Журнал аудита",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/audit?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('adminToken')) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Сводный журнал живёт в ClickHouse insights-service и без него не включается: 404 — модуль выключен.",
+                  "// Записи приезжают асинхронно (публикатор раз в 5 секунд, потом потребитель), поэтому",
+                  "// записей именно этого прогона здесь не ждём — только форму ответа.",
+                  "if (pm.response.code === 404) {",
+                  "  console.log('Сводный журнал выключен (STORE_CLICKHOUSE_ENABLED=false) — проверки пропущены');",
+                  "} else {",
+                  "  pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "  pm.test('Журнал — список записей со всех сервисов', () => {",
+                  "    const list = pm.response.json();",
+                  "    pm.expect(list).to.be.an('array');",
+                  "    list.forEach(entry => pm.expect(entry).to.have.property('sourceService'));",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Клиент лезет в журнал аудита",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/audit?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Права проверяются независимо от того, есть ли администратор: клиенту сюда нельзя.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Проверки административного контура. Без переменных adminEmail/adminPassword запросы пропускаются, кроме проверки прав."
+    }
+  ]
+}

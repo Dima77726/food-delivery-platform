@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 005-create-cart-and-cart-item
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/005-create-cart-and-cart-item.sql
-            relativeToChangelogFile: true
-            splitStatements: true

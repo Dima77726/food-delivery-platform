@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-demo-catalog
+      author: dima
+      changes:
+        - sqlFile:
+            path: sql/002-seed-demo-catalog.sql
+            relativeToChangelogFile: true
+            # Один DO-блок с точками с запятой внутри: делить его на операторы нельзя.
+            splitStatements: false

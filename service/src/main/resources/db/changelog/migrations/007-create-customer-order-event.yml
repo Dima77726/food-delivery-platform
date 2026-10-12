@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 007-create-customer-order-event
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/007-create-customer-order-event.sql
-            relativeToChangelogFile: true
-            splitStatements: true

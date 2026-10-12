@@ -1,0 +1,200 @@
+spring:
+  application:
+    name: api-gateway
+
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  data:
+    redis:
+      # Только для ограничения частоты. Клиент соединение лениво, поэтому выключенный
+      # ограничитель Redis не трогает вовсе.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  reactor:
+    # Контекст трассировки живёт в Reactor-контексте, а не в ThreadLocal: запрос в WebFlux
+    # переходит между потоками, и без автоматического переноса спан шлюза терял бы родителя
+    # на первом же асинхронном шаге, а traceparent уходил бы в сервис пустым.
+    context-propagation: auto
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Побеждает первый подходящий маршрут в порядке order: узкие пути идут раньше
+          # широких. Порядок задан явно, а не положением в списке — так он не зависит от того,
+          # как список собран.
+          #
+          # Монолита больше нет: каждый путь принадлежит своему сервису, а маршрута «всё
+          # остальное» не осталось — незнакомый путь шлюз сам отвечает 404. Переезд прошёл
+          # так, что клиент не поменял ни одного URL: ради этого шлюз и нужен.
+          routes:
+            - id: notification-service
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8083}
+              order: 1
+              predicates:
+                - Path=/api/v1/notifications/**
+
+            # Пользователи: регистрация, вход и их администрирование.
+            - id: identity-service
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8085}
+              order: 1
+              predicates:
+                - Path=/api/v1/auth/**,/api/v1/admin/users,/api/v1/admin/users/**
+
+            # Платежи читает payment-service — только GET. Запуск оплаты (POST на тот же адрес)
+            # принадлежит сервису заказов: он ведёт сагу, а сюда она приходит командой через
+            # Kafka. Один путь, два владельца — различает их метод запроса.
+            - id: payment-service
+              uri: ${PAYMENT_SERVICE_URL:http://localhost:8087}
+              order: 1
+              predicates:
+                - Path=/api/v1/customers/*/payments,/api/v1/customers/*/orders/*/payments
+                - Method=GET
+
+            # Трек курьера: точки и маршрут по REST. Пути лежат под заказами и доставками,
+            # поэтому маршрут стоит раньше сервиса заказов — его /orders/** забрал бы и их.
+            - id: tracking-service
+              uri: ${TRACKING_SERVICE_URL:http://localhost:8088}
+              order: 2
+              predicates:
+                - Path=/api/v1/customers/*/orders/*/track,/api/v1/couriers/*/deliveries/*/track,/api/v1/couriers/*/deliveries/*/positions
+
+            # Живой трек: WebSocket. Схема ws:// в адресе включает в шлюзе проксирование
+            # WebSocket — рукопожатие и дальше кадры в обе стороны, пока соединение открыто.
+            - id: tracking-live
+              uri: ${TRACKING_WS_URL:ws://localhost:8088}
+              order: 2
+              predicates:
+                - Path=/ws/tracking,/ws/tracking/**
+
+            # Отзыв о заказе и рекомендации клиенту. Пути под заказом и клиентом, поэтому маршрут
+            # стоит раньше сервиса заказов — его /customers/*/orders/** забрал бы и их.
+            - id: insights-order-scoped
+              uri: ${INSIGHTS_SERVICE_URL:http://localhost:8082}
+              order: 2
+              predicates:
+                - Path=/api/v1/customers/*/orders/*/review,/api/v1/customers/*/recommendations
+
+            # Отзывы и аналитика ресторана. Рестораном их делает только префикс пути, а данные
+            # принадлежат insights-service. Маршрут стоит раньше каталожного /api/v1/restaurants/**.
+            - id: insights-restaurant-scoped
+              uri: ${INSIGHTS_SERVICE_URL:http://localhost:8082}
+              order: 2
+              predicates:
+                - Path=/api/v1/restaurants/*/reviews,/api/v1/restaurants/*/reviews/**,/api/v1/restaurants/*/analytics/**
+
+            # Корзина, заказы клиента и ресторана, доставки и запуск оплаты.
+            # Заказы ресторана живут под /restaurants/{id}, поэтому маршрут стоит раньше каталога.
+            - id: order-service
+              uri: ${ORDER_SERVICE_URL:http://localhost:8086}
+              order: 3
+              predicates:
+                - Path=/api/v1/customers/*/restaurants/*/cart,/api/v1/customers/*/restaurants/*/cart/**,/api/v1/customers/*/restaurants/*/orders,/api/v1/customers/*/orders,/api/v1/customers/*/orders/**,/api/v1/restaurants/*/orders,/api/v1/restaurants/*/orders/**,/api/v1/deliveries/**,/api/v1/couriers/*/deliveries,/api/v1/couriers/*/deliveries/**
+
+            # Каталог: рестораны, меню, поиск и его администрирование.
+            - id: catalog-service
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8084}
+              order: 4
+              predicates:
+                - Path=/api/v1/restaurants,/api/v1/restaurants/**,/api/v1/search,/api/v1/admin/search/**
+
+            # insights-service: GraphQL, песочница к нему, рекомендации по блюду, аналитика
+            # платформы, сводный журнал аудита всех сервисов, администрирование графа. Swagger UI шлюз тоже ведёт сюда, как раньше
+            # вёл в монолит, — у остальных сервисов он на их собственных портах.
+            - id: insights-service
+              uri: ${INSIGHTS_SERVICE_URL:http://localhost:8082}
+              order: 5
+              predicates:
+                - Path=/graphql,/graphql/**,/graphiql,/graphiql/**,/api/v1/menu-items/**,/api/v1/admin/analytics/**,/api/v1/admin/audit,/api/v1/admin/audit/**,/api/v1/admin/recommendations/**,/api/v1/ping,/v3/api-docs/**,/swagger-ui/**,/swagger-ui.html
+
+          default-filters:
+            # Пользователя определяет подписанный токен, и только он. Заголовок с тем же
+            # смыслом, пришедший снаружи, срезается ещё на входе: стоит одному сервису когда-
+            # нибудь начать ему доверять, и любой клиент назовётся кем угодно. Сервисы
+            # заголовку и так не верят — это вторая линия, а не единственная.
+            - RemoveRequestHeader=X-User-Id
+
+          httpclient:
+            # Таймауты обязательны. По умолчанию их нет: зависший сервис держал бы
+            # соединение шлюза бесконечно, а с ним и клиента. Лучше быстро отдать 504.
+            connect-timeout: 2000
+            response-timeout: 15s
+
+app:
+  rate-limit:
+    # Выключено по умолчанию: шлюзу нужен живой Redis, а тесты и запуск из IDE его не поднимают.
+    # Docker Compose включает. Пороги — в токенах: ёмкость ведра (burst) и пополнение в секунду.
+    enabled: ${RATE_LIMIT_ENABLED:false}
+    general:
+      replenish-rate: ${RATE_LIMIT_RATE:50}
+      burst-capacity: ${RATE_LIMIT_BURST:100}
+      requested-tokens: 1
+    # Вход и регистрация: запрос стоит 4 токена при пополнении 1 в секунду и ёмкости 20 —
+    # пять попыток подряд, дальше одна примерно раз в четыре секунды.
+    auth:
+      replenish-rate: ${RATE_LIMIT_AUTH_RATE:1}
+      burst-capacity: ${RATE_LIMIT_AUTH_BURST:20}
+      requested-tokens: ${RATE_LIMIT_AUTH_COST:4}
+
+management:
+  health:
+    redis:
+      # Индикатор Redis — только при включённом ограничителе, иначе недоступный Redis
+      # (его нет в тестах и при запуске из IDE) уводил бы готовность шлюза в DOWN.
+      enabled: ${RATE_LIMIT_ENABLED:false}
+  # Трассировка. Спаны собирает Micrometer Tracing поверх OpenTelemetry и отправляет по OTLP
+  # в Tempo. Сквозной идентификатор trace живёт рядом с X-Correlation-Id, а не вместо него:
+  # метка запроса — наша, она едет и через то, что трассировка не покрывает (outbox, очереди).
+  tracing:
+    sampling:
+      # В локальном стеке — все запросы. В боевом этого слишком много: 0.1 и ниже.
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+  otlp:
+    tracing:
+      export:
+        # Выключено по умолчанию: запуск из IDE и тесты не должны сыпать в лог ошибками
+        # о недоступном Tempo. Docker Compose включает через TRACING_EXPORT_ENABLED=true.
+        enabled: ${TRACING_EXPORT_ENABLED:false}
+    metrics:
+      export:
+        # Метрики по-прежнему снимает Prometheus; стартер тянет OTLP-реестр метрик,
+        # и без этой строки он слал бы то же самое второй раз.
+        enabled: false
+  server:
+    port: ${MANAGEMENT_PORT:9080}
+  endpoints:
+    web:
+      exposure:
+        # gateway — список маршрутов: удобно проверить, куда на самом деле уходит запрос.
+        # Только на служебном порту, наружу он не публикуется.
+        include: health,info,prometheus,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+    gateway:
+      access: read-only
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+logging:
+  pattern:
+    # traceId и spanId — из трассировки, correlationId — наша метка запроса. Прочерк, когда
+    # значения нет: строка из фонового потока не должна выглядеть сбоем разметки.
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{correlationId:-},%X{userId:-}] "
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG

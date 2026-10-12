@@ -1,0 +1,161 @@
+spring:
+  application:
+    name: notification-service
+
+  lifecycle:
+    # Согласовано с stop_grace_period в docker-compose.yml, см. комментарий в монолите.
+    timeout-per-shutdown-phase: 20s
+
+  datasource:
+    # Своя база, а не схема в базе монолита: database-per-service. Сервис владеет своими
+    # данными целиком, и никто, кроме него, в эту базу не ходит — ни на чтение, ни тем
+    # более на запись. Локально база живёт в том же контейнере PostgreSQL, что и база
+    # монолита, в продакшене — где угодно: код от этого не зависит, меняется только URL.
+    url: jdbc:postgresql://${NOTIFICATION_DB_HOST:localhost}:${NOTIFICATION_DB_PORT:5432}/${NOTIFICATION_DB_NAME:notification}
+    # Своя учётная запись, у которой нет прав на чужие базы. Общий пользователь на все
+    # сервисы превратил бы изоляцию данных в соглашение, которое держится на честном слове.
+    username: ${NOTIFICATION_DB_USER}
+    password: ${NOTIFICATION_DB_PASSWORD}
+    hikari:
+      # Сервису нужно немного соединений: HTTP-нагрузки почти нет, соединения держат
+      # потребитель Kafka и обработчики очередей RabbitMQ — по одному на каждого.
+      maximum-pool-size: ${DB_POOL_SIZE:8}
+      minimum-idle: ${DB_POOL_SIZE:8}
+      connection-timeout: 3000
+      leak-detection-threshold: 20000
+
+  liquibase:
+    change-log: classpath:/db/changelog/changelog.yml
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+
+    template:
+      # Отправка и получение сообщений становятся спанами, а traceparent едет заголовком
+      # сообщения: трассу можно проследить из одного сервиса в другой через Kafka.
+      observation-enabled: true
+
+    producer:
+      # Продюсер нужен только для отправки в DLT, но и там потеря сообщения недопустима.
+      acks: all
+      properties:
+        enable.idempotence: true
+
+    consumer:
+      # Та же группа, что была у потребителя в монолите, — см. OrderEventsConsumer.
+      group-id: ${KAFKA_CONSUMER_GROUP:food-delivery-notifications}
+      auto-offset-reset: earliest
+      properties:
+        max.poll.records: 50
+        # Потребитель не должен создавать чужой топик. Иначе, стартуй сервис раньше
+        # монолита, брокер создал бы food-delivery.order-events с настройками по умолчанию —
+        # одной партицией вместо трёх, — и исправлять это пришлось бы пересозданием топика.
+        allow.auto.create.topics: false
+
+    listener:
+      ack-mode: record
+      observation-enabled: true
+
+  rabbitmq:
+    # По умолчанию — брокер из docker-compose, опубликованный на хост. Учётных данных
+    # по умолчанию нет, как и у баз: забытая переменная останавливает сервис на старте.
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
+    # Публикация ждёт подтверждения брокера: «отправлено» должно значить «брокер записал».
+    publisher-confirm-type: simple
+    template:
+      observation-enabled: true
+    listener:
+      simple:
+        observation-enabled: true
+        # Отказ обработчика уводит сообщение в dead-letter exchange (очередь ожидания),
+        # а не обратно в голову той же очереди — иначе сбойное сообщение крутилось бы
+        # в цикле без паузы.
+        default-requeue-rejected: false
+        # Сколько неподтверждённых сообщений брокер выдаёт одному обработчику. Мало —
+        # обработчик простаивает между сообщениями, много — одно медленное письмо
+        # задерживает пачку за собой, и приоритеты перестают работать.
+        prefetch: ${NOTIFICATION_PREFETCH:5}
+        concurrency: ${NOTIFICATION_CONCURRENCY:1}
+        max-concurrency: ${NOTIFICATION_MAX_CONCURRENCY:4}
+
+app:
+  notification:
+    # Пауза перед повтором — TTL очереди ожидания (см. NotificationTopology).
+    retry-delay: ${NOTIFICATION_RETRY_DELAY:PT10S}
+    # Сколько раз пытаться отправить, прежде чем отложить уведомление в notifications.dead.
+    max-attempts: ${NOTIFICATION_MAX_ATTEMPTS:5}
+    # Страховочный опрос: уведомления в PENDING старше sweep-stale-after получают задачу заново.
+    sweep-interval: ${NOTIFICATION_SWEEP_INTERVAL:PT1M}
+    sweep-stale-after: ${NOTIFICATION_SWEEP_STALE_AFTER:PT5M}
+    sweep-enabled: ${NOTIFICATION_SWEEP_ENABLED:true}
+
+  security:
+    jwt:
+      # Открытые ключи сервиса пользователей. Секрета подписи у сервиса нет.
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
+
+management:
+  # Трассировка. Спаны собирает Micrometer Tracing поверх OpenTelemetry и отправляет по OTLP
+  # в Tempo. Сквозной идентификатор trace живёт рядом с X-Correlation-Id, а не вместо него:
+  # метка запроса — наша, она едет и через то, что трассировка не покрывает (outbox, очереди).
+  tracing:
+    sampling:
+      # В локальном стеке — все запросы. В боевом этого слишком много: 0.1 и ниже.
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+  otlp:
+    tracing:
+      export:
+        # Выключено по умолчанию: запуск из IDE и тесты не должны сыпать в лог ошибками
+        # о недоступном Tempo. Docker Compose включает через TRACING_EXPORT_ENABLED=true.
+        enabled: ${TRACING_EXPORT_ENABLED:false}
+    metrics:
+      export:
+        # Метрики по-прежнему снимает Prometheus; стартер тянет OTLP-реестр метрик,
+        # и без этой строки он слал бы то же самое второй раз.
+        enabled: false
+  server:
+    # Порты по умолчанию рассчитаны на запуск всех сервисов из IDE рядом друг с другом.
+    # В docker-compose каждый сервис живёт в своём контейнере и слушает 8080/8081.
+    port: ${MANAGEMENT_PORT:9083}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{correlationId:-},%X{userId:-}] "
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG

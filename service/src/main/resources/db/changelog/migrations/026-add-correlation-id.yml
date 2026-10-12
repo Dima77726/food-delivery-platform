@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 026-add-correlation-id
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/026-add-correlation-id.sql
-            relativeToChangelogFile: true
-            splitStatements: true
