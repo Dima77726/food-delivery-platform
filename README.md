@@ -42,7 +42,7 @@ docker compose --profile full up -d --build
 | API (через шлюз) | http://localhost:8080/api/v1 |
 | Swagger UI (insights) | http://localhost:8080/swagger-ui.html |
 | GraphQL / песочница GraphiQL | http://localhost:8080/graphql, http://localhost:8080/graphiql |
-| Kafka UI | http://localhost:8090 |
+| Kafka UI (профиль `tools`) | http://localhost:8090 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
@@ -50,6 +50,38 @@ docker compose --profile full up -d --build
 Наружу опубликован только шлюз. Сервисы, как и их служебные порты (8081),
 доступны только внутри сети compose: `/actuator/prometheus` и `/actuator/health` видит
 Prometheus, а снаружи их не видно.
+
+### Память
+
+Стек рассчитан на ноутбук с 16 ГБ. У каждого долгоживущего контейнера есть `mem_limit`,
+а JVM-сервисы берут под кучу 60% своего лимита (`Dockerfile`). Без лимита JVM считает своей
+всю виртуальную машину Docker, и восемь сервисов вместе вытесняют остальное — первыми
+падают контейнеры Testcontainers с ошибкой 500 от Docker.
+
+| Что | Потолок |
+|---|---|
+| Инфраструктура: PostgreSQL, Redis, Kafka, RabbitMQ | ~2,4 ГБ |
+| Prometheus и Grafana | 0,6 ГБ |
+| Восемь сервисов (профиль `full`, без Cassandra) | ~4,2 ГБ |
+| Cassandra (входит в `full`) | 1,5 ГБ |
+| MongoDB, Neo4j, ClickHouse, Elasticsearch (профиль `stores`) | ~3,8 ГБ |
+| Kafka UI (профиль `tools`) | 0,5 ГБ |
+
+Это потолки, а не расход: реально стек занимает заметно меньше. Но всё сразу — около 13 ГБ
+потолков, поэтому на 16 ГБ поднимайте только то, с чем работаете. Интеграционные тесты
+поднимают собственные контейнеры; полный стек на время их прогона лучше остановить.
+
+Docker Desktop на WSL 2 по умолчанию отдаёт виртуальной машине половину памяти. Файл
+`%UserProfile%\.wslconfig` поднимает потолок и добавляет подкачку на пиковые моменты:
+
+```ini
+[wsl2]
+memory=9GB
+swap=8GB
+```
+
+Остальные 7 ГБ остаются Windows, IDE и локальной модели AI-агента. После правки —
+`wsl --shutdown` и перезапуск Docker Desktop.
 
 ### Проверить, что всё поднялось
 

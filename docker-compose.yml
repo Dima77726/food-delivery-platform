@@ -1,10 +1,19 @@
 # Ключ version намеренно отсутствует: в Compose V2 он не используется и вызывает
 # предупреждение при запуске.
 
+# Память. Каждому долгоживущему контейнеру задан mem_limit, и это не перестраховка.
+# JVM внутри контейнера считает «всей памятью» его лимит, а без лимита — всю виртуальную
+# машину Docker. С -XX:MaxRAMPercentage из Dockerfile каждый из восьми сервисов считал бы
+# своей кучей несколько гигабайт, и вместе они вытеснили бы всё остальное, включая
+# контейнеры Testcontainers. Лимиты подобраны под ноутбук с 16 ГБ: весь стек с профилями
+# full и stores укладывается примерно в 12 ГБ потолков, а реально занимает меньше.
+# Таблица бюджета — в README, раздел «Память».
+
 services:
   postgres:
     image: postgres:16
     container_name: food-delivery-postgres
+    mem_limit: 512m
     restart: unless-stopped
     environment:
       # Форма ${VAR:?...} останавливает Compose до запуска контейнеров и называет
@@ -104,6 +113,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: food-delivery-redis
+    mem_limit: 320m
     restart: unless-stopped
     # appendonly включён, чтобы кэш переживал перезапуск контейнера. Для чистого кэша это
     # не обязательно — данные восстановимы из базы, — но холодный старт после каждого
@@ -122,6 +132,7 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     container_name: food-delivery-kafka
+    mem_limit: 1g
     restart: unless-stopped
     environment:
       # KRaft: Kafka сама хранит метаданные кластера, ZooKeeper больше не нужен.
@@ -146,6 +157,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # Куча брокера. По умолчанию скрипт запуска берёт 1 ГБ, а локальному брокеру с десятком
+      # топиков хватает половины. Остальное под лимитом контейнера уходит в page cache —
+      # Kafka читает с диска через него, и это ему полезнее, чем лишняя куча.
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     volumes:
       - food_delivery_kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -166,6 +182,7 @@ services:
   rabbitmq:
     image: rabbitmq:4.1.4-management
     container_name: food-delivery-rabbitmq
+    mem_limit: 512m
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?задайте RABBITMQ_USER в .env}
@@ -194,9 +211,14 @@ services:
   # иначе придётся ловить это в логах приложения.
   #
   # Образ от kafbat — продолжение provectuslabs/kafka-ui, который автор заархивировал.
+  #
+  # Профиль tools: интерфейс нужен, когда в Kafka что-то разглядывают, а держать ради этого
+  # ещё одну JVM постоянно незачем. Включить: docker compose --profile tools up -d kafka-ui
   kafka-ui:
+    profiles: ["tools"]
     image: kafbat/kafka-ui:v1.0.0
     container_name: food-delivery-kafka-ui
+    mem_limit: 512m
     restart: unless-stopped
     depends_on:
       kafka:
@@ -212,6 +234,8 @@ services:
       # Интерфейс без авторизации. Наружу он не публикуется дальше localhost,
       # но в общей сети так оставлять нельзя.
       AUTH_TYPE: DISABLED
+      # Половина лимита под кучу: по умолчанию JVM взяла бы четверть, и интерфейсу её мало.
+      JAVA_OPTS: -XX:MaxRAMPercentage=50
     ports:
       # Не 8080: там уже висит шлюз.
       - "${KAFKA_UI_PORT:-8090}:8080"
@@ -264,6 +288,7 @@ services:
       args:
         MODULE: insights-service
     container_name: food-delivery-insights-service
+    mem_limit: 640m
     restart: unless-stopped
     # По умолчанию Docker добивает контейнер через 10 секунд после SIGTERM. Приложение
     # завершается штатно и ждёт текущую работу до 20 секунд (spring.lifecycle
@@ -345,6 +370,7 @@ services:
       args:
         MODULE: catalog-service
     container_name: food-delivery-catalog-service
+    mem_limit: 640m
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
@@ -391,6 +417,7 @@ services:
       args:
         MODULE: identity-service
     container_name: food-delivery-identity-service
+    mem_limit: 512m
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
@@ -437,6 +464,7 @@ services:
       args:
         MODULE: order-service
     container_name: food-delivery-order-service
+    mem_limit: 512m
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
@@ -480,6 +508,7 @@ services:
       args:
         MODULE: payment-service
     container_name: food-delivery-payment-service
+    mem_limit: 512m
     restart: unless-stopped
     stop_grace_period: 30s
     # Ни одного синхронного соседа: команды приходят из Kafka, исходы уходят туда же.
@@ -509,6 +538,7 @@ services:
       args:
         MODULE: tracking-service
     container_name: food-delivery-tracking-service
+    mem_limit: 512m
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
@@ -549,6 +579,7 @@ services:
       args:
         MODULE: notification-service
     container_name: food-delivery-notification-service
+    mem_limit: 512m
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
@@ -586,6 +617,7 @@ services:
       args:
         MODULE: api-gateway
     container_name: food-delivery-api-gateway
+    mem_limit: 384m
     restart: unless-stopped
     stop_grace_period: 30s
     # depends_on на сервисы намеренно нет. Шлюз не нуждается в них для старта: недоступный
@@ -628,6 +660,7 @@ services:
     profiles: ["stores"]
     image: mongo:8.0
     container_name: food-delivery-mongo
+    mem_limit: 512m
     restart: unless-stopped
     # Аутентификация не включена намеренно: это локальный стек, наружу он не смотрит,
     # а строка подключения в application.yml остаётся без пароля и не просит секрета
@@ -650,6 +683,7 @@ services:
     profiles: ["stores", "full"]
     image: cassandra:5.0
     container_name: food-delivery-cassandra
+    mem_limit: 1536m
     restart: unless-stopped
     environment:
       CASSANDRA_CLUSTER_NAME: food-delivery
@@ -680,6 +714,7 @@ services:
     profiles: ["stores"]
     image: neo4j:5.26
     container_name: food-delivery-neo4j
+    mem_limit: 1g
     restart: unless-stopped
     environment:
       # Пароль обязателен: без NEO4J_AUTH образ требует сменить пароль при первом входе,
@@ -708,6 +743,7 @@ services:
     profiles: ["stores"]
     image: clickhouse/clickhouse-server:25.3
     container_name: food-delivery-clickhouse
+    mem_limit: 1280m
     restart: unless-stopped
     environment:
       # Без явно заданной учётной записи образ закрывает сетевой доступ для default.
@@ -737,6 +773,7 @@ services:
     profiles: ["stores"]
     image: docker.elastic.co/elasticsearch/elasticsearch:9.2.0
     container_name: food-delivery-elasticsearch
+    mem_limit: 1g
     restart: unless-stopped
     environment:
       # Один узел: кворум мастеров для локального стека не нужен и не соберётся.
@@ -763,6 +800,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.1.0
     container_name: food-delivery-prometheus
+    mem_limit: 384m
     restart: unless-stopped
     # depends_on на сервисы приложения убран намеренно. Compose отказывается стартовать, если зависимость
     # выключена профилем, а Prometheus в приложении и не нуждается: недоступный таргет
@@ -784,6 +822,7 @@ services:
   grafana:
     image: grafana/grafana:11.5.1
     container_name: food-delivery-grafana
+    mem_limit: 256m
     restart: unless-stopped
     depends_on:
       - prometheus

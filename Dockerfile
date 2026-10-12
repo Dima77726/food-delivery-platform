@@ -81,4 +81,8 @@ EXPOSE 8080
 # Форма exec, а не shell: процесс Java становится PID 1 и получает SIGTERM напрямую.
 # В shell-форме сигнал уходит оболочке, приложение о нём не узнаёт и его добивает SIGKILL
 # по таймауту — с оборванными транзакциями.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
+#
+# Куча — 60% лимита контейнера (mem_limit в docker-compose.yml). Остальное нужно JVM
+# вне кучи: метаспейс, стеки потоков, буферы Netty у gRPC и Kafka. При 75% сервис с лимитом
+# 512 МБ под нагрузкой выходил бы за лимит целиком и получал OOM-kill без единой строки в логе.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-jar", "app.jar"]
