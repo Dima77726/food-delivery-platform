@@ -641,9 +641,13 @@ services:
     mem_limit: 384m
     restart: unless-stopped
     stop_grace_period: 30s
-    # depends_on на сервисы намеренно нет. Шлюз не нуждается в них для старта: недоступный
-    # сервис означает 503 на его маршрутах, а не упавший шлюз. Ровно так это и должно
-    # работать в бою — один лежащий сервис не роняет вход в систему целиком.
+    # depends_on на сервисы приложения намеренно нет. Шлюз не нуждается в них для старта:
+    # недоступный сервис означает 503 на его маршрутах, а не упавший шлюз. Ровно так это и
+    # должно работать в бою — один лежащий сервис не роняет вход в систему целиком.
+    # Redis — другое дело: он инфраструктура, и ограничитель частоты без него не считает.
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
@@ -655,6 +659,10 @@ services:
       - PAYMENT_SERVICE_URL=http://payment-service:8080
       - TRACKING_SERVICE_URL=http://tracking-service:8080
       - TRACKING_WS_URL=ws://tracking-service:8080
+      # Ограничение частоты запросов по адресу клиента; счётчики лежат в Redis.
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true

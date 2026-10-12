@@ -1,0 +1,402 @@
+# Алерты платформы. Правила Grafana (unified alerting), а не Prometheus + Alertmanager:
+# отдельный Alertmanager — ещё один контейнер, а Grafana уже работает и умеет оба источника,
+# включая Loki (по метрикам не увидеть сообщение, ушедшее в DLT).
+#
+# Куда уходят уведомления, здесь не настроено намеренно: контактная точка по умолчанию —
+# письмо на заглушку. Состояние алертов смотрят в Alerting → Alert rules. Подключить
+# Telegram или почту — в Alerting → Contact points; это секреты, в репозиторий им не место.
+
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: "platform"
+    folder: "Food Delivery"
+    interval: "1m"
+    rules:
+      - uid: "outbox-failed"
+        title: "Outbox: события исчерпали попытки"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum by (application) (food_delivery_outbox_backlog{status=\"FAILED\"})"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "1m"
+        annotations:
+          summary: "{{ $$labels.application }}: события в статусе FAILED"
+          description: "Эти события не уйдут сами: публикатор исчерпал попытки. Причину ищите в last_error таблицы order_event_outbox или payment_event_outbox."
+        labels:
+          severity: "critical"
+      - uid: "outbox-backlog"
+        title: "Outbox: очередь не разбирается"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum by (application) (food_delivery_outbox_backlog{status=\"PENDING\"})"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 50
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "5m"
+        annotations:
+          summary: "{{ $$labels.application }}: в очереди outbox больше 50 событий дольше 5 минут"
+          description: "Публикатор встал или брокер недоступен. Очередь обычно пуста: публикация идёт каждые 2 секунды."
+        labels:
+          severity: "warning"
+      - uid: "audit-backlog"
+        title: "Аудит: журнал не уезжает в сводный"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum by (application) (food_delivery_audit_backlog)"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 50
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "10m"
+        annotations:
+          summary: "{{ $$labels.application }}: больше 50 записей аудита не отправлено дольше 10 минут"
+          description: "Сводный журнал в insights-service перестал пополняться. Записи не потеряны — они лежат в audit_log сервиса."
+        labels:
+          severity: "warning"
+      - uid: "http-5xx"
+        title: "HTTP: доля ответов 5xx выше 5%"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum by (application) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum by (application) (rate(http_server_requests_seconds_count[5m])), 0.001) and sum by (application) (rate(http_server_requests_seconds_count[5m])) > 0.05"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0.05
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "5m"
+        annotations:
+          summary: "{{ $$labels.application }}: доля 5xx больше 5% за 5 минут"
+          description: "Условие учитывает только сервисы с трафиком больше 0,05 запроса в секунду: одна ошибка на тишине не повод для тревоги."
+        labels:
+          severity: "critical"
+      - uid: "payments-failed"
+        title: "Платежи: доля отказов выше 20%"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum(rate(food_delivery_payments_total{outcome=\"failed\"}[10m])) / clamp_min(sum(rate(food_delivery_payments_total[10m])), 0.0001) and sum(rate(food_delivery_payments_total[10m])) > 0.01"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0.2
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "10m"
+        annotations:
+          summary: "Больше 20% платежей отклонено"
+          description: "Проверьте платёжный шлюз и журнал payment-service."
+        labels:
+          severity: "warning"
+      - uid: "jvm-heap"
+        title: "JVM: куча почти заполнена"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "sum by (application) (jvm_memory_used_bytes{area=\"heap\"}) / sum by (application) (jvm_memory_max_bytes{area=\"heap\"})"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0.9
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "5m"
+        annotations:
+          summary: "{{ $$labels.application }}: куча заполнена больше чем на 90%"
+          description: "Куча — 60% лимита контейнера (Dockerfile). Постоянные 90% означают утечку или лимит, который мал для нагрузки."
+        labels:
+          severity: "warning"
+      - uid: "service-down"
+        title: "Сервис недоступен для Prometheus"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "max by (service) (up{job!=\"prometheus\"})"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "lt"
+                    params:
+                      - 1
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "5m"
+        annotations:
+          summary: "{{ $$labels.service }}: Prometheus не может снять метрики"
+          description: "Сервис упал или не запущен. В частичном стеке (без профиля full) сработает для всех, кого вы не поднимали, — это ожидаемо."
+        labels:
+          severity: "warning"
+      - uid: "dlt"
+        title: "Kafka: сообщения ушли в DLT"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "loki"
+            model:
+              refId: "A"
+              expr: "sum(count_over_time({service=~\".+\"} |~ \"отправлен[о]? в DLT\" [5m]))"
+              queryType: "instant"
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "0s"
+        annotations:
+          summary: "Сообщение не обработано и отправлено в топик разбора"
+          description: "Смотрите ERROR в логах потребителя (Explore → Loki) и сообщение в Kafka UI. Три попытки не помогли, нужен человек."
+        labels:
+          severity: "critical"
+      - uid: "circuit-open"
+        title: "gRPC: предохранитель разомкнут"
+        condition: "C"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              refId: "A"
+              expr: "max by (application, name) (resilience4j_circuitbreaker_state{state=\"open\"})"
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              refId: "B"
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              refId: "C"
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params:
+                      - 0
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "1m"
+        annotations:
+          summary: "{{ $$labels.application }}: вызовы к {{ $$labels.name }} отклоняются без обращения к соседу"
+          description: "Сосед отвечает ошибками подряд, предохранитель разомкнулся. Запросы, которым нужен этот сервис, получают 503 сразу. Проверьте состояние соседа."
+        labels:
+          severity: "critical"

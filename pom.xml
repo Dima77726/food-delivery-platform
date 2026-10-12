@@ -64,6 +64,9 @@
         <openapi-generator.version>7.24.0</openapi-generator.version>
         <!-- ClickHouse не входит в spring-boot-dependencies: версию держим здесь. -->
         <clickhouse-jdbc.version>0.9.9</clickhouse-jdbc.version>
+        <!-- Resilience4j не входит в spring-boot-dependencies. Берутся только модули без Spring:
+             предохранитель на gRPC-канале не зависит от версии Boot. -->
+        <resilience4j.version>2.3.0</resilience4j.version>
         <!--
             Релизный поезд Spring Cloud под Spring Boot 4.0. Нужен только шлюзу, но версия
             держится здесь: следующие сервисы (discovery, config, resilience) возьмут ту же.
@@ -113,6 +116,16 @@
                 protobuf-java явно: BOM spring-grpc задаёт его версию свойством, но не управляет
                 артефактом, и библиотека контрактов без этой строки не знала бы, какую версию взять.
             -->
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-circuitbreaker</artifactId>
+                <version>${resilience4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-micrometer</artifactId>
+                <version>${resilience4j.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.google.protobuf</groupId>
                 <artifactId>protobuf-java</artifactId>
