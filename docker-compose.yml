@@ -242,12 +242,16 @@ services:
 
   # Сервисы приложения — все под профилем full: обычный `docker compose up -d` их НЕ поднимает.
   #
-  # У каждого сервиса и build, и image. По умолчанию (IMAGE_TAG=local) compose собирает образы
-  # из исходников и называет их так же, как они называются в реестре. Готовые образы из
-  # GitHub Container Registry — те, что собрал CI после мержа, — поднимаются без сборки:
-  #   IMAGE_TAG=dev docker compose --profile full pull
-  #   IMAGE_TAG=dev docker compose --profile full up -d --no-build
-  # Вместо dev можно взять sha конкретного коммита — так поднимается ровно та версия.
+  # Образы сервисов собирают их собственные репозитории (food-delivery-<сервис>) и публикуют
+  # в GitHub Container Registry на каждый пуш в main и dev. Здесь они только подтягиваются:
+  #   docker compose --profile full pull
+  #   docker compose --profile full up -d
+  #
+  # Тег по умолчанию — main. Общий IMAGE_TAG меняет его у всех сразу (dev, sha коммита), а
+  # <СЕРВИС>_TAG — у одного: сервис, который вы сейчас правите, поднимается из локальной
+  # сборки, остальные остаются готовыми:
+  #   cd ../food-delivery-order-service && docker build --secret id=maven_settings,src=$HOME/.m2/settings.xml   #       -t ghcr.io/dima77726/food-delivery-order-service:local .
+  #   ORDER_SERVICE_TAG=local docker compose --profile full up -d order-service
   #
   #   api-gateway          — единственный сервис, опубликованный наружу (порт 8080);
   #   insights-service     — отзывы, аналитика, рекомендации, GraphQL (всё, что осталось от монолита);
@@ -278,15 +282,10 @@ services:
   # Контейнер при этом нужен: он проверяет, что образ собирается и стартует — то же самое
   # поедет в CI и на стенд. Поэтому не удалён, а спрятан:
   #   docker compose up -d                        — только инфраструктура
-  #   docker compose --profile full up -d --build — весь стек
+  #   docker compose --profile full up -d — весь стек
   insights-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-insights-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: insights-service
+    image: ghcr.io/dima77726/food-delivery-insights-service:${INSIGHTS_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-insights-service
     mem_limit: 640m
     restart: unless-stopped
@@ -366,12 +365,7 @@ services:
 
   catalog-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-catalog-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: catalog-service
+    image: ghcr.io/dima77726/food-delivery-catalog-service:${CATALOG_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-catalog-service
     mem_limit: 640m
     restart: unless-stopped
@@ -416,12 +410,7 @@ services:
 
   identity-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-identity-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: identity-service
+    image: ghcr.io/dima77726/food-delivery-identity-service:${IDENTITY_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-identity-service
     mem_limit: 512m
     restart: unless-stopped
@@ -466,12 +455,7 @@ services:
 
   order-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-order-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: order-service
+    image: ghcr.io/dima77726/food-delivery-order-service:${ORDER_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-order-service
     mem_limit: 512m
     restart: unless-stopped
@@ -513,12 +497,7 @@ services:
 
   payment-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-payment-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: payment-service
+    image: ghcr.io/dima77726/food-delivery-payment-service:${PAYMENT_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-payment-service
     mem_limit: 512m
     restart: unless-stopped
@@ -546,12 +525,7 @@ services:
 
   tracking-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-tracking-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: tracking-service
+    image: ghcr.io/dima77726/food-delivery-tracking-service:${TRACKING_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-tracking-service
     mem_limit: 512m
     restart: unless-stopped
@@ -590,12 +564,7 @@ services:
 
   notification-service:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-notification-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: notification-service
+    image: ghcr.io/dima77726/food-delivery-notification-service:${NOTIFICATION_SERVICE_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-notification-service
     mem_limit: 512m
     restart: unless-stopped
@@ -631,12 +600,7 @@ services:
 
   api-gateway:
     profiles: ["full"]
-    image: ghcr.io/dima77726/food-delivery-api-gateway:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MODULE: api-gateway
+    image: ghcr.io/dima77726/food-delivery-api-gateway:${API_GATEWAY_TAG:-${IMAGE_TAG:-main}}
     container_name: food-delivery-api-gateway
     mem_limit: 384m
     restart: unless-stopped
@@ -678,7 +642,7 @@ services:
   # занимают около пяти гигабайт памяти, а нужны только тем модулям, которые с ними работают.
   #
   #   docker compose --profile stores up -d          — инфраструктура плюс эти пять
-  #   docker compose --profile stores --profile full up -d --build   — вообще всё
+  #   docker compose --profile stores --profile full up -d   — вообще всё
   #
   # Одного профиля мало: в .env нужно ещё выставить STORE_*_ENABLED=true, иначе приложение
   # поднимется без этих модулей. Разделение намеренное — контейнер можно держать поднятым,

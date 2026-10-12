@@ -1,0 +1,24 @@
+name: Compose
+
+# Платформенный репозиторий не содержит кода сервисов, поэтому проверять в нём нечего, кроме
+# одного: docker-compose.yml разбирается во всех профилях. Опечатка в переменной или отступ
+# в yaml иначе обнаружились бы только на чужой машине при `docker compose up`.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: docker-compose.yml разбирается
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Значения из .env.example — заглушки, но они обязательные переменные compose задают.
+      - name: Все профили
+        run: docker compose --env-file .env.example --profile full --profile stores --profile tools config --quiet

@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 001-create-orders
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/001-create-orders.sql
-            relativeToChangelogFile: true
-            splitStatements: true

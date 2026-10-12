@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 003-audit-log-publication
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/003-audit-log-publication.sql
-            relativeToChangelogFile: true
-            splitStatements: true

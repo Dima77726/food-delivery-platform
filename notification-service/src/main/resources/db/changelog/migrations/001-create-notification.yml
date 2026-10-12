@@ -1,9 +1,0 @@
-databaseChangeLog:
-  - changeSet:
-      id: 001-create-notification
-      author: dima
-      changes:
-        - sqlFile:
-            path: sql/001-create-notification.sql
-            relativeToChangelogFile: true
-            splitStatements: true
