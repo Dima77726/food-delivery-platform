@@ -62,6 +62,7 @@ Prometheus, а снаружи их не видно.
 |---|---|
 | Инфраструктура: PostgreSQL, Redis, Kafka, RabbitMQ | ~2,4 ГБ |
 | Prometheus и Grafana | 0,6 ГБ |
+| Tempo, Loki, Alloy | ~1 ГБ |
 | Восемь сервисов (профиль `full`, без Cassandra) | ~4,2 ГБ |
 | Cassandra (входит в `full`) | 1,5 ГБ |
 | MongoDB, Neo4j, ClickHouse, Elasticsearch (профиль `stores`) | ~3,8 ГБ |
@@ -669,6 +670,30 @@ docker compose --profile full logs | grep <correlation-id>
 
 Метрики отдаёт Actuator в формате Prometheus, дашборд Grafana поставляется в
 `observability/grafana/provisioning/`.
+
+**Трассы.** Каждый сервис трассирует запросы через Micrometer Tracing поверх OpenTelemetry
+и отправляет спаны по OTLP в Tempo. Заголовок `traceparent` (W3C) идёт через HTTP, gRPC,
+Kafka и RabbitMQ, поэтому путь запроса от шлюза до соседнего сервиса — одна трасса.
+Служебные запросы (`/actuator/**`) не наблюдаются: их опрашивает Prometheus каждые пять
+секунд, и без фильтра они забили бы поиск.
+
+**Логи.** Alloy читает stdout контейнеров через сокет Docker и пишет в Loki; сервисам
+об этом знать не нужно. В каждой строке — `[сервис,traceId,spanId,correlationId,userId]`.
+
+В Grafana (http://localhost:3000) оба хранилища подключены как источники и связаны:
+в Explore → Loki у строки лога есть ссылка на трассу по `traceId`, а в Tempo у спана — кнопка
+«Logs» с логами этого сервиса за окно спана. Поиск по сервису — `{service="order-service"}`.
+
+Экспорт трасс выключен по умолчанию (`TRACING_EXPORT_ENABLED=false`), чтобы запуск из IDE и
+тесты не сыпали ошибками о недоступном Tempo; Docker Compose включает его для всех сервисов.
+Для запуска из IDE при поднятом стеке достаточно `TRACING_EXPORT_ENABLED=true` — Tempo слушает
+`localhost:4318`. Доля трассируемых запросов — `TRACING_SAMPLING_PROBABILITY` (по умолчанию `1.0`,
+вне локального стека хватает `0.1`).
+
+**Где трасса обрывается.** Outbox разрывает её намеренно: событие публикуется планировщиком
+в другом потоке и позже, и `traceparent` запроса в outbox пока не сохраняется. Сообщение
+Kafka начинает новую трассу, а связывает её с исходной `correlationId` — он едет в заголовке
+и виден в логах обеих сторон: `{service=~".+"} |= "<correlation-id>"` в Loki.
 
 ---
 

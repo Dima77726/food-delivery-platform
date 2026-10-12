@@ -332,6 +332,9 @@ services:
       # Внутри сети — внутренний листенер брокера.
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
@@ -405,6 +408,9 @@ services:
       - ELASTIC_PORT=9200
       - STORE_ELASTICSEARCH_ENABLED
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
@@ -454,6 +460,9 @@ services:
       - APP_ADMIN_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
 
   order-service:
     profiles: ["full"]
@@ -497,6 +506,9 @@ services:
       # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
       - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
   payment-service:
@@ -527,6 +539,9 @@ services:
       - PAYMENT_DB_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
   tracking-service:
@@ -568,6 +583,9 @@ services:
       - RABBITMQ_PASSWORD
       - TRACKING_ALLOWED_ORIGINS=${TRACKING_ALLOWED_ORIGINS:-http://localhost:*}
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
   notification-service:
@@ -605,6 +623,9 @@ services:
       - RABBITMQ_USER
       - RABBITMQ_PASSWORD
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
 
@@ -635,6 +656,9 @@ services:
       - TRACKING_SERVICE_URL=http://tracking-service:8080
       - TRACKING_WS_URL=ws://tracking-service:8080
       - TZ=${TZ}
+      # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
     ports:
       # Единственный опубликованный порт приложения. Служебный 8081 остаётся внутри сети
       # compose: снимать метрики может Prometheus, а снаружи их не видно.
@@ -819,6 +843,47 @@ services:
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
 
+  # Трассы. Принимает OTLP от сервисов (4318 по HTTP), хранит на диске, отдаёт Grafana.
+  # Наружу не публикуется: смотреть трассы нужно в Grafana, а сервисам хватает сети compose.
+  tempo:
+    image: grafana/tempo:2.7.2
+    container_name: food-delivery-tempo
+    mem_limit: 384m
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - food_delivery_tempo_data:/var/tempo
+    ports:
+      # Только для сервисов, запущенных из IDE: контейнерам хватает сети compose.
+      - "127.0.0.1:${TEMPO_OTLP_PORT:-4318}:4318"
+
+  # Логи. Хранилище строк, индексируются только метки (сервис), а не содержимое: поэтому оно
+  # легче Elasticsearch и укладывается в локальный бюджет памяти.
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: food-delivery-loki
+    mem_limit: 384m
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - food_delivery_loki_data:/loki
+
+  # Сборщик логов: читает stdout контейнеров через сокет Docker и пишет в Loki.
+  # Сокет — только на чтение: Alloy видит список контейнеров и их вывод, но не управляет ими.
+  alloy:
+    image: grafana/alloy:v1.7.5
+    container_name: food-delivery-alloy
+    mem_limit: 256m
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   grafana:
     image: grafana/grafana:11.5.1
     container_name: food-delivery-grafana
@@ -826,6 +891,8 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+      - tempo
+      - loki
     environment:
       # Пароль администратора Grafana. Значения по умолчанию нет намеренно: admin/admin
       # в файле репозитория — это тот же захардкоженный пароль, только привычный.
@@ -846,6 +913,8 @@ volumes:
   food_delivery_redis_data:
   food_delivery_prometheus_data:
   food_delivery_grafana_data:
+  food_delivery_tempo_data:
+  food_delivery_loki_data:
   # Сертификаты mTLS. Не данные — их можно удалить, и grpc-certs выпустит новые.
   food_delivery_grpc_certs:
   # Тома дополнительных хранилищ объявлены безусловно: список томов профилями
