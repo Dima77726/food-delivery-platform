@@ -11,6 +11,26 @@
 Синхронно сервисы разговаривают по gRPC, асинхронно — через Kafka; оплата заказа — сага
 поверх Kafka с outbox и inbox на обеих сторонах.
 
+**Репозитории.** Код сервисов живёт в отдельных репозиториях, у каждого своя история, свой CI
+и свой образ. Этот репозиторий — платформа: Docker Compose, наблюдаемость, Postman и общая
+документация, ничего из кода сервисов здесь нет.
+
+| Репозиторий | Что в нём |
+|---|---|
+| [food-delivery-platform](https://github.com/Dima77726/food-delivery-platform) | этот: compose, `observability/`, `postman/`, `docker/`, документация |
+| [food-delivery-contracts](https://github.com/Dima77726/food-delivery-contracts) | контракты: события Kafka, gRPC, OpenAPI и клиент; публикуются в GitHub Packages |
+| [food-delivery-api-gateway](https://github.com/Dima77726/food-delivery-api-gateway) | шлюз |
+| [food-delivery-identity-service](https://github.com/Dima77726/food-delivery-identity-service) | пользователи, вход, токены |
+| [food-delivery-catalog-service](https://github.com/Dima77726/food-delivery-catalog-service) | рестораны, меню, поиск |
+| [food-delivery-order-service](https://github.com/Dima77726/food-delivery-order-service) | корзина, заказ, доставка, сага оплаты |
+| [food-delivery-payment-service](https://github.com/Dima77726/food-delivery-payment-service) | платежи |
+| [food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service) | уведомления |
+| [food-delivery-tracking-service](https://github.com/Dima77726/food-delivery-tracking-service) | трек курьера |
+| [food-delivery-insights-service](https://github.com/Dima77726/food-delivery-insights-service) | отзывы, аналитика, рекомендации, сводный аудит, GraphQL |
+
+Пути вида `order-service/src/...` в этой документации — это пути внутри репозитория
+соответствующего сервиса. Все репозитории разом клонирует `scripts/clone-services.sh`.
+
 Проект учебный, но написан по боевым правилам: транзакционный outbox для событий, сквозная
 метка запроса, идемпотентная оплата, миграции Liquibase, интеграционные тесты на настоящих
 PostgreSQL, Redis и Kafka через Testcontainers.
@@ -19,13 +39,16 @@ PostgreSQL, Redis и Kafka через Testcontainers.
 
 ## Быстрый старт
 
-Нужны Docker и Docker Compose. JDK ставить не обязательно — сборка идёт внутри образа.
+Нужны Docker и Docker Compose. Ни JDK, ни исходников сервисов не нужно: compose подтягивает
+готовые образы из GitHub Container Registry, которые собирает CI репозиториев сервисов.
 
 ```bash
 cp .env.example .env
 # замените в .env заглушки change-me-* на свои значения, а JWT_PRIVATE_KEY — на ключ:
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0
-docker compose --profile full up -d --build
+docker login ghcr.io     # если образы приватные: логин GitHub и токен с правом read:packages
+docker compose --profile full pull
+docker compose --profile full up -d
 ```
 
 Ни одного пароля в репозитории нет: у учётных данных не осталось значений по умолчанию
@@ -54,7 +77,7 @@ Prometheus, а снаружи их не видно.
 ### Память
 
 Стек рассчитан на ноутбук с 16 ГБ. У каждого долгоживущего контейнера есть `mem_limit`,
-а JVM-сервисы берут под кучу 60% своего лимита (`Dockerfile`). Без лимита JVM считает своей
+а JVM-сервисы берут под кучу 60% своего лимита (`Dockerfile` в репозитории сервиса). Без лимита JVM считает своей
 всю виртуальную машину Docker, и восемь сервисов вместе вытесняют остальное — первыми
 падают контейнеры Testcontainers с ошибкой 500 от Docker.
 
@@ -152,6 +175,17 @@ Neo4j и ClickHouse ходят под учётными записями из `.e
 
 ## Разработка
 
+Сервисы разрабатываются каждый в своём репозитории. Клонировать все разом:
+
+```bash
+scripts/clone-services.sh ..          # рядом с этим репозиторием, в ../food-delivery-<сервис>
+```
+
+Контракты сервисы берут из GitHub Packages, а он требует токен даже для чтения. Один раз
+создайте токен с правом `read:packages` и положите в `~/.m2/settings.xml` (шаблон — в README
+`food-delivery-contracts`). Менять сами контракты и собирать с ними сервис локально можно так:
+в `food-delivery-contracts` — `./mvnw install`, версию в pom сервиса поставьте `1.0.0-SNAPSHOT`.
+
 Инфраструктура в Docker, сервисы — из IDE:
 
 ```bash
@@ -196,20 +230,17 @@ gRPC: каталог слушает 7084, identity-service — 7085, order-servi
 | `APP_ADMIN_EMAIL`, `APP_ADMIN_PASSWORD` | identity-service, если нужен администратор |
 
 Тестам эти переменные задавать не нужно: их значения лежат в
-`src/test/resources/application.properties` каждого модуля, а адреса и пароли контейнеров
+`src/test/resources/application.properties` каждого сервиса, а адреса и пароли контейнеров
 подставляют Testcontainers.
 
 ### Тесты
 
-Два круга, и разделены они намеренно:
+Команды запускаются в репозитории сервиса. Два круга, и разделены они намеренно:
 
 ```bash
 ./mvnw test      # быстрый круг: без Docker, сами тесты — меньше секунды
 ./mvnw verify    # + интеграционные на Testcontainers, около двух минут
 ```
-
-Основное время первой команды уходит не на тесты, а на генерацию из OpenAPI
-и компиляцию.
 
 Surefire гоняет классы `*Test` — доменные правила и обработчик ошибок. Failsafe гоняет `*IT`
 на настоящих контейнерах: именно они проверяют SQL, транзакции и кэш.
@@ -368,7 +399,7 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
   `GET .../payments`. Держать HTTP-запрос до ответа другого сервиса значило бы вернуть
   синхронную связь, от которой сага избавляет.
 
-| Модуль | Что это |
+| Сервис | Что это |
 |---|---|
 | `api-gateway` | Spring Cloud Gateway (WebFlux): маршруты, сквозная метка запроса, срез `X-User-Id`, 503 на недоступный сервис |
 | `insights-service` | отзывы, аналитика, рекомендации, сводный журнал аудита; REST и GraphQL — то, что осталось от монолита |
@@ -378,9 +409,9 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 | `order-service` | корзина, заказ, доставка; журнал аудита заказов (пишет, наружу не отдаёт); оркестратор саги оплаты; gRPC-чтение заказов для insights-service и трека |
 | `payment-service` | платежи: списания и возвраты по командам саги; наружу — только чтение платежей |
 | `tracking-service` | трек курьера: точки в Cassandra по REST, живой трек по WebSocket (STOMP через RabbitMQ) |
-| `libs/event-contracts` | контракты событий Kafka |
-| `libs/grpc-contracts` | `.proto` и сгенерированные из них стабы gRPC |
-| `client` | типизированный Java-клиент к API |
+
+Контракты (`event-contracts`, `grpc-contracts`, клиент REST) — в репозитории
+[food-delivery-contracts](https://github.com/Dima77726/food-delivery-contracts).
 
 Правила, которые держат границы:
 
@@ -388,8 +419,8 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
   к чужим базам. Локально все базы живут в одном контейнере PostgreSQL, их создаёт
   одноразовый `postgres-provision` при каждом `docker compose up`. В продакшене база
   переезжает на свой сервер сменой одного URL.
-- **Общий код — только контракты.** `libs/event-contracts` — формы сообщений и имена
-  топиков, `libs/grpc-contracts` — `.proto` синхронных вызовов. Логики в них нет. Общая библиотека с логикой превратила бы
+- **Общий код — только контракты.** `event-contracts` — формы сообщений и имена
+  топиков, `grpc-contracts` — `.proto` синхронных вызовов. Логики в них нет. Общая библиотека с логикой превратила бы
   сервисы в распределённый монолит, который релизится только целиком.
 - **Каждый сервис проверяет токен сам.** Шлюз токен не проверяет: внутри сети до сервиса
   можно достучаться и в обход шлюза. Подпись асимметричная (RS256): закрытый ключ есть только
@@ -516,6 +547,8 @@ REST insights-service остался прежним: GraphQL добавлен р
 | ✅ 4 | order-service и payment-service: корзина, заказ, доставка, оплата | сага поверх Kafka, outbox и inbox |
 | ✅ 5 | tracking-service | WebSocket (STOMP через RabbitMQ): трек курьера в реальном времени |
 | ✅ 6 | insights-service: отзывы, аналитика, рекомендации; монолит исчез | GraphQL |
+
+| ✅ 7 | разделение на репозитории: контракты, восемь сервисов, платформа | контракты в GitHub Packages, образы в GHCR |
 
 Уведомлениям WebSocket тоже подойдёт — шлюз на WebFlux проксирует `ws://` без доработок.
 
@@ -729,8 +762,10 @@ Kafka начинает новую трассу, а связывает её с и
 
 ## API
 
-Источник истины по контракту — `openapi/food-delivery-api.yaml`. Из него генерируются
-интерфейсы контроллеров для `service` и типизированный клиент в модуле `client`.
+Источник истины по контракту — `openapi/food-delivery-api.yaml` в репозитории
+`food-delivery-contracts`. Из него генерируется типизированный клиент, а сама спецификация едет
+внутри jar клиента: catalog-service распаковывает её оттуда и генерирует интерфейсы своих
+контроллеров.
 
 Спецификация описывает рестораны, меню и пять дополнительных модулей: отзывы, трекинг,
 рекомендации, аналитику и поиск. Рестораны и меню реализуют сгенерированные интерфейсы;
@@ -793,43 +828,42 @@ Refresh-токен одноразовый. Если уже обменянный 
 
 ## Сборка
 
-```bash
-./mvnw clean verify                          # сборка и все тесты всех модулей
-./mvnw -pl catalog-service -am verify        # один сервис и то, от чего он зависит
-docker compose --profile full build          # образы всех сервисов
-```
-
-Dockerfile один на все сервисы, какой собирать — задаёт аргумент `MODULE`:
+Каждый сервис собирается в своём репозитории:
 
 ```bash
-docker build --build-arg MODULE=notification-service -t notification-service .
+./mvnw verify           # сборка и все тесты сервиса (интеграционным нужен Docker)
+docker build --secret id=maven_settings,src=$HOME/.m2/settings.xml -t food-delivery-order-service .
 ```
+
+Секрет `maven_settings` — ваш `~/.m2/settings.xml` с токеном для GitHub Packages: контракты
+читаются во время сборки образа, и в слои образа токен не попадает.
 
 ### CI и поставка
 
-Монорепозиторий устроен так, чтобы его можно было разрезать на отдельные репозитории
-без переделок: сервисы не зависят друг от друга по коду, собираются, проверяются
-и поставляются по отдельности.
+| Репозиторий | Workflow | Когда | Что делает |
+|---|---|---|---|
+| сервис | `ci.yml` | PR и пуш в `dev`/`main` | сборка и все тесты сервиса, включая интеграционные на Testcontainers |
+| сервис | `image.yml` | пуш в `dev`/`main` | образ в GHCR с тегами `<sha>` и `<ветка>` |
+| контракты | `ci.yml` | PR и пуш в `main` | сборка контрактов, генерация стабов gRPC и клиента |
+| контракты | `contracts.yml` | тег `vX.Y.Z` | публикация в GitHub Packages |
+| платформа | `compose.yml` | PR и пуш | проверка, что `docker-compose.yml` разбирается во всех профилях |
 
-| Workflow | Когда | Что делает |
-|---|---|---|
-| `ci.yml` | PR и пуш в `dev`/`main` | собирает и тестирует **только затронутые** модули, каждый отдельным job; итоговая проверка `CI пройден` — для защиты ветки |
-| `images.yml` | пуш в `dev`/`main` | собирает образы изменившихся сервисов и публикует в GHCR с тегами `<sha>` и `<ветка>` |
-| `contracts.yml` | тег `contracts-vX.Y.Z` | публикует `event-contracts` и `grpc-contracts` в GitHub Packages |
+**Версии.** У контрактов своя версия (теги `vX.Y.Z` в `food-delivery-contracts`), сервисы
+указывают её в `contracts.version`. Совместимое изменение — минорная версия, несовместимое —
+мажорная и новый пакет `.proto` (`catalog.v2`). Сервисы поставляются образами, и их версия —
+это sha коммита в теге образа.
 
-Что считается «затронутым», описано в `ci.yml`: сам модуль, контракты, от которых он
-зависит, и общая сборка (корневой pom, `mvnw`). Правка контракта запускает всех его
-потребителей — ровно это и нужно проверить.
+**Изменить контракт.** Правка в `food-delivery-contracts`, тег новой версии, затем в каждом
+затронутом сервисе поднять `contracts.version`. Контракты — единственное общее место, поэтому
+порядок обратный монорепо: сначала контракт, потом потребители.
 
-**Версии.** У контрактов своя версия (`contracts.version`, сейчас `1.0.0-SNAPSHOT`) и свои pom
-без родителя платформы: потребителю не нужно тянуть за контрактом pom монолита. Совместимое
-изменение — минорная версия, несовместимое — мажорная и новый пакет `.proto` (`catalog.v2`).
-Сервисы поставляются образами, и их версия — это sha коммита в теге образа.
-
-**Готовые образы.** Поднять стек из того, что собрал CI, без локальной сборки:
+**Готовые образы.** Поднять стек из того, что собрал CI:
 
 ```bash
-docker login ghcr.io          # пакеты репозитория приватные
+docker login ghcr.io          # если пакеты приватные
 IMAGE_TAG=dev docker compose --profile full pull
-IMAGE_TAG=dev docker compose --profile full up -d --no-build
+IMAGE_TAG=dev docker compose --profile full up -d
 ```
+
+Один сервис можно взять из локальной сборки, остальные оставить готовыми:
+`ORDER_SERVICE_TAG=local docker compose --profile full up -d order-service`.

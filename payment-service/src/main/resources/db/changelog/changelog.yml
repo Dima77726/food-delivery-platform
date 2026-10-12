@@ -1,4 +1,0 @@
-databaseChangeLog:
-  - include:
-      file: migrations/001-create-payments.yml
-      relativeToChangelogFile: true
