@@ -517,6 +517,11 @@ services:
       - PAYMENT_DB_USER
       - PAYMENT_DB_PASSWORD
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Платёжный шлюз: simulated (заглушка, по умолчанию) или stripe. Со stripe нужен STRIPE_API_KEY
+      # (sk_test_… для теста); без ключа сервис не стартует. Подробности — в README payment-service.
+      - PAYMENT_GATEWAY=${PAYMENT_GATEWAY:-simulated}
+      - STRIPE_API_KEY
+      - STRIPE_CURRENCY=${STRIPE_CURRENCY:-usd}
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
