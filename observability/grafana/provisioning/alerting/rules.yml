@@ -2,9 +2,8 @@
 # отдельный Alertmanager — ещё один контейнер, а Grafana уже работает и умеет оба источника,
 # включая Loki (по метрикам не увидеть сообщение, ушедшее в DLT).
 #
-# Куда уходят уведомления, здесь не настроено намеренно: контактная точка по умолчанию —
-# письмо на заглушку. Состояние алертов смотрят в Alerting → Alert rules. Подключить
-# Telegram или почту — в Alerting → Contact points; это секреты, в репозиторий им не место.
+# Куда уходят уведомления, описано в contact-points.yml: локально это письмо в Mailpit.
+# Состояние алертов смотрят в Alerting → Alert rules.
 
 apiVersion: 1
 groups:
@@ -52,7 +51,7 @@ groups:
         execErrState: "Error"
         for: "1m"
         annotations:
-          summary: "{{ $$labels.application }}: события в статусе FAILED"
+          summary: "{{ $labels.application }}: события в статусе FAILED"
           description: "Эти события не уйдут сами: публикатор исчерпал попытки. Причину ищите в last_error таблицы order_event_outbox или payment_event_outbox."
         labels:
           severity: "critical"
@@ -95,7 +94,7 @@ groups:
         execErrState: "Error"
         for: "5m"
         annotations:
-          summary: "{{ $$labels.application }}: в очереди outbox больше 50 событий дольше 5 минут"
+          summary: "{{ $labels.application }}: в очереди outbox больше 50 событий дольше 5 минут"
           description: "Публикатор встал или брокер недоступен. Очередь обычно пуста: публикация идёт каждые 2 секунды."
         labels:
           severity: "warning"
@@ -138,7 +137,7 @@ groups:
         execErrState: "Error"
         for: "10m"
         annotations:
-          summary: "{{ $$labels.application }}: больше 50 записей аудита не отправлено дольше 10 минут"
+          summary: "{{ $labels.application }}: больше 50 записей аудита не отправлено дольше 10 минут"
           description: "Сводный журнал в insights-service перестал пополняться. Записи не потеряны — они лежат в audit_log сервиса."
         labels:
           severity: "warning"
@@ -181,7 +180,7 @@ groups:
         execErrState: "Error"
         for: "5m"
         annotations:
-          summary: "{{ $$labels.application }}: доля 5xx больше 5% за 5 минут"
+          summary: "{{ $labels.application }}: доля 5xx больше 5% за 5 минут"
           description: "Условие учитывает только сервисы с трафиком больше 0,05 запроса в секунду: одна ошибка на тишине не повод для тревоги."
         labels:
           severity: "critical"
@@ -267,7 +266,7 @@ groups:
         execErrState: "Error"
         for: "5m"
         annotations:
-          summary: "{{ $$labels.application }}: куча заполнена больше чем на 90%"
+          summary: "{{ $labels.application }}: куча заполнена больше чем на 90%"
           description: "Куча — 60% лимита контейнера (Dockerfile). Постоянные 90% означают утечку или лимит, который мал для нагрузки."
         labels:
           severity: "warning"
@@ -310,7 +309,7 @@ groups:
         execErrState: "Error"
         for: "5m"
         annotations:
-          summary: "{{ $$labels.service }}: Prometheus не может снять метрики"
+          summary: "{{ $labels.service }}: Prometheus не может снять метрики"
           description: "Сервис упал или не запущен. В частичном стеке (без профиля full) сработает для всех, кого вы не поднимали, — это ожидаемо."
         labels:
           severity: "warning"
@@ -396,7 +395,7 @@ groups:
         execErrState: "Error"
         for: "1m"
         annotations:
-          summary: "{{ $$labels.application }}: вызовы к {{ $$labels.name }} отклоняются без обращения к соседу"
+          summary: "{{ $labels.application }}: вызовы к {{ $labels.name }} отклоняются без обращения к соседу"
           description: "Сосед отвечает ошибками подряд, предохранитель разомкнулся. Запросы, которым нужен этот сервис, получают 503 сразу. Проверьте состояние соседа."
         labels:
           severity: "critical"
