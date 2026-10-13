@@ -401,6 +401,12 @@ services:
       - ELASTIC_HOST=elasticsearch
       - ELASTIC_PORT=9200
       - STORE_ELASTICSEARCH_ENABLED
+      # Фото блюд лежат в MinIO. Бакет сервис создаёт сам при первой записи, поэтому порядок
+      # старта не важен: недоступное хранилище означает 503 на загрузку, а не падение каталога.
+      - MEDIA_ENABLED=${MEDIA_ENABLED:-true}
+      - MEDIA_ENDPOINT=http://minio:9000
+      - MEDIA_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MEDIA_SECRET_KEY=${MINIO_ROOT_PASSWORD}
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
@@ -649,6 +655,8 @@ services:
       - MANAGEMENT_PORT=8081
       - INSIGHTS_SERVICE_URL=http://insights-service:8080
       - CATALOG_SERVICE_URL=http://catalog-service:8080
+      # Фото блюд (/media/**) шлюз читает прямо из бакета.
+      - MEDIA_STORAGE_URL=http://minio:9000
       - IDENTITY_SERVICE_URL=http://identity-service:8080
       - NOTIFICATION_SERVICE_URL=http://notification-service:8080
       - ORDER_SERVICE_URL=http://order-service:8080
@@ -900,6 +908,24 @@ services:
     ports:
       - "${MAILPIT_PORT:-8025}:8025"
 
+  # Хранилище фото блюд (S3-совместимое). Официальные образы minio/minio сняты с публикации,
+  # поэтому берётся сборка Chainguard. Бакет menu-images и политику «анонимное чтение» создаёт
+  # каталог. Наружу — только консоль на localhost; фото снаружи читают через шлюз по /media/.
+  minio:
+    profiles: ["full"]
+    image: cgr.dev/chainguard/minio:latest
+    container_name: food-delivery-minio
+    mem_limit: 256m
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      - MINIO_ROOT_USER
+      - MINIO_ROOT_PASSWORD
+    volumes:
+      - food_delivery_minio_data:/data
+    ports:
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+
   grafana:
     image: grafana/grafana:11.5.1
     container_name: food-delivery-grafana
@@ -931,6 +957,8 @@ volumes:
   food_delivery_grafana_data:
   food_delivery_tempo_data:
   food_delivery_loki_data:
+  # Фото блюд. Единственные данные без второго источника, кроме баз: бэкапить вместе с PostgreSQL.
+  food_delivery_minio_data:
   # Сертификаты mTLS. Не данные — их можно удалить, и grpc-certs выпустит новые.
   food_delivery_grpc_certs:
   # Тома дополнительных хранилищ объявлены безусловно: список томов профилями

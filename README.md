@@ -68,6 +68,7 @@ docker compose --profile full up -d
 | Kafka UI (профиль `tools`) | http://localhost:8090 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Mailpit (письма уведомлений) | http://localhost:8025 |
+| MinIO (консоль; фото блюд) | http://localhost:9001 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
@@ -387,6 +388,12 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 отправляет по SMTP. Локально письма принимает Mailpit и показывает на http://localhost:8025, наружу
 ничего не уходит. `EMAIL_ENABLED=false` возвращает отправку «в лог». Подробности — в README
 [food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#доставка-по-e-mail).
+
+**Фото блюд.** Менеджер ресторана загружает фото блюда (`PUT /api/v1/restaurants/{id}/menu/items/{itemId}/image`,
+JPEG/PNG/WebP до 2 МБ), каталог кладёт его в MinIO и отдаёт в меню `imageUrl` вида `/media/...`; шлюз
+читает такие адреса прямо из бакета (только GET/HEAD, без токенов). Ключи — `MINIO_ROOT_USER` и
+`MINIO_ROOT_PASSWORD` в `.env`, консоль — http://localhost:9001. Официальные образы `minio/minio` сняты с
+публикации, поэтому используется сборка Chainguard.
 
 **Telegram.** Второй настоящий канал: пользователь получает ссылку (`POST /api/v1/notifications/telegram/link`),
 открывает её в Telegram — и уведомления о заказах приходят ему и в чат. Нужен бот от @BotFather
