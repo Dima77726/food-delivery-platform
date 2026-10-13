@@ -381,6 +381,13 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 не дождался оплаты (PAYMENT_TIMEOUT, 15 мин)                   ─▶ CANCELED (+ REFUND_REQUESTED, если оплату запросили)
 ```
 
+**Платёжный шлюз.** По умолчанию деньги двигает заглушка (`PAYMENT_GATEWAY=simulated`: любое
+списание проходит, сумма с копейками `.13` — отказ банка). С `PAYMENT_GATEWAY=stripe` и тестовым
+ключом `STRIPE_API_KEY=sk_test_…` payment-service работает с настоящим Stripe в тестовом режиме:
+`PaymentIntent` и возвраты, ключ идемпотентности в каждом запросе. Сценарии Postman работают с
+обоими. Подробности, ограничения и что делать для боевой оплаты — в README
+[food-delivery-payment-service](https://github.com/Dima77726/food-delivery-payment-service#платёжный-шлюз).
+
 - **Топики** — `food-delivery.payment-commands` (пишет только сервис заказов) и
   `food-delivery.payment-events` (пишет только сервис платежей). Ключ — идентификатор заказа,
   поэтому «спиши» и «верни» одного заказа приходят по порядку. Контракты —
