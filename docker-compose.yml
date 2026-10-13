@@ -916,6 +916,11 @@ services:
       # Дашборд и источник данных приезжают провижинингом, поэтому мастер первого запуска
       # только мешает.
       - GF_USERS_ALLOW_SIGN_UP=false
+      # Алерты уходят письмом в Mailpit (контактная точка provisioning/alerting/contact-points.yml).
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=mailpit:1025
+      - GF_SMTP_FROM_ADDRESS=alerts@food-delivery.local
+      - GF_SMTP_FROM_NAME=Food Delivery Alerts
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - food_delivery_grafana_data:/var/lib/grafana
