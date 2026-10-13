@@ -612,6 +612,13 @@ services:
       - GRPC_TLS_PRIVATE_KEY=file:/certs/notification-service.key
       - GRPC_TLS_CA=file:/certs/ca.crt
       # Настоящая доставка по e-mail. false — письма уходят «в лог», как раньше.
+      # Уведомления в Telegram. Выключено, пока не задан бот: TELEGRAM_ENABLED=true, TELEGRAM_BOT_TOKEN
+      # (от @BotFather — секрет, передаётся только если задан) и TELEGRAM_BOT_USERNAME. Опрос бота
+      # ведёт один экземпляр; при нескольких репликах на остальных TELEGRAM_POLLING_ENABLED=false.
+      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-false}
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_BOT_USERNAME
+      - TELEGRAM_POLLING_ENABLED=${TELEGRAM_POLLING_ENABLED:-true}
       - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
       - EMAIL_FROM=${EMAIL_FROM:-no-reply@food-delivery.local}
       - MAIL_HOST=${MAIL_HOST:-mailpit}
