@@ -67,6 +67,7 @@ docker compose --profile full up -d
 | GraphQL / песочница GraphiQL | http://localhost:8080/graphql, http://localhost:8080/graphiql |
 | Kafka UI (профиль `tools`) | http://localhost:8090 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
+| Mailpit (письма уведомлений) | http://localhost:8025 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
@@ -380,6 +381,12 @@ payment-service: банк отказал    ─▶ событие PAYMENT_FAILED
 payment-service: вернул деньги   ─▶ событие PAYMENT_REFUNDED   ─▶ ORDER_REFUNDED в истории заказа
 не дождался оплаты (PAYMENT_TIMEOUT, 15 мин)                   ─▶ CANCELED (+ REFUND_REQUESTED, если оплату запросили)
 ```
+
+**Почта.** Уведомления по каналу EMAIL уходят настоящими письмами: notification-service берёт адрес
+получателя у identity-service по gRPC (в событии заказа адреса нет — это персональные данные) и
+отправляет по SMTP. Локально письма принимает Mailpit и показывает на http://localhost:8025, наружу
+ничего не уходит. `EMAIL_ENABLED=false` возвращает отправку «в лог». Подробности — в README
+[food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#доставка-по-e-mail).
 
 **Платёжный шлюз.** По умолчанию деньги двигает заглушка (`PAYMENT_GATEWAY=simulated`: любое
 списание проходит, сумма с копейками `.13` — отказ банка). С `PAYMENT_GATEWAY=stripe` и тестовым

@@ -84,7 +84,7 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service", "notification-service"]
 
   # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
   # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
@@ -575,6 +575,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       rabbitmq:
@@ -582,6 +584,12 @@ services:
       postgres-provision:
         # База сервиса существует только после того, как отработал провижининг.
         condition: service_completed_successfully
+      # Почта: письмо принимает Mailpit. Не ждём его здоровья — недоступный SMTP означает повтор
+      # уведомления через очередь, а не отказ сервиса.
+      mailpit:
+        condition: service_started
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
@@ -596,6 +604,18 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER
       - RABBITMQ_PASSWORD
+      # Адрес получателя — у identity-service по gRPC; канал защищён взаимным TLS, сервис пускают
+      # по имени из сертификата (notification-service в allowed-clients identity-service).
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/notification-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/notification-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      # Настоящая доставка по e-mail. false — письма уходят «в лог», как раньше.
+      - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
+      - EMAIL_FROM=${EMAIL_FROM:-no-reply@food-delivery.local}
+      - MAIL_HOST=${MAIL_HOST:-mailpit}
+      - MAIL_PORT=${MAIL_PORT:-1025}
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
@@ -860,6 +880,18 @@ services:
     volumes:
       - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Локальный приёмник писем: принимает SMTP (1025) и показывает письма в интерфейсе (8025).
+  # Наружу ничего не отправляет, поэтому настоящие уведомления можно проверять, не рискуя
+  # написать живому человеку. Письма живут в памяти и пропадают с контейнером.
+  mailpit:
+    profiles: ["full"]
+    image: axllent/mailpit:v1.21
+    container_name: food-delivery-mailpit
+    mem_limit: 128m
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"
 
   grafana:
     image: grafana/grafana:11.5.1
