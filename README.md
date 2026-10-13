@@ -388,6 +388,12 @@ payment-service: вернул деньги   ─▶ событие PAYMENT_REFUN
 ничего не уходит. `EMAIL_ENABLED=false` возвращает отправку «в лог». Подробности — в README
 [food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#доставка-по-e-mail).
 
+**Telegram.** Второй настоящий канал: пользователь получает ссылку (`POST /api/v1/notifications/telegram/link`),
+открывает её в Telegram — и уведомления о заказах приходят ему и в чат. Нужен бот от @BotFather
+(`TELEGRAM_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`); без него канал выключен и
+ничего не требует. Устройство, безопасность и ограничения — в README
+[food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#уведомления-в-telegram).
+
 **Платёжный шлюз.** По умолчанию деньги двигает заглушка (`PAYMENT_GATEWAY=simulated`: любое
 списание проходит, сумма с копейками `.13` — отказ банка). С `PAYMENT_GATEWAY=stripe` и тестовым
 ключом `STRIPE_API_KEY=sk_test_…` payment-service работает с настоящим Stripe в тестовом режиме:
