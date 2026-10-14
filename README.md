@@ -401,6 +401,19 @@ JPEG/PNG/WebP до 2 МБ), каталог кладёт его в MinIO и от�
 ничего не требует. Устройство, безопасность и ограничения — в README
 [food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#уведомления-в-telegram).
 
+**SOAP.** Протокол представлен с двух сторон.
+*Сервер:* партнёрский API для касс ресторанов, которым REST неудобен. Контракт первичен — XSD в
+`food-delivery-contracts` (`libs/soap-contracts`, пространство имён `urn:fooddelivery:partner:v1`), WSDL строится по нему
+и отдаётся без токена: меню — `GET /ws/menu.wsdl` (каталог: `GetMenu`, `SetItemAvailability`), заказы — `GET /ws/orders.wsdl`
+(сервис заказов: `ListOpenOrders`, `GetOrderStatus`, `AcceptOrder`). Запросы — `POST /ws/menu` и `POST /ws/orders` через шлюз с
+заголовком `Authorization: Bearer <JWT>`; права те же, что у REST. Ошибки — SOAP Fault с деталью `PartnerFault`.
+*Клиент:* payment-service запрашивает курсы ЦБ РФ (`DailyInfo.GetCursOnDateXML`) для пересчёта суммы в валюту Stripe
+(`FX_ENABLED=true`).
+
+```bash
+curl -s http://localhost:8080/ws/menu   -H 'Content-Type: text/xml; charset=utf-8' -H "Authorization: Bearer $TOKEN"   -d '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><GetMenuRequest xmlns="urn:fooddelivery:partner:v1"><restaurantId>1</restaurantId></GetMenuRequest></soapenv:Body></soapenv:Envelope>'
+```
+
 **Платёжный шлюз.** По умолчанию деньги двигает заглушка (`PAYMENT_GATEWAY=simulated`: любое
 списание проходит, сумма с копейками `.13` — отказ банка). С `PAYMENT_GATEWAY=stripe` и тестовым
 ключом `STRIPE_API_KEY=sk_test_…` payment-service работает с настоящим Stripe в тестовом режиме:
