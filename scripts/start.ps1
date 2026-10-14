@@ -11,6 +11,7 @@
       -Light        без Mongo, Neo4j, ClickHouse и Elasticsearch: пропадают отзывы, рекомендации,
                     аналитика и поиск, остальное работает                               ~5 ГБ
       -Auth         добавляет Keycloak (+0,7 ГБ)
+      -Tools        добавляет Kafka UI и Kibana (+1,5 ГБ)
 
 .EXAMPLE
     ./scripts/start.ps1                  # всё
@@ -19,6 +20,7 @@
 param(
     [switch]$Light,
     [switch]$Auth,
+    [switch]$Tools,
     [switch]$Agent,
     [switch]$NoBrowser,
     [switch]$NoSeed,
@@ -66,6 +68,7 @@ Step 'Запускаю контейнеры (первый запуск скач�
 $profiles = @('--profile', 'full')
 if (-not $Light) { $profiles += @('--profile', 'stores') }
 if ($Auth) { $profiles += @('--profile', 'auth') }
+if ($Tools) { $profiles += @('--profile', 'tools') }
 
 $stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
 $saved = @{}
@@ -90,6 +93,19 @@ if (-not (Wait-Http 'http://localhost:8080/api/v1/restaurants' 240 'Шлюз')) 
 }
 Ok 'Шлюз отвечает'
 Wait-Http "http://localhost:$WebPort/" 30 'Веб-интерфейс' | Out-Null
+
+# ---------- Kibana: представление данных для индексов поиска ----------
+if ($Tools -and -not $Light) {
+    if (Wait-Http 'http://localhost:5601/api/status' 180 'Kibana') {
+        # Идемпотентно: представление с тем же id перезаписывается, а не дублируется.
+        $view = '{"data_view":{"id":"food-delivery","title":"food-delivery-*","name":"Food Delivery: поиск (рестораны и блюда)"},"override":true}'
+        try {
+            Invoke-RestMethod -Method Post -Uri 'http://localhost:5601/api/data_views/data_view' -Headers @{ 'kbn-xsrf' = 'true' } `
+                -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($view)) | Out-Null
+            Ok 'Kibana: представление данных food-delivery-* готово'
+        } catch { Warn 'Kibana: представление данных не создано (его можно создать в Stack Management → Data Views)' }
+    }
+}
 
 # ---------- Демо-данные ----------
 $marker = Join-Path $Root '.demo-seeded'
@@ -175,7 +191,10 @@ Write-Host ''
 Write-Host '══════════════════════════════════════════════════════' -ForegroundColor DarkGray
 Write-Host "  Вкусно:         http://localhost:$WebPort" -ForegroundColor Green
 Write-Host '  Демо-вход:      кнопки на странице входа (клиент, ресторатор, курьер, админ)'
+Write-Host "  Инструменты:    http://localhost:$WebPort/#/tools   (все адреса и что где смотреть)"
 Write-Host '  Grafana:        http://localhost:3000     Письма:  http://localhost:8025'
+Write-Host '  RabbitMQ:       http://localhost:15672    MinIO:   http://localhost:9001'
+if ($Tools) { Write-Host '  Kafka UI:       http://localhost:8090     Kibana:  http://localhost:5601' }
 Write-Host '  Остановить:     ./scripts/stop.ps1          Копия данных:  ./scripts/backup.ps1'
 Write-Host '══════════════════════════════════════════════════════' -ForegroundColor DarkGray
 

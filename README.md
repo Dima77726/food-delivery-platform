@@ -75,6 +75,13 @@ PostgreSQL, Redis и Kafka через Testcontainers.
 раз); тестовые рестораны от автотестов прячет `python scripts/hide-test-restaurants.py --apply` (они закрываются, а не
 удаляются).
 
+**Инструменты для разбора.** `./scripts/start.ps1 -Tools` добавляет Kafka UI и Kibana (в Kibana сразу создаётся
+представление данных `food-delivery-*` для индексов поиска). В Grafana, кроме технического дашборда, есть
+«Бизнес: заказы, платежи, аудит» (заказы по часам и статусам, выручка, отказы оплаты, топ блюд, сводный аудит и
+переходы статусов из ClickHouse) и источники данных на базы сервисов. Grafana читает базы учётной записью
+`analytics_reader` (`ANALYTICS_DB_PASSWORD` в `.env`): только SELECT, без хешей паролей и refresh-токенов; её же
+удобно использовать в DataGrip, чтобы случайно ничего не изменить.
+
 **Копия данных.** `./scripts/backup.ps1` снимает все базы PostgreSQL, фото блюд, Keycloak, отзывы и `.env` в
 `backups/<время>/` (папка вне Git), оставляя семь последних. `./scripts/restore.ps1 -Path backups\<время>` возвращает
 данные из копии. Пересобираемое (поиск, рекомендации, аналитика, метрики) не копируется.
@@ -105,10 +112,12 @@ docker compose --profile full up -d
 | Что | Адрес |
 |---|---|
 | Веб-интерфейс «Вкусно» | http://localhost:8070 |
+| Все инструменты со статусом и подсказками по входу | http://localhost:8070/#/tools |
 | API (через шлюз) | http://localhost:8080/api/v1 |
 | Swagger UI (insights) | http://localhost:8080/swagger-ui.html |
 | GraphQL / песочница GraphiQL | http://localhost:8080/graphql, http://localhost:8080/graphiql |
 | Kafka UI (профиль `tools`) | http://localhost:8090 |
+| Kibana для Elasticsearch (профиль `tools`) | http://localhost:5601 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Mailpit (письма уведомлений) | http://localhost:8025 |
 | Keycloak (профиль `auth`) | http://localhost:8180 |
