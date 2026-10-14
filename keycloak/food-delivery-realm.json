@@ -1,0 +1,57 @@
+{
+  "realm": "food-delivery",
+  "displayName": "Food Delivery",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@food-delivery.local",
+    "fromDisplayName": "Food Delivery",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "roles": {
+    "realm": [
+      { "name": "CUSTOMER", "description": "Клиент: заказывает еду" },
+      { "name": "RESTAURANT_OWNER", "description": "Владелец ресторана" },
+      { "name": "COURIER", "description": "Курьер" }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-food-delivery",
+    "description": "Роли по умолчанию: самостоятельно зарегистрированный человек - клиент",
+    "composite": true,
+    "composites": {
+      "realm": ["offline_access", "uma_authorization", "CUSTOMER"]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "food-delivery-web",
+      "name": "Food Delivery (веб и мобильные клиенты)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:3000/*", "http://localhost:8080/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "fullScopeAllowed": true
+    }
+  ]
+}

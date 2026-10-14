@@ -68,6 +68,7 @@ docker compose --profile full up -d
 | Kafka UI (профиль `tools`) | http://localhost:8090 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Mailpit (письма уведомлений) | http://localhost:8025 |
+| Keycloak (профиль `auth`) | http://localhost:8180 |
 | MinIO (консоль; фото блюд) | http://localhost:9001 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
@@ -400,6 +401,14 @@ JPEG/PNG/WebP до 2 МБ), каталог кладёт его в MinIO и от�
 (`TELEGRAM_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`); без него канал выключен и
 ничего не требует. Устройство, безопасность и ограничения — в README
 [food-delivery-notification-service](https://github.com/Dima77726/food-delivery-notification-service#уведомления-в-telegram).
+
+**Keycloak.** Профиль `auth` (`docker compose --profile full --profile auth up -d`, около 700 МБ). Keycloak отвечает за то,
+как человека опознают (форма входа, подтверждение почты через Mailpit, защита от перебора, второй фактор, соцсети), а
+пользователями, ролями и правами на рестораны по-прежнему владеет платформа: `POST /api/v1/auth/oidc` меняет access-токен
+Keycloak на токен платформы, поэтому остальные сервисы не менялись. Включение: `KEYCLOAK_ADMIN_PASSWORD` и `OIDC_ENABLED=true`
+в `.env`. Realm `food-delivery` (клиент `food-delivery-web`, роли `CUSTOMER`/`RESTAURANT_OWNER`/`COURIER`, самостоятельная
+регистрация с ролью клиента) загружается из `keycloak/food-delivery-realm.json`. Правила обмена — в README
+[food-delivery-identity-service](https://github.com/Dima77726/food-delivery-identity-service#вход-через-keycloak-oidc).
 
 **SOAP.** Протокол представлен с двух сторон.
 *Сервер:* партнёрский API для касс ресторанов, которым REST неудобен. Контракт первичен — XSD в
