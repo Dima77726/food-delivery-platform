@@ -453,6 +453,12 @@ services:
       - JWT_REFRESH_TOKEN_TTL=${JWT_REFRESH_TOKEN_TTL:-P30D}
       - APP_ADMIN_EMAIL
       - APP_ADMIN_PASSWORD
+      # Вход через Keycloak (профиль auth): токен Keycloak обменивается на токен платформы. Издатель - адрес,
+      # по которому Keycloak виден клиентам (он записан в токенах); ключи сервис берёт изнутри сети Docker.
+      - OIDC_ENABLED=${OIDC_ENABLED:-false}
+      - OIDC_ISSUER=http://localhost:${KEYCLOAK_PORT:-8180}/realms/food-delivery
+      - OIDC_JWK_SET_URI=http://keycloak:8080/realms/food-delivery/protocol/openid-connect/certs
+      - OIDC_CLIENT_IDS=food-delivery-web
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
@@ -901,6 +907,33 @@ services:
   # Локальный приёмник писем: принимает SMTP (1025) и показывает письма в интерфейсе (8025).
   # Наружу ничего не отправляет, поэтому настоящие уведомления можно проверять, не рискуя
   # написать живому человеку. Письма живут в памяти и пропадают с контейнером.
+  # Keycloak: форма входа, подтверждение почты, защита от перебора, при желании второй фактор и соцсети.
+  # Платформа владеет пользователями и ролями сама; Keycloak лишь опознаёт человека, а identity-service
+  # обменивает его токен на токен платформы (POST /api/v1/auth/oidc). Режим start-dev: встроенная база в томе,
+  # без HTTPS - для локальной работы. Realm (клиенты, роли, настройки) загружается из keycloak/.
+  # Профиль auth, около 700 МБ памяти: включайте, когда нужен вход через Keycloak.
+  keycloak:
+    profiles: ["auth"]
+    image: quay.io/keycloak/keycloak:26.4
+    container_name: food-delivery-keycloak
+    mem_limit: 768m
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN:-admin}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_HTTP_PORT=8080
+      # Адрес для клиентов; он же издатель в токенах. Изнутри сети Keycloak отвечает и по своему имени.
+      - KC_HOSTNAME=http://localhost:${KEYCLOAK_PORT:-8180}
+      - KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true
+      # Куча ограничена: по умолчанию JVM взяла бы заметно больше, чем нужно для разработки.
+      - JAVA_OPTS_KC_HEAP=-Xms192m -Xmx448m
+    volumes:
+      - ./keycloak/food-delivery-realm.json:/opt/keycloak/data/import/food-delivery-realm.json:ro
+      - food_delivery_keycloak_data:/opt/keycloak/data
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
+
   mailpit:
     profiles: ["full"]
     image: axllent/mailpit:v1.21
@@ -964,6 +997,8 @@ volumes:
   food_delivery_grafana_data:
   food_delivery_tempo_data:
   food_delivery_loki_data:
+  # Встроенная база Keycloak (режим start-dev): пользователи и сессии. Realm восстанавливается из keycloak/.
+  food_delivery_keycloak_data:
   # Фото блюд. Единственные данные без второго источника, кроме баз: бэкапить вместе с PostgreSQL.
   food_delivery_minio_data:
   # Сертификаты mTLS. Не данные — их можно удалить, и grpc-certs выпустит новые.
