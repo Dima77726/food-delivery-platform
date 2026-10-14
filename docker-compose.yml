@@ -528,6 +528,8 @@ services:
       - PAYMENT_GATEWAY=${PAYMENT_GATEWAY:-simulated}
       - STRIPE_API_KEY
       - STRIPE_CURRENCY=${STRIPE_CURRENCY:-usd}
+      # Пересчёт суммы заказа (рубли) в валюту провайдера по курсу ЦБ РФ, SOAP DailyInfo. Нужен выход в интернет.
+      - FX_ENABLED=${FX_ENABLED:-false}
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
