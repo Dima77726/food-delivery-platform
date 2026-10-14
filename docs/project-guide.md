@@ -668,7 +668,7 @@ docker run --rm --network food-delivery-platform_default `
   -d '{"restaurant_id": 26}' catalog-service:9090 fooddelivery.catalog.v1.CatalogService/GetRestaurant
 ```
 
-(Proto: `fooddelivery/catalog/v1/catalog.proto`, `identity/v1/restaurant_access.proto`, `identity/v1/user_directory.proto`, `order/v1/order_query.proto`. Образ grpcurl скачается при первом запуске.)
+(Proto: `fooddelivery/catalog/v1/catalog.proto`, `fooddelivery/identity/v1/restaurant_access.proto`, `fooddelivery/identity/v1/user_directory.proto`, `fooddelivery/order/v1/order_query.proto`. Образ grpcurl скачается при первом запуске.)
 Попробуйте сертификат сервиса, которого нет в списке разрешённых, — сервер откажет.
 
 ### 11.7 WebSocket трека
