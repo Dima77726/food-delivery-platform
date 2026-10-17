@@ -25,6 +25,7 @@ const ROUTES = [
     ["/admin", "admin", ["ADMIN"], true],
     ["/admin/users", "admin-users", ["ADMIN"], true],
     ["/admin/audit", "admin-audit", ["ADMIN"], true],
+    ["/tools", "tools", [], false],
 ];
 
 
@@ -32,8 +33,8 @@ const NAV_BY_ROLE = {
     CUSTOMER: [["/", "Рестораны"], ["/orders", "Мои заказы"], ["/profile", "Уведомления"]],
     RESTAURANT_OWNER: [["/owner", "Мои рестораны"], ["/", "Каталог"], ["/profile", "Профиль"]],
     COURIER: [["/courier", "Доставки"], ["/profile", "Профиль"]],
-    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/audit", "Журнал"], ["/", "Каталог"]],
-    GUEST: [["/", "Рестораны"]],
+    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/audit", "Журнал"], ["/", "Каталог"], ["/tools", "Инструменты"]],
+    GUEST: [["/", "Рестораны"], ["/tools", "Инструменты"]],
 };
 
 let cleanups = [];
@@ -136,6 +137,7 @@ function accountMenu() {
         ${me.user.roles.length > 1 ? html`<hr><div class="head">Роль</div>${me.user.roles.map((r) => html`<button class="menu-item-row ${r === me.role ? "current" : ""}" data-act="switch-role" data-role="${r}">${ROLE_ICONS[r]} ${ROLE_LABELS[r]} ${r === me.role ? "✓" : ""}</button>`)}` : ""}
         ${demo.length ? html`<hr><div class="head">Демо-аккаунты</div>${demo.map((d) => html`<button class="menu-item-row" data-act="demo-login" data-email="${d.email}"><span class="avatar">${d.icon}</span><span><b>${d.title}</b> <span class="muted small">${d.email}</span></span></button>`)}` : ""}
         <hr>
+        <a class="menu-item-row" href="#/tools">🧰 Инструменты: Grafana, Kafka, БД…</a>
         <button class="menu-item-row" data-act="add-account">➕ Войти в другой аккаунт</button>
         <button class="menu-item-row" data-act="sign-out">🚪 Выйти из «${me.user.fullName}»</button>
     </div>`;

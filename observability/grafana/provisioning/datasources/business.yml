@@ -1,0 +1,88 @@
+# Бизнес-данные для дашбордов и ручного анализа: базы сервисов и ClickHouse.
+#
+# В PostgreSQL Grafana ходит учётной записью только для чтения (analytics_reader, заводится
+# docker/postgres/provision-service-databases.sh): дашборду не нужно право менять данные, а хеши паролей и
+# refresh-токены этой записи не видны. Пароли подставляются из окружения контейнера, в файле их нет.
+# ClickHouse и остальные хранилища профиля stores работают только в полном режиме запуска.
+
+apiVersion: 1
+
+datasources:
+  - name: "PostgreSQL · orders"
+    uid: pg-orders
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: $ANALYTICS_DB_USER
+    editable: false
+    jsonData:
+      database: orders
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ANALYTICS_DB_PASSWORD
+
+  - name: "PostgreSQL · payments"
+    uid: pg-payments
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: $ANALYTICS_DB_USER
+    editable: false
+    jsonData:
+      database: payments
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ANALYTICS_DB_PASSWORD
+
+  - name: "PostgreSQL · catalog"
+    uid: pg-catalog
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: $ANALYTICS_DB_USER
+    editable: false
+    jsonData:
+      database: catalog
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ANALYTICS_DB_PASSWORD
+
+  - name: "PostgreSQL · identity"
+    uid: pg-identity
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: $ANALYTICS_DB_USER
+    editable: false
+    jsonData:
+      database: identity
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ANALYTICS_DB_PASSWORD
+
+  - name: "PostgreSQL · notification"
+    uid: pg-notification
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: $ANALYTICS_DB_USER
+    editable: false
+    jsonData:
+      database: notification
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ANALYTICS_DB_PASSWORD
+
+  # Плагин ClickHouse ставится при старте контейнера (GF_INSTALL_PLUGINS в docker-compose.yml).
+  - name: ClickHouse
+    uid: clickhouse
+    type: grafana-clickhouse-datasource
+    editable: false
+    jsonData:
+      host: clickhouse
+      port: 8123
+      protocol: http
+      username: $CLICKHOUSE_USER
+      defaultDatabase: food_delivery
+    secureJsonData:
+      password: $CLICKHOUSE_PASSWORD
