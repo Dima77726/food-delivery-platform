@@ -13,5 +13,14 @@ window.APP_CONFIG = {
         { role: "ADMIN", email: "admin@demo.local", name: "Админ", title: "Админ", icon: "🛡️" }
     ],
     // ИИ-помощник (отдельный сервис food_delivery_agent на этом компьютере; nginx проксирует /agent/).
-    assistant: true
+    assistant: true,
+    // Адрес доставки: плитки карты и геокодер (подсказки при вводе и адрес по точке). По умолчанию —
+    // OpenStreetMap и Photon: бесплатно и без ключа, но с ограничением на нагрузку, так что на общедоступном
+    // сервере их стоит заменить на свои или платные. center и zoom — вид карты, пока клиент ничего не выбрал.
+    geo: {
+        tiles: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        geocoder: "https://photon.komoot.io",
+        center: [55.7558, 37.6173],
+        zoom: 12
+    }
 };

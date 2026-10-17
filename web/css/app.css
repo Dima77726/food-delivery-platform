@@ -270,6 +270,23 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .star-pick span.on { opacity: 1; color: #f5b301; }
 .map { width: 100%; height: 220px; border-radius: var(--radius-sm); background: linear-gradient(135deg, color-mix(in srgb, var(--info) 14%, var(--bg-2)), var(--bg-2)); border: 1px solid var(--border); }
 
+/* Адрес доставки и карты Leaflet */
+.addr-field { position: relative; }
+.addr-input { display: flex; gap: 8px; }
+.addr-input .input { flex: 1; min-width: 0; }
+.addr-list { position: absolute; z-index: 1100; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 6px; list-style: none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); max-height: 280px; overflow: auto; }
+.addr-list li { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.addr-list li:hover, .addr-list li.on { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.addr-hint:empty { display: none; }
+.addr-recent .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addr-map { height: 260px; overflow: hidden; }
+.order-map { height: 260px; overflow: hidden; }
+.map-fallback { height: 100%; display: grid; place-content: center; text-align: center; padding: 12px; }
+.map .leaflet-container, .map.leaflet-container { font: inherit; background: var(--bg-2); }
+.map-pin { background: none; border: 0; }
+.map-pin span { display: grid; place-items: center; width: 36px; height: 36px; font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .35)); }
+.addr-line { display: flex; gap: 8px; align-items: flex-start; }
+
 /* Вход */
 .auth { min-height: calc(100vh - var(--nav-h)); display: grid; place-items: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 440px; }

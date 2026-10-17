@@ -1,6 +1,7 @@
 // Страница заказа: этапы, хронология, оплата, трек курьера, отмена и отзыв.
 
 import { get, post, restaurantName } from "../api.js";
+import { orderMap, loadLeaflet, formatAddress } from "../geo.js";
 import { html, raw, delegate, money, emojiFor, statusBadge, dateTime, timeOnly, empty, skeleton, toast, reportError, modal, confirmDialog, DELIVERY_STATUS } from "../ui.js";
 
 const STEPS = [["CREATED", "Создан"], ["PAID", "Оплачен"], ["ACCEPTED", "Принят"], ["COOKING", "Готовится"], ["READY_FOR_DELIVERY", "Ждёт курьера"], ["IN_DELIVERY", "В пути"], ["DELIVERED", "Доставлен"]];
@@ -14,6 +15,10 @@ export default async function orderPage({ root, params, me, onLeave }) {
     root.innerHTML = html`<div class="container">${skeleton(2)}</div>`.value;
 
     let order; let events = []; let payments = []; let track = null; let name = "";
+    // Карта создаётся один раз и переносится между перерисовками; если Leaflet не загрузился, остаётся схема.
+    let leaflet = null;
+    let map = null;
+    loadLeaflet().then(() => { leaflet = true; }, () => { leaflet = false; }).finally(() => order && draw());
 
     async function load() {
         order = await get(`/api/v1/customers/${uid}/orders/${oid}`);
@@ -25,6 +30,27 @@ export default async function orderPage({ root, params, me, onLeave }) {
         track = ["IN_DELIVERY", "DELIVERED"].includes(order.status)
             ? await get(`/api/v1/customers/${uid}/orders/${oid}/track?limit=200`).catch(() => null)
             : null;
+        // Трек отдаётся от новых точек к старым, а маршрут рисуется от начала к курьеру.
+        track?.positions?.sort((a, b) => new Date(a.recordedAt ?? a.createdAt) - new Date(b.recordedAt ?? b.createdAt));
+    }
+
+    const trackPoints = (positions) => positions
+        .map((p) => [p.latitude ?? p.lat, p.longitude ?? p.lon ?? p.lng])
+        .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+
+    function destination() {
+        const a = order.deliveryAddress;
+        return a?.latitude != null ? [Number(a.latitude), Number(a.longitude)] : null;
+    }
+
+    const mapSlot = () => html`<div class="map" data-order-map><div class="map-fallback muted small">Загружаем карту…</div></div>`;
+
+    function mountMap() {
+        const slot = root.querySelector("[data-order-map]");
+        if (!slot || leaflet === false) return;
+        map ??= orderMap();
+        map.mount(slot);
+        map.update({ destination: destination(), path: trackPoints(track?.positions || []) });
     }
 
     function mapSvg(positions) {
@@ -47,6 +73,8 @@ export default async function orderPage({ root, params, me, onLeave }) {
         const canceled = order.status === "CANCELED";
         const idx = STEP_INDEX[order.status] ?? 0;
         const canCancel = ["CREATED", "PAYMENT_PENDING", "PAID"].includes(order.status);
+        const showTrack = order.status === "IN_DELIVERY" || (order.status === "DELIVERED" && track?.positions?.length);
+        const address = order.deliveryAddress;
         root.innerHTML = html`<div class="container">
             <div class="page-head"><a class="btn sm" href="#/orders">← Заказы</a><h1>Заказ №${order.id}</h1>${statusBadge(order.status)}<span class="muted right">${emojiFor(name)} ${name}</span></div>
             <div class="split"><div class="stack lg">
@@ -55,8 +83,11 @@ export default async function orderPage({ root, params, me, onLeave }) {
                         : html`<div class="stepper">${STEPS.map(([key, label], i) => html`<div class="step ${i < idx || order.status === "DELIVERED" ? "done" : i === idx ? "now" : ""}">${label}</div>`)}</div>`}
                     ${order.status === "PAYMENT_PENDING" ? html`<p class="muted small center">Платёж проводится, это занимает несколько секунд…</p>` : ""}
                 </div>
-                ${order.status === "IN_DELIVERY" || (order.status === "DELIVERED" && track?.positions?.length) ? html`<div class="card stack"><h3>🛵 Курьер ${order.status === "IN_DELIVERY" ? "в пути" : "доставил заказ"}</h3>${mapSvg(track?.positions || [])}
+                ${showTrack ? html`<div class="card stack"><h3>🛵 Курьер ${order.status === "IN_DELIVERY" ? "в пути" : "доставил заказ"}</h3>${leaflet !== false ? mapSlot() : mapSvg(track?.positions || [])}
+                    ${address ? html`<div class="addr-line muted small"><span>📍</span><span>${formatAddress(address)}</span></div>` : ""}
                     <span class="muted small">${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
+                ${address && !showTrack ? html`<div class="card stack"><h3>📍 Адрес доставки</h3><div><b>${address.address}</b>${address.details ? html`<div class="muted small">${address.details}</div>` : ""}</div>
+                    ${destination() && leaflet !== false && !canceled ? mapSlot() : ""}</div>` : ""}
                 <div class="card stack"><h3>Состав заказа</h3>
                     ${order.items.map((i) => html`<div class="cart-line"><span style="font-size:26px">${emojiFor(i.menuItemName)}</span><div style="flex:1"><b>${i.menuItemName}</b><div class="muted small">${money(i.price)} × ${i.quantity}</div></div><b>${money(i.lineTotal)}</b></div>`)}
                     <div class="total"><span>Итого</span><span>${money(order.totalAmount)}</span></div></div>
@@ -69,6 +100,7 @@ export default async function orderPage({ root, params, me, onLeave }) {
                 ${canCancel ? html`<button class="btn danger block" data-act="cancel">Отменить заказ</button>` : ""}
                 ${["CREATED"].includes(order.status) ? html`<button class="btn primary block" data-act="pay">Оплатить</button>` : ""}
             </aside></div></div>`.value;
+        mountMap();
     }
 
     function reviewDialog() {
@@ -146,5 +178,5 @@ export default async function orderPage({ root, params, me, onLeave }) {
         if (document.querySelector(".overlay")) return;
         try { await load(); draw(); } catch { /* повторим */ }
     }, 4000);
-    onLeave(() => clearInterval(timer));
+    onLeave(() => { clearInterval(timer); map?.destroy(); });
 }
