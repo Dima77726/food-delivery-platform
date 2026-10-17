@@ -1,12 +1,22 @@
 // Курьер: доступные доставки, свои доставки, движение по маршруту и завершение.
 
 import { get, post } from "../api.js";
+import { mapsLink } from "../geo.js";
 import { html, delegate, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, DELIVERY_STATUS } from "../ui.js";
 
-// Учебный маршрут по центру Москвы: курьер «едет» от ресторана к клиенту, пока включена отправка позиции.
+// Учебный маршрут: курьер «едет» к точке клиента, пока включена отправка позиции. Координат ресторана в каталоге
+// нет, поэтому старт — в паре километров к юго-западу от клиента. Без точки клиента — маршрут по центру Москвы.
 const FROM = [55.7539, 37.6208];
 const TO = [55.7712, 37.6502];
+const START_OFFSET = [-0.012, -0.02];
 const STEPS = 24;
+
+function route(delivery) {
+    const a = delivery?.deliveryAddress;
+    if (a?.latitude == null) return [FROM, TO];
+    const to = [Number(a.latitude), Number(a.longitude)];
+    return [[to[0] + START_OFFSET[0], to[1] + START_OFFSET[1]], to];
+}
 
 export default async function courierPage({ root, me, onLeave }) {
     const uid = me.user.id;
@@ -27,6 +37,9 @@ export default async function courierPage({ root, me, onLeave }) {
         const isRiding = riding.has(d.id);
         return html`<div class="card stack"><div class="row between"><h3>Заказ №${d.orderId}</h3>${statusBadge(d.status, DELIVERY_STATUS)}</div>
             <div class="muted small">Доставка №${d.id} · создана ${ago(d.createdAt)}${d.deliveredAt ? " · доставлена " + dateTime(d.deliveredAt) : ""}</div>
+            ${d.deliveryAddress ? html`<div class="addr-line"><span>📍</span><div style="flex:1"><b>${d.deliveryAddress.address}</b>${d.deliveryAddress.details ? html`<div class="muted small">${d.deliveryAddress.details}</div>` : ""}</div>
+                ${mode !== "done" ? html`<a class="btn sm ghost" href="${mapsLink(d.deliveryAddress)}" target="_blank" rel="noopener">🗺️ На карте</a>` : ""}</div>`
+                : html`<div class="muted small">Адрес не указан: заказ оформлен без адреса</div>`}
             ${mode === "available" ? html`<button class="btn primary" data-act="assign" data-id="${d.id}">Взять доставку</button>` : ""}
             ${d.status === "ASSIGNED" ? html`<button class="btn primary" data-act="pickup" data-id="${d.id}">📦 Забрал заказ в ресторане</button>` : ""}
             ${d.status === "PICKED_UP" ? html`<div class="row wrap"><button class="btn ${isRiding ? "danger" : ""}" data-act="ride" data-id="${d.id}">${isRiding ? "⏸ Остановить отправку позиции" : "🛵 Поехали (симуляция GPS)"}</button>
@@ -58,10 +71,13 @@ export default async function courierPage({ root, me, onLeave }) {
 
     function startRide(id) {
         const state = { step: 0, timer: null };
+        const [from, to] = route(mine.find((d) => d.id === id));
         const send = async () => {
             const t = Math.min(state.step / STEPS, 1);
-            const latitude = FROM[0] + (TO[0] - FROM[0]) * t + Math.sin(state.step) * 0.0003;
-            const longitude = FROM[1] + (TO[1] - FROM[1]) * t + Math.cos(state.step) * 0.0003;
+            // Последняя точка — ровно у клиента, без «дрожания».
+            const wobble = t < 1 ? 0.0003 : 0;
+            const latitude = from[0] + (to[0] - from[0]) * t + Math.sin(state.step) * wobble;
+            const longitude = from[1] + (to[1] - from[1]) * t + Math.cos(state.step) * wobble;
             try {
                 await post(`/api/v1/couriers/${uid}/deliveries/${id}/positions`, { latitude, longitude, speedKmh: 18 + Math.round(Math.random() * 12) });
                 state.step++;

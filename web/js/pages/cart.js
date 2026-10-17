@@ -1,6 +1,7 @@
 // Корзины клиента (по одной на ресторан), оформление заказа и оплата.
 
-import { get, post, patch, del, restaurantName } from "../api.js";
+import { get, post, patch, del, restaurant, restaurantName } from "../api.js";
+import { addressPicker, rememberAddress } from "../geo.js";
 import { cartRestaurants, untrackCart } from "../store.js";
 import { html, $, delegate, money, emojiFor, modal, toast, reportError, empty, skeleton, sleep } from "../ui.js";
 import { navigate } from "../nav.js";
@@ -42,24 +43,38 @@ export default async function cartPage({ root, me, refreshChrome }) {
     function checkout(rid) {
         const entry = carts.find((c) => c.id === rid);
         let method = "CARD";
+        let picker;
         modal({
             title: "Оформление заказа",
+            wide: true,
             body: html`<div class="stack"><p>${entry.name}: <b>${money(entry.cart.totalAmount)}</b></p>
+                <div data-address></div>
                 <div class="role-pick" style="grid-template-columns:1fr 1fr" id="pay-methods">
                     <label><input type="radio" name="m" value="CARD" checked><span style="font-size:26px">💳</span>Картой онлайн</label>
                     <label><input type="radio" name="m" value="CASH_ON_DELIVERY"><span style="font-size:26px">💵</span>Наличными курьеру</label></div>
                 <p class="muted small">Оплата проходит в учебном режиме: деньги никуда не списываются, пока не подключён настоящий платёжный провайдер.</p></div>`,
-            onMount: (el) => el.addEventListener("change", (e) => { if (e.target.name === "m") method = e.target.value; }),
+            onMount: (el, close) => {
+                el.addEventListener("change", (e) => { if (e.target.name === "m") method = e.target.value; });
+                picker = addressPicker(el.querySelector("[data-address]"), { uid });
+                restaurant(rid).then((r) => picker.setCity(r.city)).catch(() => {});
+                // Окно закрывается и кнопками, и щелчком мимо: карту освобождаем в любом случае.
+                new MutationObserver((_, observer) => { if (!el.isConnected) { picker.destroy(); observer.disconnect(); } })
+                    .observe(document.getElementById("modal-root"), { childList: true });
+            },
             actions: [
                 { label: "Отмена" },
                 {
                     label: "Заказать и оплатить", kind: "primary", close: false,
                     onClick: async ({ close, button }) => {
+                        const problem = picker.validate();
+                        if (problem) { toast(problem, "bad"); return false; }
+                        const deliveryAddress = picker.value();
                         button.disabled = true;
                         button.textContent = "Оформляем…";
                         try {
-                            const order = await post(`/api/v1/customers/${uid}/restaurants/${rid}/orders`);
+                            const order = await post(`/api/v1/customers/${uid}/restaurants/${rid}/orders`, { deliveryAddress });
                             untrackCart(uid, rid);
+                            rememberAddress(uid, deliveryAddress);
                             await post(`/api/v1/customers/${uid}/orders/${order.id}/payments`, { method, idempotencyKey: crypto.randomUUID() });
                             // Оплата идёт через очереди: платёж проводится за секунды. Ждём итог, но не бесконечно.
                             for (let i = 0; i < 20; i++) {
