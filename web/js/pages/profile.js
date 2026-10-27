@@ -1,7 +1,8 @@
-// Профиль: данные аккаунта, уведомления и привязка Telegram.
+// Профиль: данные аккаунта, уведомления, привязка Telegram и Web Push.
 
 import { get, post } from "../api.js";
 import { html, delegate, initials, ago, empty, skeleton, ROLE_LABELS, ROLE_ICONS, toast, reportError } from "../ui.js";
+import { pushSupported, currentPushSubscription, enablePush, disablePush } from "../push.js";
 
 const CHANNEL = { EMAIL: ["✉️", "Почта"], TELEGRAM: ["✈️", "Telegram"], SMS: ["💬", "SMS"], PUSH: ["🔔", "Push"] };
 
@@ -9,8 +10,12 @@ export default async function profilePage({ root, me }) {
     root.innerHTML = html`<div class="container"><div class="page-head"><h1>Профиль</h1></div>${skeleton(2)}</div>`.value;
     let items = [];
     let link = null;
+    let pushOn = false;
 
-    const load = async () => { items = await get("/api/v1/notifications/me").catch(() => []); };
+    const load = async () => {
+        items = await get("/api/v1/notifications/me").catch(() => []);
+        pushOn = Boolean(await currentPushSubscription().catch(() => null));
+    };
 
     function draw() {
         const u = me.user;
@@ -30,10 +35,21 @@ export default async function profilePage({ root, me }) {
             <aside class="stack sticky"><div class="card stack"><h3>✈️ Telegram</h3>
                 <p class="muted small">Подключите бота, и статусы заказов будут приходить прямо в мессенджер.</p>
                 ${link ? html`<a class="btn primary block" href="${link.deepLink}" target="_blank" rel="noopener">Открыть Telegram</a><p class="muted small">Ссылка действует до ${new Date(link.expiresAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}. В открывшемся чате нажмите «Start».</p>`
-                    : html`<button class="btn primary block" data-act="link">Подключить Telegram</button>`}</div></aside></div></div>`.value;
+                    : html`<button class="btn primary block" data-act="link">Подключить Telegram</button>`}</div>
+                <div class="card stack"><h3>🔔 Уведомления в браузере</h3>
+                    <p class="muted small">Web Push: статусы заказов приходят, даже когда вкладка закрыта. Сообщение шифруется ключом этого браузера — push-сервис (Google, Mozilla, Apple) его не читает.</p>
+                    ${!pushSupported() ? html`<p class="muted small">Этот браузер Web Push не поддерживает.</p>`
+                        : pushOn ? html`<button class="btn block" data-act="push-off">Выключить в этом браузере</button>`
+                            : html`<button class="btn primary block" data-act="push-on">Включить в этом браузере</button>`}</div></aside></div></div>`.value;
     }
 
     delegate(root, "click", {
+        "push-on": async () => {
+            try { await enablePush(); pushOn = true; toast("Уведомления в браузере включены", "ok"); draw(); } catch (error) {
+                reportError(error.status === 503 ? new Error("Web Push не настроен на платформе (нет ключей VAPID)") : error);
+            }
+        },
+        "push-off": async () => { await disablePush(); pushOn = false; toast("Уведомления в браузере выключены"); draw(); },
         link: async () => {
             try { link = await post("/api/v1/notifications/telegram/link"); draw(); } catch (error) {
                 reportError(error.status === 404 || error.status === 503 ? new Error("Telegram-бот не включён в этой установке") : error);
