@@ -492,12 +492,17 @@ services:
         condition: service_healthy
       postgres-provision:
         condition: service_completed_successfully
+      # Redis: гео-индекс курьеров на линии, коэффициент спроса, фильтр Блума промокодов.
+      redis:
+        condition: service_healthy
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       # gRPC-клиенты: каталог (ресторан и блюдо для корзины) и сервис пользователей (права на ресторан).
       - CATALOG_GRPC_ADDRESS=static://catalog-service:9090
       - IDENTITY_GRPC_ADDRESS=static://identity-service:9090

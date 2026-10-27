@@ -346,3 +346,12 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .oc-typing { min-height: 1.2em; }
 .oc-form { display: flex; gap: 6px; }
 .oc-form .input { flex: 1; }
+
+/* Условия заказа и предложения курьеру */
+.field > span { font-size: 13px; font-weight: 650; color: var(--muted); }
+.ok-text { color: var(--accent); }
+.bad-text { color: var(--danger); }
+.card.subtle { background: var(--bg); box-shadow: none; border: 1px solid var(--border); }
+.offer { border: 2px solid var(--primary); }
+.countdown { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.countdown > i { display: block; height: 100%; background: var(--primary); transition: width 1s linear; }
