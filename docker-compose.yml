@@ -190,6 +190,8 @@ services:
       TZ: ${TZ}
     volumes:
       - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      # MQTT и HTTP-бэкенд аутентификации для курьеров (см. сам файл).
+      - ./docker/rabbitmq/20-food-delivery.conf:/etc/rabbitmq/conf.d/20-food-delivery.conf:ro
       - food_delivery_rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -200,6 +202,8 @@ services:
     ports:
       - "${RABBITMQ_PORT:-5672}:5672"
       - "${RABBITMQ_UI_PORT:-15672}:15672"
+      # MQTT для устройств курьеров (mosquitto_pub, приложения). Только на этом компьютере.
+      - "127.0.0.1:${MQTT_PORT:-1883}:1883"
 
   # Веб-интерфейс к брокеру: топики, партиции, лаг групп, чтение и отправка сообщений.
   #
@@ -573,6 +577,8 @@ services:
       - CASSANDRA_CONTACT_POINTS=cassandra:9042
       # Живой трек: подписки держит RabbitMQ через свой STOMP-плагин, а не память процесса.
       - TRACKING_RELAY_ENABLED=true
+      # Точки курьеров по MQTT и ручки HTTP-аутентификации брокера (/internal/rabbitmq/*).
+      - TRACKING_MQTT_ENABLED=${TRACKING_MQTT_ENABLED:-true}
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_STOMP_PORT=61613
       - RABBITMQ_USER
