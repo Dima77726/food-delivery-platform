@@ -64,3 +64,33 @@ provision "$IDENTITY_DB_NAME" "$IDENTITY_DB_USER" "$IDENTITY_DB_PASSWORD"
 provision "$ORDER_DB_NAME" "$ORDER_DB_USER" "$ORDER_DB_PASSWORD"
 
 provision "$PAYMENT_DB_NAME" "$PAYMENT_DB_USER" "$PAYMENT_DB_PASSWORD"
+
+# ---------- Debezium (CDC, профиль cdc): чтение WAL базы заказов ----------
+#
+# Отдельная роль с правом REPLICATION и только чтением базы заказов, а не суперпользователь. Публикация
+# FOR ALL TABLES создаётся здесь, от суперпользователя: так она не зависит от того, создал ли уже
+# Liquibase таблицы сервиса, а Debezium не нужны права владельца таблиц. Какие таблицы читать, Debezium
+# решает сам (table.include.list). Без DEBEZIUM_DB_PASSWORD ничего не заводится.
+if [ -n "${DEBEZIUM_DB_PASSWORD:-}" ]; then
+    psql -v ON_ERROR_STOP=1 -q -v user="$DEBEZIUM_DB_USER" -v password="$DEBEZIUM_DB_PASSWORD" -v db="$ORDER_DB_NAME" <<'SQL'
+SELECT format('CREATE ROLE %I LOGIN REPLICATION PASSWORD %L', :'user', :'password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'user')
+\gexec
+SELECT format('ALTER ROLE %I LOGIN REPLICATION PASSWORD %L', :'user', :'password')
+\gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'db', :'user')
+\gexec
+SQL
+    psql -v ON_ERROR_STOP=1 -q -d "$ORDER_DB_NAME" -v user="$DEBEZIUM_DB_USER" -v owner="$ORDER_DB_USER" <<'SQL'
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'user')
+\gexec
+SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', :'user')
+\gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', :'owner', :'user')
+\gexec
+SELECT 'CREATE PUBLICATION debezium_orders FOR ALL TABLES'
+WHERE NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'debezium_orders')
+\gexec
+SQL
+    echo "Учётная запись Debezium $DEBEZIUM_DB_USER и публикация debezium_orders готовы"
+fi

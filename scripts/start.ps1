@@ -11,6 +11,8 @@
       -Light        без Mongo, Neo4j, ClickHouse и Elasticsearch: пропадают отзывы, рекомендации,
                     аналитика и поиск, остальное работает                               ~5 ГБ
       -Auth         добавляет Keycloak (+0,7 ГБ)
+      -Cdc          добавляет CDC: Debezium читает WAL базы заказов в Kafka, ClickHouse — из Kafka (+0,5 ГБ;
+                    ClickHouse есть только без -Light). Нужен DEBEZIUM_DB_PASSWORD в .env
 
 .EXAMPLE
     ./scripts/start.ps1                  # всё
@@ -19,6 +21,7 @@
 param(
     [switch]$Light,
     [switch]$Auth,
+    [switch]$Cdc,
     [switch]$Agent,
     [switch]$NoBrowser,
     [switch]$NoSeed,
@@ -66,6 +69,7 @@ Step 'Запускаю контейнеры (первый запуск скач�
 $profiles = @('--profile', 'full')
 if (-not $Light) { $profiles += @('--profile', 'stores') }
 if ($Auth) { $profiles += @('--profile', 'auth') }
+if ($Cdc) { $profiles += @('--profile', 'cdc') }
 
 $stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
 $saved = @{}
