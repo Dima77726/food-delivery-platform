@@ -106,6 +106,7 @@ export async function refreshSession() {
 
 export const get = (path, options) => api("GET", path, options);
 export const post = (path, body, options) => api("POST", path, { ...options, body });
+export const put = (path, body, options) => api("PUT", path, { ...options, body });
 export const patch = (path, body, options) => api("PATCH", path, { ...options, body });
 export const del = (path, options) => api("DELETE", path, options);
 
