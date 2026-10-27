@@ -15,6 +15,12 @@ services:
     container_name: food-delivery-postgres
     mem_limit: 512m
     restart: unless-stopped
+    # Логическая репликация — для CDC (Debezium, профиль cdc): журнал WAL несёт строки целиком, а не только
+    # физические изменения страниц. max_slot_wal_keep_size — предохранитель: слот репликации держит WAL, пока
+    # его не прочитали, и остановленный Debezium без потолка заполнил бы диск. Сверх 1 ГБ слот теряет позицию,
+    # и Debezium делает снимок заново — лучше, чем упавшая база.
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=4", "-c", "max_wal_senders=4",
+              "-c", "max_slot_wal_keep_size=1GB"]
     environment:
       # Форма ${VAR:?...} останавливает Compose до запуска контейнеров и называет
       # недостающую переменную. Значения берутся из .env, образец — в .env.example.
@@ -66,6 +72,9 @@ services:
       PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
       PAYMENT_DB_USER: ${PAYMENT_DB_USER:?задайте PAYMENT_DB_USER в .env}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?задайте PAYMENT_DB_PASSWORD в .env}
+      # Учётка Debezium (CDC): только репликация и чтение базы заказов. Без пароля не заводится.
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER:-debezium}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD:-}
     volumes:
       - ./docker/postgres/provision-service-databases.sh:/provision.sh:ro
     entrypoint: ["sh", "/provision.sh"]
@@ -190,6 +199,8 @@ services:
       TZ: ${TZ}
     volumes:
       - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      # MQTT и HTTP-бэкенд аутентификации для курьеров (см. сам файл).
+      - ./docker/rabbitmq/20-food-delivery.conf:/etc/rabbitmq/conf.d/20-food-delivery.conf:ro
       - food_delivery_rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -200,6 +211,8 @@ services:
     ports:
       - "${RABBITMQ_PORT:-5672}:5672"
       - "${RABBITMQ_UI_PORT:-15672}:15672"
+      # MQTT для устройств курьеров (mosquitto_pub, приложения). Только на этом компьютере.
+      - "127.0.0.1:${MQTT_PORT:-1883}:1883"
 
   # Веб-интерфейс к брокеру: топики, партиции, лаг групп, чтение и отправка сообщений.
   #
@@ -498,6 +511,11 @@ services:
       - ORDER_DB_NAME=${ORDER_DB_NAME:-orders}
       - ORDER_DB_USER
       - ORDER_DB_PASSWORD
+      # Ежедневные расчёты (Spring Batch): CSV за вчера в 03:00 по Москве, в бакет settlements того же MinIO.
+      - SETTLEMENT_STORAGE_ENABLED=${SETTLEMENT_STORAGE_ENABLED:-true}
+      - SETTLEMENT_S3_ENDPOINT=http://minio:9000
+      - SETTLEMENT_S3_ACCESS_KEY=${MINIO_ROOT_USER}
+      - SETTLEMENT_S3_SECRET_KEY=${MINIO_ROOT_PASSWORD}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
       - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
@@ -573,6 +591,8 @@ services:
       - CASSANDRA_CONTACT_POINTS=cassandra:9042
       # Живой трек: подписки держит RabbitMQ через свой STOMP-плагин, а не память процесса.
       - TRACKING_RELAY_ENABLED=true
+      # Точки курьеров по MQTT и ручки HTTP-аутентификации брокера (/internal/rabbitmq/*).
+      - TRACKING_MQTT_ENABLED=${TRACKING_MQTT_ENABLED:-true}
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_STOMP_PORT=61613
       - RABBITMQ_USER
@@ -646,6 +666,10 @@ services:
       - WEBHOOK_SECRET_KEY
       - WEBHOOK_ALLOWED_PRIVATE_HOSTS=${WEBHOOK_ALLOWED_PRIVATE_HOSTS:-webhook-sink}
       - WEBHOOK_RETRY_DELAYS=${WEBHOOK_RETRY_DELAYS:-PT10S,PT1M,PT5M,PT30M,PT2H}
+      # Web Push (VAPID): уведомления в браузер, даже когда вкладка закрыта. Без пары ключей выключен.
+      - WEB_PUSH_VAPID_PUBLIC_KEY
+      - WEB_PUSH_VAPID_PRIVATE_KEY
+      - WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-mailto:admin@food-delivery.local}
       - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
       - EMAIL_FROM=${EMAIL_FROM:-no-reply@food-delivery.local}
       - MAIL_HOST=${MAIL_HOST:-mailpit}
@@ -963,6 +987,75 @@ services:
     ports:
       - "127.0.0.1:${WEB_PORT:-8070}:80"
 
+  # ---------- CDC (профиль cdc): изменения таблиц заказов прямо из WAL PostgreSQL ----------
+  #
+  # Debezium Server читает журнал логической репликации базы заказов и пишет каждое изменение строки в
+  # Kafka (топики cdc.public.customer_order, cdc.public.delivery) — без единой строчки кода в сервисе.
+  # Сравнение с outbox сервиса заказов — в docs/system-design, глава 4. Нужен DEBEZIUM_DB_PASSWORD в .env.
+  debezium:
+    profiles: ["cdc"]
+    image: quay.io/debezium/server:3.1.2.Final
+    container_name: food-delivery-debezium
+    mem_limit: 512m
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      JAVA_OPTS: "-Xmx256m"
+      DEBEZIUM_SOURCE_CONNECTOR_CLASS: io.debezium.connector.postgresql.PostgresConnector
+      DEBEZIUM_SOURCE_DATABASE_HOSTNAME: postgres
+      DEBEZIUM_SOURCE_DATABASE_PORT: "5432"
+      DEBEZIUM_SOURCE_DATABASE_USER: ${DEBEZIUM_DB_USER:-debezium}
+      DEBEZIUM_SOURCE_DATABASE_PASSWORD: ${DEBEZIUM_DB_PASSWORD:-}
+      DEBEZIUM_SOURCE_DATABASE_DBNAME: ${ORDER_DB_NAME:-orders}
+      DEBEZIUM_SOURCE_TOPIC_PREFIX: cdc
+      DEBEZIUM_SOURCE_PLUGIN_NAME: pgoutput
+      # Публикацию создаёт provisioning (FOR ALL TABLES — от суперпользователя); слот Debezium создаёт сам.
+      DEBEZIUM_SOURCE_PUBLICATION_NAME: debezium_orders
+      DEBEZIUM_SOURCE_PUBLICATION_AUTOCREATE_MODE: disabled
+      DEBEZIUM_SOURCE_SLOT_NAME: debezium_orders
+      DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST: public.customer_order,public.delivery
+      DEBEZIUM_SOURCE_DECIMAL_HANDLING_MODE: string
+      DEBEZIUM_SOURCE_SNAPSHOT_MODE: initial
+      DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME: /debezium/data/offsets.dat
+      DEBEZIUM_SOURCE_OFFSET_FLUSH_INTERVAL_MS: "5000"
+      # Только новое состояние строки плюс тип операции и время в источнике — плоский JSON, удобный потребителям.
+      DEBEZIUM_TRANSFORMS: unwrap
+      DEBEZIUM_TRANSFORMS_UNWRAP_TYPE: io.debezium.transforms.ExtractNewRecordState
+      DEBEZIUM_TRANSFORMS_UNWRAP_ADD_FIELDS: op,source.ts_ms
+      DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_HANDLING_MODE: rewrite
+      DEBEZIUM_FORMAT_VALUE: json
+      DEBEZIUM_FORMAT_VALUE_SCHEMAS_ENABLE: "false"
+      DEBEZIUM_FORMAT_KEY: json
+      DEBEZIUM_FORMAT_KEY_SCHEMAS_ENABLE: "false"
+      DEBEZIUM_SINK_TYPE: kafka
+      DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS: kafka:9092
+      DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER: org.apache.kafka.common.serialization.StringSerializer
+      DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER: org.apache.kafka.common.serialization.StringSerializer
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_debezium_data:/debezium/data
+
+  # Потребитель CDC без кода приложения: ClickHouse сам читает топик таблицей на движке Kafka, а
+  # материализованное представление раскладывает изменения в историю статусов заказов. Одноразовый
+  # контейнер применяет идемпотентный SQL и выходит. Нужен ClickHouse — профиль stores.
+  cdc-clickhouse-init:
+    profiles: ["cdc"]
+    image: clickhouse/clickhouse-server:25.3
+    container_name: food-delivery-cdc-clickhouse-init
+    restart: "no"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-food_delivery}
+    volumes:
+      - ./docker/cdc/clickhouse-cdc.sql:/cdc.sql:ro
+      - ./docker/cdc/apply.sh:/apply.sh:ro
+    entrypoint: ["sh", "/apply.sh"]
+
   # Приёмник вебхуков для демонстрации: принимает подписанные POST от notification-service, показывает их
   # на http://localhost:8095 и проверяет подпись в браузере. Отвечает кодом из пути (/hooks/fail-503 → 503),
   # чтобы было на чём посмотреть повторы. Стандартная библиотека Python, без зависимостей.
@@ -1045,6 +1138,8 @@ volumes:
   food_delivery_keycloak_data:
   # Фото блюд. Единственные данные без второго источника, кроме баз: бэкапить вместе с PostgreSQL.
   food_delivery_minio_data:
+  # Позиция Debezium в WAL (offsets). Удалить — Debezium сделает снимок таблиц заново.
+  food_delivery_debezium_data:
   # Сертификаты mTLS. Не данные — их можно удалить, и grpc-certs выпустит новые.
   food_delivery_grpc_certs:
   # Тома дополнительных хранилищ объявлены безусловно: список томов профилями

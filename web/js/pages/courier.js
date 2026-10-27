@@ -3,6 +3,7 @@
 import { get, post } from "../api.js";
 import { longPoll, pollFetch } from "../live.js";
 import { mountChat } from "../chat.js";
+import { connectCourierMqtt } from "../mqtt-gps.js";
 import { mapsLink } from "../geo.js";
 import { html, delegate, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, modal, DELIVERY_STATUS } from "../ui.js";
 
@@ -20,14 +21,22 @@ function route(delivery) {
     return [[to[0] + START_OFFSET[0], to[1] + START_OFFSET[1]], to];
 }
 
+const MQTT_LABELS = { live: "● подключено к брокеру", reconnecting: "○ переподключение…" };
+
 export default async function courierPage({ root, me, onLeave }) {
     const uid = me.user.id;
     let tab = "available";
     let available = [];
     let mine = [];
     const riding = new Map(); // deliveryId -> { step, timer }
+    // Канал точек GPS: HTTP (POST /positions) или MQTT поверх WebSocket — выбор запоминается в браузере.
+    let gpsTransport = (() => { try { return localStorage.getItem("gpsTransport") || "http"; } catch { return "http"; } })();
+    let mqttLink = null;
+    let mqttState = "";
 
     root.innerHTML = html`<div class="container"><div class="page-head"><h1>Доставки</h1></div>${skeleton(3)}</div>`.value;
+
+    const mqttLabel = () => MQTT_LABELS[mqttState] || (mqttState.startsWith("error:") ? "ошибка: " + mqttState.slice(6) : "подключится с первой точкой");
 
     async function load() {
         [available, mine] = await Promise.all([get("/api/v1/deliveries/available").catch(() => []), get(`/api/v1/couriers/${uid}/deliveries`).catch(() => [])]);
@@ -47,7 +56,11 @@ export default async function courierPage({ root, me, onLeave }) {
             ${d.status === "ASSIGNED" ? html`<button class="btn primary" data-act="pickup" data-id="${d.id}">📦 Забрал заказ в ресторане</button>` : ""}
             ${d.status === "PICKED_UP" ? html`<div class="row wrap"><button class="btn ${isRiding ? "danger" : ""}" data-act="ride" data-id="${d.id}">${isRiding ? "⏸ Остановить отправку позиции" : "🛵 Поехали (симуляция GPS)"}</button>
                 <button class="btn green" data-act="deliver" data-id="${d.id}">✓ Доставил</button></div>
-                ${isRiding ? html`<div class="muted small">Позиция уходит каждые 2 секунды: клиент видит курьера на своей карте.</div>` : ""}` : ""}</div>`;
+                <div class="row wrap small"><span class="muted">Канал GPS:</span>
+                    <button class="chip ${gpsTransport === "http" ? "on" : ""}" data-act="gps" data-transport="http">HTTP</button>
+                    <button class="chip ${gpsTransport === "mqtt" ? "on" : ""}" data-act="gps" data-transport="mqtt">MQTT</button>
+                    ${gpsTransport === "mqtt" ? html`<span class="muted" data-mqtt-state>${mqttLabel()}</span>` : ""}</div>
+                ${isRiding ? html`<div class="muted small">Позиция уходит каждые 2 секунды ${gpsTransport === "mqtt" ? "по MQTT (топик couriers/" + uid + "/deliveries/" + d.id + "/position)" : "запросом POST"}: клиент видит курьера на своей карте.</div>` : ""}` : ""}</div>`;
     }
 
     function draw() {
@@ -82,7 +95,16 @@ export default async function courierPage({ root, me, onLeave }) {
             const latitude = from[0] + (to[0] - from[0]) * t + Math.sin(state.step) * wobble;
             const longitude = from[1] + (to[1] - from[1]) * t + Math.cos(state.step) * wobble;
             try {
-                await post(`/api/v1/couriers/${uid}/deliveries/${id}/positions`, { latitude, longitude, speedKmh: 18 + Math.round(Math.random() * 12) });
+                const point = { latitude, longitude, speedKmh: 18 + Math.round(Math.random() * 12) };
+                if (gpsTransport === "mqtt") {
+                    mqttLink ??= await connectCourierMqtt(uid).then((link) => {
+                        link.onState((state) => { mqttState = state; const el = root.querySelector("[data-mqtt-state]"); if (el) el.textContent = mqttLabel(); });
+                        return link;
+                    });
+                    await mqttLink.publish(id, point);
+                } else {
+                    await post(`/api/v1/couriers/${uid}/deliveries/${id}/positions`, point);
+                }
                 state.step++;
                 if (state.step > STEPS) { stopRide(id); toast("Вы на месте! Нажмите «Доставил»", "ok"); draw(); }
             } catch (error) {
@@ -102,6 +124,12 @@ export default async function courierPage({ root, me, onLeave }) {
         pickup: (el) => act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/pick-up`), "Заказ у вас, клиент получил уведомление"),
         deliver: (el) => { stopRide(Number(el.dataset.id)); return act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/deliver`), "Доставка завершена"); },
         ride: (el) => { const id = Number(el.dataset.id); riding.has(id) ? stopRide(id) : startRide(id); draw(); },
+        gps: (el) => {
+            gpsTransport = el.dataset.transport;
+            try { localStorage.setItem("gpsTransport", gpsTransport); } catch { /* приватное окно */ }
+            if (gpsTransport !== "mqtt") { mqttLink?.close(); mqttLink = null; mqttState = ""; }
+            draw();
+        },
         chat: (el) => {
             let chat = null;
             modal({
@@ -142,5 +170,5 @@ export default async function courierPage({ root, me, onLeave }) {
         if (document.querySelector(".overlay")) return;
         try { mine = await get(`/api/v1/couriers/${uid}/deliveries`); draw(); } catch { /* повторим */ }
     }, 15000);
-    onLeave(() => { clearInterval(timer); stopPoll(); [...riding.keys()].forEach(stopRide); });
+    onLeave(() => { clearInterval(timer); stopPoll(); [...riding.keys()].forEach(stopRide); mqttLink?.close(); });
 }

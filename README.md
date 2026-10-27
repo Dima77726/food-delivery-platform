@@ -428,6 +428,22 @@ WebSocket-соединение и подписывается на свой за�
 - В веб-интерфейсе — вкладка «🔌 Интеграции» у ресторана; приёмник для проверки —
   http://localhost:8095 (сервис `webhook-sink`, проверяет подпись прямо в браузере).
 
+### Ещё шесть интеграций
+
+Подробности и сравнение — в [docs/system-design](docs/system-design/README.md), глава 4.
+
+| Интеграция | Где | Как попробовать |
+|---|---|---|
+| MQTT: GPS курьера | RabbitMQ (`rabbitmq_mqtt`, порт 1883, WebSocket `/mqtt`) → tracking-service | курьер → «Канал GPS: MQTT»; или `mosquitto_pub -u <id курьера> -P <токен> -t couriers/<id>/deliveries/<id>/position` |
+| Web Push | notification-service (VAPID, RFC 8291), `web/sw.js` | профиль → «Уведомления в браузере» (нужны `WEB_PUSH_VAPID_*`) |
+| gRPC server streaming | `OrderQueryService.WatchOrder` в order-service | поток событий заказа до финального статуса |
+| Пакетные файлы | order-service, Spring Batch: расчёты за день → CSV в MinIO `settlements` | `POST /api/v1/admin/settlements/{дата}`; ресторатор: `/api/v1/restaurants/{r}/settlements.csv` |
+| CDC | профиль `cdc`: Debezium Server → Kafka `cdc.public.*` → ClickHouse `order_status_history` | `./scripts/start.ps1 -Cdc` (нужен `DEBEZIUM_DB_PASSWORD`) |
+| AsyncAPI | `food-delivery-contracts/asyncapi/food-delivery.asyncapi.yaml` | все асинхронные каналы платформы в одном документе |
+
+PostgreSQL теперь запускается с `wal_level=logical` (нужно CDC) и потолком WAL для слотов репликации
+`max_slot_wal_keep_size=1GB`.
+
 ### Рассылка уведомлений через RabbitMQ
 
 Kafka и RabbitMQ в проекте делят работу, а не дублируют друг друга. Kafka — журнал событий:
