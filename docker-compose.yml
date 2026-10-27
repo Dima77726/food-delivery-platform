@@ -536,6 +536,9 @@ services:
       - STRIPE_CURRENCY=${STRIPE_CURRENCY:-usd}
       # Пересчёт суммы заказа (рубли) в валюту провайдера по курсу ЦБ РФ, SOAP DailyInfo. Нужен выход в интернет.
       - FX_ENABLED=${FX_ENABLED:-false}
+      # Входящие вебхуки Stripe (POST /api/v1/webhooks/stripe): секрет конечной точки whsec_… из кабинета
+      # или из `stripe listen`. Не задан — приём выключен (503).
+      - STRIPE_WEBHOOK_SECRET
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
@@ -633,6 +636,16 @@ services:
       - TELEGRAM_BOT_TOKEN
       - TELEGRAM_BOT_USERNAME
       - TELEGRAM_POLLING_ENABLED=${TELEGRAM_POLLING_ENABLED:-true}
+      # polling — бот сам спрашивает Telegram; webhook — Telegram присылает сообщения на публичный https-адрес
+      # TELEGRAM_WEBHOOK_PUBLIC_URL с секретом TELEGRAM_WEBHOOK_SECRET (у локального стека такого адреса нет).
+      - TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
+      - TELEGRAM_WEBHOOK_PUBLIC_URL
+      - TELEGRAM_WEBHOOK_SECRET
+      # Исходящие вебхуки ресторанов. Ключ шифрования секретов подписок (32 байта в Base64); без него
+      # вебхуки выключены, остальное работает. Приёмнику-демонстрации webhook-sink разрешён http внутри сети.
+      - WEBHOOK_SECRET_KEY
+      - WEBHOOK_ALLOWED_PRIVATE_HOSTS=${WEBHOOK_ALLOWED_PRIVATE_HOSTS:-webhook-sink}
+      - WEBHOOK_RETRY_DELAYS=${WEBHOOK_RETRY_DELAYS:-PT10S,PT1M,PT5M,PT30M,PT2H}
       - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
       - EMAIL_FROM=${EMAIL_FROM:-no-reply@food-delivery.local}
       - MAIL_HOST=${MAIL_HOST:-mailpit}
@@ -949,6 +962,21 @@ services:
       - ./docker/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "127.0.0.1:${WEB_PORT:-8070}:80"
+
+  # Приёмник вебхуков для демонстрации: принимает подписанные POST от notification-service, показывает их
+  # на http://localhost:8095 и проверяет подпись в браузере. Отвечает кодом из пути (/hooks/fail-503 → 503),
+  # чтобы было на чём посмотреть повторы. Стандартная библиотека Python, без зависимостей.
+  webhook-sink:
+    profiles: ["full"]
+    image: python:3.12-alpine
+    container_name: food-delivery-webhook-sink
+    mem_limit: 48m
+    restart: unless-stopped
+    command: ["python", "-u", "/app/sink.py"]
+    volumes:
+      - ./docker/webhook-sink/sink.py:/app/sink.py:ro
+    ports:
+      - "127.0.0.1:${WEBHOOK_SINK_PORT:-8095}:8000"
 
   mailpit:
     profiles: ["full"]

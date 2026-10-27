@@ -409,6 +409,25 @@ WebSocket-соединение и подписывается на свой за�
 - **Веб-интерфейс** читает SSE через `fetch` (токен в заголовке, а не в адресе) и переходит на
   прежний опрос, пока поток недоступен (`web/js/live.js`).
 
+### Вебхуки и ключи API партнёров
+
+Ресторан может подключить свою систему (кассу, CRM) двумя способами — подробности в
+[docs/system-design](docs/system-design/README.md), глава 3.
+
+| Что | Где | Адрес |
+|---|---|---|
+| Ключ API: выпуск, список, отзыв | identity-service | `POST/GET /api/v1/auth/api-keys`, `DELETE /api/v1/auth/api-keys/{id}` |
+| Обмен ключа на 15-минутный токен | identity-service | `POST /api/v1/auth/api-keys/token` + `X-Api-Key` |
+| Исходящие вебхуки на события заказов | notification-service | `/api/v1/restaurants/{r}/webhooks` (+ `/test`, `/rotate-secret`, `/enable`, `/deliveries`) |
+| Входящий вебхук Stripe | payment-service | `POST /api/v1/webhooks/stripe` (`STRIPE_WEBHOOK_SECRET`) |
+| Входящий вебхук Telegram | notification-service | `POST /api/v1/webhooks/telegram` (`TELEGRAM_MODE=webhook`) |
+
+- Исходящие вебхуки подписаны по Standard Webhooks, повторяются по лестнице очередей RabbitMQ
+  (10 с → 2 ч), защищены от SSRF и выключаются сами после 20 провалов подряд. Без
+  `WEBHOOK_SECRET_KEY` (`openssl rand -base64 32`) выключены только они.
+- В веб-интерфейсе — вкладка «🔌 Интеграции» у ресторана; приёмник для проверки —
+  http://localhost:8095 (сервис `webhook-sink`, проверяет подпись прямо в браузере).
+
 ### Рассылка уведомлений через RabbitMQ
 
 Kafka и RabbitMQ в проекте делят работу, а не дублируют друг друга. Kafka — журнал событий:

@@ -1,9 +1,10 @@
-// Управление рестораном: заказы (канбан), меню, аналитика, отзывы и настройки.
+// Управление рестораном: заказы (канбан), меню, аналитика, отзывы, интеграции и настройки.
 
 import { get, post, patch, del, api, restaurant } from "../api.js";
 import { html, delegate, modal, formValues, confirmDialog, money, emojiFor, coverStyle, ago, empty, skeleton, toast, reportError, statusBadge, ORDER_STATUS } from "../ui.js";
 import { navigate } from "../nav.js";
 import { sseStream } from "../live.js";
+import { integrationsTab } from "./integrations.js";
 
 const COLUMNS = [
     ["PAID", "Новые", "Принять", "accept"],
@@ -191,9 +192,11 @@ export default async function managePage({ root, params, query, onLeave }) {
 
     // ---------- Каркас страницы ----------
 
-    const TABS = [["orders", "🍳 Заказы"], ["menu", "📋 Меню"], ["analytics", "📊 Аналитика"], ["reviews", "💬 Отзывы"], ["settings", "⚙️ Настройки"]];
-    const loaders = { orders: loadOrders, menu: loadMenu, analytics: loadAnalytics, reviews: loadReviews, settings: async () => {} };
-    const views = { orders: ordersView, menu: menuView, analytics: analyticsView, reviews: reviewsView, settings: settingsView };
+    const integrations = integrationsTab({ rid, getState: () => state, redraw: () => tab === "integrations" && redrawBody() });
+
+    const TABS = [["orders", "🍳 Заказы"], ["menu", "📋 Меню"], ["analytics", "📊 Аналитика"], ["reviews", "💬 Отзывы"], ["integrations", "🔌 Интеграции"], ["settings", "⚙️ Настройки"]];
+    const loaders = { orders: loadOrders, menu: loadMenu, analytics: loadAnalytics, reviews: loadReviews, integrations: integrations.load, settings: async () => {} };
+    const views = { orders: ordersView, menu: menuView, analytics: analyticsView, reviews: reviewsView, integrations: integrations.view, settings: settingsView };
 
     function draw() {
         root.innerHTML = html`<div class="container">
@@ -230,6 +233,7 @@ export default async function managePage({ root, params, query, onLeave }) {
     };
 
     delegate(root, "click", {
+        ...integrations.handlers,
         tab: (el) => openTab(el.dataset.tab),
         advance,
         range: async (el) => { state.days = Number(el.dataset.days); state.analytics = null; await openTab("analytics"); },
