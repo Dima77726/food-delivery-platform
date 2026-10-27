@@ -28,10 +28,10 @@ export function mountChat(slot, { orderId, me, closed = false }) {
     let isClosed = closed;
     const pending = new Map(); // clientMessageId -> текст, ещё не подтверждённый сервером
 
-    slot.innerHTML = html`<div class="chat">
-        <div class="chat-log" data-log><div class="muted small center">Загружаем переписку…</div></div>
-        <div class="chat-typing muted small" data-typing></div>
-        <form class="chat-form" data-form>
+    slot.innerHTML = html`<div class="oc">
+        <div class="oc-log" data-log><div class="muted small center">Загружаем переписку…</div></div>
+        <div class="oc-typing muted small" data-typing></div>
+        <form class="oc-form" data-form>
             <input class="input" name="text" maxlength="1000" autocomplete="off" placeholder="Сообщение…">
             <button class="btn primary" type="submit">➤</button>
         </form></div>`.value;
@@ -47,9 +47,9 @@ export function mountChat(slot, { orderId, me, closed = false }) {
         log.innerHTML = messages.length || pending.size
             ? messages.map((m) => {
                 const mine = m.senderId === me.id;
-                return `<div class="chat-msg ${mine ? "mine" : ""}"><div class="chat-bubble">${!mine ? `<div class="chat-who">${esc(ROLE_NAMES[m.senderRole] || "")}</div>` : ""}${esc(m.text)}
-                    <div class="chat-meta">${esc(timeOnly(m.sentAt))}${mine && m.messageId === lastMineRead ? " · прочитано" : ""}</div></div></div>`;
-            }).join("") + [...pending.values()].map((text) => `<div class="chat-msg mine pending"><div class="chat-bubble">${esc(text)}<div class="chat-meta">отправляется…</div></div></div>`).join("")
+                return `<div class="oc-msg ${mine ? "mine" : ""}"><div class="oc-bubble">${!mine ? `<div class="oc-who">${esc(ROLE_NAMES[m.senderRole] || "")}</div>` : ""}${esc(m.text)}
+                    <div class="oc-meta">${esc(timeOnly(m.sentAt))}${mine && m.messageId === lastMineRead ? " · прочитано" : ""}</div></div></div>`;
+            }).join("") + [...pending.values()].map((text) => `<div class="oc-msg mine pending"><div class="oc-bubble">${esc(text)}<div class="oc-meta">отправляется…</div></div></div>`).join("")
             : `<div class="muted small center">Сообщений пока нет. Напишите первым — например, код домофона.</div>`;
         if (atBottom || messages.length < 30) log.scrollTop = log.scrollHeight;
         typingLine.textContent = Date.now() < typingUntil ? `${ROLE_NAMES[typingRole] || "Собеседник"} печатает…` : "";

@@ -98,6 +98,7 @@ export default async function orderPage({ root, params, me, onLeave }) {
                     <span class="muted small" data-track-time>${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
                 ${address && !showTrack ? html`<div class="card stack"><h3>📍 Адрес доставки</h3><div><b>${address.address}</b>${address.details ? html`<div class="muted small">${address.details}</div>` : ""}</div>
                     ${destination() && leaflet !== false && !canceled ? mapSlot() : ""}</div>` : ""}
+                ${CHAT_STATUSES.has(order.status) ? html`<div class="card stack"><h3>💬 Чат с курьером</h3><div data-chat-slot></div></div>` : ""}
                 <div class="card stack"><h3>Состав заказа</h3>
                     ${order.items.map((i) => html`<div class="cart-line"><span style="font-size:26px">${emojiFor(i.menuItemName)}</span><div style="flex:1"><b>${i.menuItemName}</b><div class="muted small">${money(i.price)} × ${i.quantity}</div></div><b>${money(i.lineTotal)}</b></div>`)}
                     <div class="total"><span>Итого</span><span>${money(order.totalAmount)}</span></div></div>
@@ -106,7 +107,6 @@ export default async function orderPage({ root, params, me, onLeave }) {
             <aside class="stack sticky">
                 <div class="card stack"><h3>Оплата</h3>${payments.length ? payments.map((p) => html`<div class="row between"><span>${p.method === "CARD" ? "💳 Картой" : "💵 Наличными"}</span>
                     <span class="badge ${p.status === "SUCCEEDED" ? "green" : p.status === "FAILED" ? "red" : "yellow"}">${{ SUCCEEDED: "Оплачено", FAILED: "Отказ", REFUNDED: "Возврат", PENDING: "Ожидает" }[p.status] || p.status}</span></div>${p.failureReason ? html`<div class="err small">${p.failureReason}</div>` : ""}`) : html`<p class="muted">Платежей пока нет</p>`}</div>
-                ${CHAT_STATUSES.has(order.status) ? html`<div class="card stack"><h3>💬 Чат с курьером</h3><div data-chat-slot></div></div>` : ""}
                 ${order.status === "DELIVERED" ? html`<button class="btn primary block" data-act="review">⭐ Оставить отзыв</button>` : ""}
                 ${canCancel ? html`<button class="btn danger block" data-act="cancel">Отменить заказ</button>` : ""}
                 ${["CREATED"].includes(order.status) ? html`<button class="btn primary block" data-act="pay">Оплатить</button>` : ""}
