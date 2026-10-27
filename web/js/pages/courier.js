@@ -1,8 +1,10 @@
 // Курьер: доступные доставки, свои доставки, движение по маршруту и завершение.
 
 import { get, post } from "../api.js";
+import { longPoll, pollFetch } from "../live.js";
+import { mountChat } from "../chat.js";
 import { mapsLink } from "../geo.js";
-import { html, delegate, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, DELIVERY_STATUS } from "../ui.js";
+import { html, delegate, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, modal, DELIVERY_STATUS } from "../ui.js";
 
 // Учебный маршрут: курьер «едет» к точке клиента, пока включена отправка позиции. Координат ресторана в каталоге
 // нет, поэтому старт — в паре километров к юго-западу от клиента. Без точки клиента — маршрут по центру Москвы.
@@ -41,6 +43,7 @@ export default async function courierPage({ root, me, onLeave }) {
                 ${mode !== "done" ? html`<a class="btn sm ghost" href="${mapsLink(d.deliveryAddress)}" target="_blank" rel="noopener">🗺️ На карте</a>` : ""}</div>`
                 : html`<div class="muted small">Адрес не указан: заказ оформлен без адреса</div>`}
             ${mode === "available" ? html`<button class="btn primary" data-act="assign" data-id="${d.id}">Взять доставку</button>` : ""}
+            ${mode === "mine" ? html`<button class="btn ghost" data-act="chat" data-order="${d.orderId}">💬 Чат с клиентом</button>` : ""}
             ${d.status === "ASSIGNED" ? html`<button class="btn primary" data-act="pickup" data-id="${d.id}">📦 Забрал заказ в ресторане</button>` : ""}
             ${d.status === "PICKED_UP" ? html`<div class="row wrap"><button class="btn ${isRiding ? "danger" : ""}" data-act="ride" data-id="${d.id}">${isRiding ? "⏸ Остановить отправку позиции" : "🛵 Поехали (симуляция GPS)"}</button>
                 <button class="btn green" data-act="deliver" data-id="${d.id}">✓ Доставил</button></div>
@@ -49,7 +52,7 @@ export default async function courierPage({ root, me, onLeave }) {
 
     function draw() {
         const done = mine.filter((d) => d.status === "DELIVERED");
-        root.innerHTML = html`<div class="container"><div class="page-head"><h1>Доставки</h1><span class="muted right">Обновляется автоматически</span></div>
+        root.innerHTML = html`<div class="container"><div class="page-head"><h1>Доставки</h1><span class="muted right">Новые доставки приходят сразу (long polling)</span></div>
             <div class="kpis"><div class="kpi"><div class="v">${available.length}</div><div class="l">ждут курьера</div></div><div class="kpi"><div class="v">${active().length}</div><div class="l">у меня в работе</div></div><div class="kpi"><div class="v">${done.length}</div><div class="l">доставлено всего</div></div></div>
             <div class="tabs"><button class="tab ${tab === "available" ? "on" : ""}" data-act="tab" data-tab="available">Доступные (${available.length})</button><button class="tab ${tab === "mine" ? "on" : ""}" data-act="tab" data-tab="mine">Мои (${active().length})</button><button class="tab ${tab === "done" ? "on" : ""}" data-act="tab" data-tab="done">История (${done.length})</button></div>
             <div class="grid">${tab === "available" ? (available.length ? available.map((d) => card(d, "available")) : "") : tab === "mine" ? active().map((d) => card(d, "mine")) : done.map((d) => card(d, "done"))}</div>
@@ -99,11 +102,45 @@ export default async function courierPage({ root, me, onLeave }) {
         pickup: (el) => act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/pick-up`), "Заказ у вас, клиент получил уведомление"),
         deliver: (el) => { stopRide(Number(el.dataset.id)); return act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/deliver`), "Доставка завершена"); },
         ride: (el) => { const id = Number(el.dataset.id); riding.has(id) ? stopRide(id) : startRide(id); draw(); },
+        chat: (el) => {
+            let chat = null;
+            modal({
+                title: `Чат по заказу №${el.dataset.order}`,
+                body: html`<div data-chat></div>`,
+                onMount: (dialog) => {
+                    chat = mountChat(dialog.querySelector("[data-chat]"), { orderId: Number(el.dataset.order), me: { id: uid } });
+                    // Окно закрывают и кликом мимо него: подписку чата снимаем, как только окно исчезло со страницы.
+                    const watch = new MutationObserver(() => { if (!dialog.isConnected) { chat.destroy(); watch.disconnect(); } });
+                    watch.observe(document.body, { childList: true });
+                },
+                actions: [{ label: "Закрыть" }],
+            });
+        },
     });
 
     await load();
     draw();
 
-    const timer = setInterval(async () => { try { await load(); draw(); } catch { /* повторим */ } }, 6000);
-    onLeave(() => { clearInterval(timer); [...riding.keys()].forEach(stopRide); });
+    // Свободные доставки — long polling: сервер держит запрос, пока список не изменится (до 25 с), и сразу отвечает,
+    // когда ресторан передаст заказ или его заберёт другой курьер. Версия списка — ETag, клиент шлёт её в If-None-Match.
+    let etag = null;
+    const stopPoll = longPoll(async (signal) => {
+        const response = await pollFetch("/api/v1/deliveries/available/poll?timeoutSeconds=25", {
+            headers: etag ? { "If-None-Match": etag } : {}, signal,
+        });
+        if (response.status === 304) return;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const fresh = await response.json();
+        const isFirst = etag === null;
+        etag = response.headers.get("ETag");
+        if (!isFirst && fresh.length > available.length) toast("Появилась новая доставка", "ok");
+        available = fresh;
+        if (!document.querySelector(".overlay")) draw();
+    });
+    // Свои доставки меняются только от действий самого курьера — их редкий опрос остаётся страховкой.
+    const timer = setInterval(async () => {
+        if (document.querySelector(".overlay")) return;
+        try { mine = await get(`/api/v1/couriers/${uid}/deliveries`); draw(); } catch { /* повторим */ }
+    }, 15000);
+    onLeave(() => { clearInterval(timer); stopPoll(); [...riding.keys()].forEach(stopRide); });
 }
