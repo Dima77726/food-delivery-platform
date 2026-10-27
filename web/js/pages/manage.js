@@ -1,8 +1,10 @@
-// Управление рестораном: заказы (канбан), меню, аналитика, отзывы и настройки.
+// Управление рестораном: заказы (канбан), меню, аналитика, отзывы, интеграции и настройки.
 
 import { get, post, patch, del, api, restaurant } from "../api.js";
 import { html, delegate, modal, formValues, confirmDialog, money, emojiFor, coverStyle, ago, empty, skeleton, toast, reportError, statusBadge, ORDER_STATUS } from "../ui.js";
 import { navigate } from "../nav.js";
+import { sseStream } from "../live.js";
+import { integrationsTab } from "./integrations.js";
 
 const COLUMNS = [
     ["PAID", "Новые", "Принять", "accept"],
@@ -190,9 +192,11 @@ export default async function managePage({ root, params, query, onLeave }) {
 
     // ---------- Каркас страницы ----------
 
-    const TABS = [["orders", "🍳 Заказы"], ["menu", "📋 Меню"], ["analytics", "📊 Аналитика"], ["reviews", "💬 Отзывы"], ["settings", "⚙️ Настройки"]];
-    const loaders = { orders: loadOrders, menu: loadMenu, analytics: loadAnalytics, reviews: loadReviews, settings: async () => {} };
-    const views = { orders: ordersView, menu: menuView, analytics: analyticsView, reviews: reviewsView, settings: settingsView };
+    const integrations = integrationsTab({ rid, getState: () => state, redraw: () => tab === "integrations" && redrawBody() });
+
+    const TABS = [["orders", "🍳 Заказы"], ["menu", "📋 Меню"], ["analytics", "📊 Аналитика"], ["reviews", "💬 Отзывы"], ["integrations", "🔌 Интеграции"], ["settings", "⚙️ Настройки"]];
+    const loaders = { orders: loadOrders, menu: loadMenu, analytics: loadAnalytics, reviews: loadReviews, integrations: integrations.load, settings: async () => {} };
+    const views = { orders: ordersView, menu: menuView, analytics: analyticsView, reviews: reviewsView, integrations: integrations.view, settings: settingsView };
 
     function draw() {
         root.innerHTML = html`<div class="container">
@@ -229,6 +233,7 @@ export default async function managePage({ root, params, query, onLeave }) {
     };
 
     delegate(root, "click", {
+        ...integrations.handlers,
         tab: (el) => openTab(el.dataset.tab),
         advance,
         range: async (el) => { state.days = Number(el.dataset.days); state.analytics = null; await openTab("analytics"); },
@@ -289,10 +294,30 @@ export default async function managePage({ root, params, query, onLeave }) {
     draw();
     await openTab(tab);
 
-    // Новые заказы появляются без перезагрузки страницы.
+    // Доска живёт на потоке SSE: каждый кадр «заказ N теперь в статусе S» — перечитать колонки. Кадры, пришедшие
+    // пачкой, схлопываются в одно чтение. Новый оплаченный заказ — ещё и всплывающее уведомление.
+    let reloadQueued = false;
+    let live = false;
+    const reload = () => {
+        if (reloadQueued) return;
+        reloadQueued = true;
+        setTimeout(async () => {
+            reloadQueued = false;
+            if (tab !== "orders" || document.querySelector(".overlay")) return;
+            try { await loadOrders(); if (tab === "orders") redrawBody(); } catch { /* следующий кадр повторит */ }
+        }, 200);
+    };
+    const stopStream = sseStream(`/api/v1/restaurants/${rid}/orders/stream`, {
+        onEvent: (name, data) => {
+            if (name === "order" && data.status === "PAID") toast(`Новый заказ №${data.orderId}`, "ok");
+            if (name === "order" || name === "ready") reload();
+        },
+        onState: (state) => { live = state === "live"; },
+    });
+    // Пока поток недоступен (переподключение), доска опрашивается по-старому.
     const timer = setInterval(async () => {
-        if (tab !== "orders" || document.querySelector(".overlay")) return;
+        if (live || tab !== "orders" || document.querySelector(".overlay")) return;
         try { await loadOrders(); if (tab === "orders") redrawBody(); } catch { /* повторим */ }
     }, 5000);
-    onLeave(() => clearInterval(timer));
+    onLeave(() => { clearInterval(timer); stopStream(); });
 }

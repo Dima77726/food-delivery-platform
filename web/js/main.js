@@ -5,6 +5,7 @@ import { get, login, logout } from "./api.js";
 import { html, initials, ROLE_LABELS, ROLE_ICONS, toast, reportError, $, delegate } from "./ui.js";
 import { mountAssistant } from "./assistant.js";
 import { navigate, homeFor } from "./nav.js";
+import { ensureNotificationFeed, unreadCount, onUnreadChange, markAllSeen } from "./notifications.js";
 
 const CONFIG = window.APP_CONFIG || {};
 
@@ -104,13 +105,22 @@ function renderShell(content) {
             <nav class="nav-links">${links}</nav>
             <div class="nav-spacer"></div>
             <button class="icon-btn" data-act="theme" title="Тема оформления">${{ auto: "🌗", dark: "🌙", light: "☀️" }[theme()]}</button>
+            ${me ? html`<a class="icon-btn" href="#/profile" title="Уведомления" data-bell>🔔${unreadCount() ? html`<span class="dot">${unreadCount()}</span>` : ""}</a>` : ""}
             ${role === "CUSTOMER" ? html`<a class="icon-btn" href="#/cart" title="Корзина">🛒${cartCount ? html`<span class="dot">${cartCount}</span>` : ""}</a>` : ""}
             ${me ? accountButton(me) : html`<a class="btn primary" href="#/login">Войти</a>`}
         </header>
         <main id="view">${content || ""}</main>`.value;
 
     if (!content) mountAssistantIfNeeded();
+    ensureNotificationFeed(me?.email ?? null);
+    if (path === "/profile") markAllSeen();
 }
+
+// Счётчик на колокольчике обновляется точечно, без перерисовки всей панели.
+onUnreadChange((count) => {
+    const bell = document.querySelector("[data-bell]");
+    if (bell) bell.innerHTML = count ? `🔔<span class="dot">${count}</span>` : "🔔";
+});
 
 function accountButton(me) {
     return html`<div class="rel" id="account-root">

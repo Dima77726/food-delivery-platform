@@ -2,12 +2,17 @@
 
 import { get, post, restaurantName } from "../api.js";
 import { orderMap, loadLeaflet, formatAddress } from "../geo.js";
+import { sseStream, stomp } from "../live.js";
+import { mountChat } from "../chat.js";
 import { html, raw, delegate, money, emojiFor, statusBadge, dateTime, timeOnly, empty, skeleton, toast, reportError, modal, confirmDialog, DELIVERY_STATUS } from "../ui.js";
 
 const STEPS = [["CREATED", "Создан"], ["PAID", "Оплачен"], ["ACCEPTED", "Принят"], ["COOKING", "Готовится"], ["READY_FOR_DELIVERY", "Ждёт курьера"], ["IN_DELIVERY", "В пути"], ["DELIVERED", "Доставлен"]];
 const STEP_INDEX = { CREATED: 0, PAYMENT_PENDING: 0, PAID: 1, ACCEPTED: 2, COOKING: 3, READY_FOR_DELIVERY: 4, IN_DELIVERY: 5, DELIVERED: 6 };
 const FINAL = new Set(["DELIVERED", "CANCELED"]);
 const TAGS = ["быстро", "вкусно", "горячо", "вежливый курьер", "красиво упаковано"];
+// Чат с курьером открывается, когда заказ ждёт курьера или уже в пути; после доставки остаётся для чтения.
+const CHAT_STATUSES = new Set(["READY_FOR_DELIVERY", "IN_DELIVERY", "DELIVERED"]);
+const LIVE_LABEL = { live: "● обновляется вживую", reconnecting: "○ переподключение…", closed: "" };
 
 export default async function orderPage({ root, params, me, onLeave }) {
     const uid = me.user.id;
@@ -15,6 +20,11 @@ export default async function orderPage({ root, params, me, onLeave }) {
     root.innerHTML = html`<div class="container">${skeleton(2)}</div>`.value;
 
     let order; let events = []; let payments = []; let track = null; let name = "";
+    let liveState = "reconnecting";
+    // Чат живёт в своём элементе: перерисовка страницы переносит его на новое место, не теряя переписку и ввод.
+    const chatHost = document.createElement("div");
+    let chat = null;
+    let stopTrack = null;
     // Карта создаётся один раз и переносится между перерисовками; если Leaflet не загрузился, остаётся схема.
     let leaflet = null;
     let map = null;
@@ -76,7 +86,7 @@ export default async function orderPage({ root, params, me, onLeave }) {
         const showTrack = order.status === "IN_DELIVERY" || (order.status === "DELIVERED" && track?.positions?.length);
         const address = order.deliveryAddress;
         root.innerHTML = html`<div class="container">
-            <div class="page-head"><a class="btn sm" href="#/orders">← Заказы</a><h1>Заказ №${order.id}</h1>${statusBadge(order.status)}<span class="muted right">${emojiFor(name)} ${name}</span></div>
+            <div class="page-head"><a class="btn sm" href="#/orders">← Заказы</a><h1>Заказ №${order.id}</h1>${statusBadge(order.status)}<span class="live-dot small ${liveState}">${FINAL.has(order.status) ? "" : LIVE_LABEL[liveState]}</span><span class="muted right">${emojiFor(name)} ${name}</span></div>
             <div class="split"><div class="stack lg">
                 <div class="card">
                     ${canceled ? html`<div class="banner" style="background:color-mix(in srgb,var(--danger) 14%,transparent)">Заказ отменён${payments.some((p) => p.status === "SUCCEEDED") ? ". Деньги будут возвращены." : "."}</div>`
@@ -85,9 +95,10 @@ export default async function orderPage({ root, params, me, onLeave }) {
                 </div>
                 ${showTrack ? html`<div class="card stack"><h3>🛵 Курьер ${order.status === "IN_DELIVERY" ? "в пути" : "доставил заказ"}</h3>${leaflet !== false ? mapSlot() : mapSvg(track?.positions || [])}
                     ${address ? html`<div class="addr-line muted small"><span>📍</span><span>${formatAddress(address)}</span></div>` : ""}
-                    <span class="muted small">${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
+                    <span class="muted small" data-track-time>${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
                 ${address && !showTrack ? html`<div class="card stack"><h3>📍 Адрес доставки</h3><div><b>${address.address}</b>${address.details ? html`<div class="muted small">${address.details}</div>` : ""}</div>
                     ${destination() && leaflet !== false && !canceled ? mapSlot() : ""}</div>` : ""}
+                ${CHAT_STATUSES.has(order.status) ? html`<div class="card stack"><h3>💬 Чат с курьером</h3><div data-chat-slot></div></div>` : ""}
                 <div class="card stack"><h3>Состав заказа</h3>
                     ${order.items.map((i) => html`<div class="cart-line"><span style="font-size:26px">${emojiFor(i.menuItemName)}</span><div style="flex:1"><b>${i.menuItemName}</b><div class="muted small">${money(i.price)} × ${i.quantity}</div></div><b>${money(i.lineTotal)}</b></div>`)}
                     <div class="total"><span>Итого</span><span>${money(order.totalAmount)}</span></div></div>
@@ -101,6 +112,28 @@ export default async function orderPage({ root, params, me, onLeave }) {
                 ${["CREATED"].includes(order.status) ? html`<button class="btn primary block" data-act="pay">Оплатить</button>` : ""}
             </aside></div></div>`.value;
         mountMap();
+        attachChat();
+        followTrack();
+    }
+
+    function attachChat() {
+        const slot = root.querySelector("[data-chat-slot]");
+        if (!slot) return;
+        chat ??= mountChat(chatHost, { orderId: oid, me: { id: uid }, closed: FINAL.has(order.status) });
+        chat.setClosed(FINAL.has(order.status));
+        slot.replaceWith(chatHost);
+    }
+
+    /** Пока заказ в пути, точки курьера приходят через WebSocket — сразу, без опроса трека. */
+    function followTrack() {
+        if (order.status !== "IN_DELIVERY") { stopTrack?.(); stopTrack = null; return; }
+        stopTrack ??= stomp().subscribe(`/topic/order.${oid}.track`, (position) => {
+            track ??= { positions: [] };
+            track.positions = [...(track.positions || []), position];
+            if (map) map.update({ destination: destination(), path: trackPoints(track.positions) });
+            const stamp = root.querySelector("[data-track-time]");
+            if (stamp) stamp.textContent = `Обновлено в ${timeOnly(position.recordedAt ?? position.createdAt)}`;
+        });
     }
 
     function reviewDialog() {
@@ -173,10 +206,30 @@ export default async function orderPage({ root, params, me, onLeave }) {
     }
     draw();
 
+    // Статус и хронология приходят потоком SSE: событие — перечитали заказ. Перечитывание схлопывается, если события
+    // идут пачкой (история при подключении). Пока поток недоступен, работает прежний опрос раз в 4 секунды.
+    let reloadQueued = false;
+    const reload = () => {
+        if (reloadQueued) return;
+        reloadQueued = true;
+        setTimeout(async () => {
+            reloadQueued = false;
+            if (document.querySelector(".overlay")) return;
+            try { await load(); draw(); } catch { /* следующее событие повторит */ }
+        }, 150);
+    };
+    const stopStream = FINAL.has(order.status) ? null : sseStream(`/api/v1/customers/${uid}/orders/${oid}/stream`, {
+        onEvent: (name) => { if (name === "order-event" || name === "status") reload(); },
+        onState: (state) => {
+            liveState = state;
+            const dot = root.querySelector(".live-dot");
+            if (dot) { dot.className = `live-dot small ${state}`; dot.textContent = LIVE_LABEL[state]; }
+            if (state === "closed") reload();
+        },
+    });
     const timer = setInterval(async () => {
-        if (FINAL.has(order.status) && !document.querySelector(".overlay")) return;
-        if (document.querySelector(".overlay")) return;
+        if (liveState === "live" || FINAL.has(order.status) || document.querySelector(".overlay")) return;
         try { await load(); draw(); } catch { /* повторим */ }
     }, 4000);
-    onLeave(() => { clearInterval(timer); map?.destroy(); });
+    onLeave(() => { clearInterval(timer); stopStream?.(); stopTrack?.(); chat?.destroy(); map?.destroy(); });
 }

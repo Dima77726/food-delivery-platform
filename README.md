@@ -385,6 +385,49 @@ WebSocket-соединение и подписывается на свой за�
 - **Живой канал — ускорение, а не источник правды.** Точка сначала записывается в Cassandra,
   потом рассылается; неудачная рассылка не ломает запись.
 
+### Живые обновления: SSE, long polling, чат
+
+Кроме трека, вживую приходят статус заказа, доска ресторана, свободные доставки, уведомления и
+чат заказа. Сравнение транспортов и разбор механизмов — в учебнике
+[docs/system-design](docs/system-design/README.md), глава 1.
+
+| Что | Транспорт | Адрес |
+|---|---|---|
+| История и статус заказа клиента | SSE, продолжение по `Last-Event-ID` | `GET /api/v1/customers/{c}/orders/{o}/stream` |
+| Доска заказов ресторана | SSE | `GET /api/v1/restaurants/{r}/orders/stream` |
+| Свободные доставки курьера | long polling, `ETag`/`If-None-Match`, 304 по таймауту | `GET /api/v1/deliveries/available/poll` |
+| Лента уведомлений | long polling по курсору | `GET /api/v1/notifications/me/poll?after={id}` |
+| Чат заказа (клиент, курьер, поддержка) | отправка — HTTP, доставка — WebSocket/STOMP | `POST/GET /api/v1/orders/{o}/chat/messages`, `SUBSCRIBE /topic/order.{o}.chat` |
+
+- **Между экземплярами** сигналы разносят три механизма: `LISTEN/NOTIFY` PostgreSQL в order-service
+  (сигнал уходит только после коммита), fanout-обмен RabbitMQ `notifications.live` в
+  notification-service, STOMP-ретранслятор RabbitMQ в tracking-service.
+- **Сигнал — только «звонок в дверь»:** данные получатель читает из базы, поэтому потерянный
+  или повторный сигнал ничего не ломает.
+- **Шлюз** ведёт эти пути отдельными маршрутами без общего 15-секундного таймаута ответа; nginx
+  не буферизует SSE (`X-Accel-Buffering: no`), пульс раз в 15 секунд держит соединение.
+- **Веб-интерфейс** читает SSE через `fetch` (токен в заголовке, а не в адресе) и переходит на
+  прежний опрос, пока поток недоступен (`web/js/live.js`).
+
+### Вебхуки и ключи API партнёров
+
+Ресторан может подключить свою систему (кассу, CRM) двумя способами — подробности в
+[docs/system-design](docs/system-design/README.md), глава 3.
+
+| Что | Где | Адрес |
+|---|---|---|
+| Ключ API: выпуск, список, отзыв | identity-service | `POST/GET /api/v1/auth/api-keys`, `DELETE /api/v1/auth/api-keys/{id}` |
+| Обмен ключа на 15-минутный токен | identity-service | `POST /api/v1/auth/api-keys/token` + `X-Api-Key` |
+| Исходящие вебхуки на события заказов | notification-service | `/api/v1/restaurants/{r}/webhooks` (+ `/test`, `/rotate-secret`, `/enable`, `/deliveries`) |
+| Входящий вебхук Stripe | payment-service | `POST /api/v1/webhooks/stripe` (`STRIPE_WEBHOOK_SECRET`) |
+| Входящий вебхук Telegram | notification-service | `POST /api/v1/webhooks/telegram` (`TELEGRAM_MODE=webhook`) |
+
+- Исходящие вебхуки подписаны по Standard Webhooks, повторяются по лестнице очередей RabbitMQ
+  (10 с → 2 ч), защищены от SSRF и выключаются сами после 20 провалов подряд. Без
+  `WEBHOOK_SECRET_KEY` (`openssl rand -base64 32`) выключены только они.
+- В веб-интерфейсе — вкладка «🔌 Интеграции» у ресторана; приёмник для проверки —
+  http://localhost:8095 (сервис `webhook-sink`, проверяет подпись прямо в браузере).
+
 ### Рассылка уведомлений через RabbitMQ
 
 Kafka и RabbitMQ в проекте делят работу, а не дублируют друг друга. Kafka — журнал событий:

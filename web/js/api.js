@@ -94,6 +94,16 @@ export async function api(method, path, { body, auth = true, form, base = "" } =
     throw new ApiError(401, "Нужно войти в аккаунт");
 }
 
+/** Текущий access-токен — для транспортов, которые ходят мимо api(): SSE, long polling, WebSocket. */
+export const accessToken = () => session()?.access ?? null;
+
+/** Обменять refresh-токен (после 401 в потоке). false — сессия кончилась, нужно войти заново. */
+export async function refreshSession() {
+    const current = session();
+    if (!current) return false;
+    return refresh(current.email, current.refresh);
+}
+
 export const get = (path, options) => api("GET", path, options);
 export const post = (path, body, options) => api("POST", path, { ...options, body });
 export const patch = (path, body, options) => api("PATCH", path, { ...options, body });
