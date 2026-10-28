@@ -355,3 +355,10 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .offer { border: 2px solid var(--primary); }
 .countdown { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .countdown > i { display: block; height: 100%; background: var(--primary); transition: width 1s linear; }
+
+/* Помощник: карточка подготовленного действия, сообщение «пишет первым», счётчик на кнопке */
+.action-card { margin-top: 8px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--primary); background: color-mix(in srgb, var(--primary) 7%, transparent); display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.action-card.done { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.action-card.canceled, .action-card.failed { border-color: var(--border); background: transparent; }
+.msg.proactive { border-color: var(--primary); }
+.fab-badge { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 12px; display: grid; place-items: center; }

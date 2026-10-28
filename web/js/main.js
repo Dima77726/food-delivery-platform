@@ -180,15 +180,16 @@ export async function refreshChrome() {
 let assistantHandle = null;
 function mountAssistantIfNeeded() {
     const me = session();
-    const wanted = CONFIG.assistant && me && me.role === "CUSTOMER";
+    // Помощник есть у всех ролей: набор его инструментов агент выбирает по роли в токене.
+    const wanted = CONFIG.assistant && me && me.role;
     if (!wanted) {
         assistantHandle?.destroy();
         assistantHandle = null;
         return;
     }
-    if (!assistantHandle || assistantHandle.email !== me.email) {
+    if (!assistantHandle || assistantHandle.email !== me.email || assistantHandle.role !== me.role) {
         assistantHandle?.destroy();
-        assistantHandle = mountAssistant(me.email);
+        assistantHandle = mountAssistant(me.email, me.role, me.user.id);
     }
 }
 
