@@ -5,6 +5,7 @@ import { get, login, logout } from "./api.js";
 import { html, initials, ROLE_LABELS, ROLE_ICONS, toast, reportError, $, delegate } from "./ui.js";
 import { mountAssistant } from "./assistant.js";
 import { navigate, homeFor } from "./nav.js";
+import { ensureNotificationFeed, unreadCount, onUnreadChange, markAllSeen } from "./notifications.js";
 
 const CONFIG = window.APP_CONFIG || {};
 
@@ -26,6 +27,7 @@ const ROUTES = [
     ["/admin/users", "admin-users", ["ADMIN"], true],
     ["/admin/audit", "admin-audit", ["ADMIN"], true],
     ["/tools", "tools", [], false],
+    ["/admin/business", "admin-business", ["ADMIN"], true],
 ];
 
 
@@ -33,7 +35,7 @@ const NAV_BY_ROLE = {
     CUSTOMER: [["/", "Рестораны"], ["/orders", "Мои заказы"], ["/profile", "Уведомления"]],
     RESTAURANT_OWNER: [["/owner", "Мои рестораны"], ["/", "Каталог"], ["/profile", "Профиль"]],
     COURIER: [["/courier", "Доставки"], ["/profile", "Профиль"]],
-    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/audit", "Журнал"], ["/", "Каталог"], ["/tools", "Инструменты"]],
+    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/business", "Промо и возвраты"], ["/admin/audit", "Журнал"], ["/", "Каталог"], ["/tools", "Инструменты"]],
     GUEST: [["/", "Рестораны"], ["/tools", "Инструменты"]],
 };
 
@@ -105,13 +107,22 @@ function renderShell(content) {
             <nav class="nav-links">${links}</nav>
             <div class="nav-spacer"></div>
             <button class="icon-btn" data-act="theme" title="Тема оформления">${{ auto: "🌗", dark: "🌙", light: "☀️" }[theme()]}</button>
+            ${me ? html`<a class="icon-btn" href="#/profile" title="Уведомления" data-bell>🔔${unreadCount() ? html`<span class="dot">${unreadCount()}</span>` : ""}</a>` : ""}
             ${role === "CUSTOMER" ? html`<a class="icon-btn" href="#/cart" title="Корзина">🛒${cartCount ? html`<span class="dot">${cartCount}</span>` : ""}</a>` : ""}
             ${me ? accountButton(me) : html`<a class="btn primary" href="#/login">Войти</a>`}
         </header>
         <main id="view">${content || ""}</main>`.value;
 
     if (!content) mountAssistantIfNeeded();
+    ensureNotificationFeed(me?.email ?? null);
+    if (path === "/profile") markAllSeen();
 }
+
+// Счётчик на колокольчике обновляется точечно, без перерисовки всей панели.
+onUnreadChange((count) => {
+    const bell = document.querySelector("[data-bell]");
+    if (bell) bell.innerHTML = count ? `🔔<span class="dot">${count}</span>` : "🔔";
+});
 
 function accountButton(me) {
     return html`<div class="rel" id="account-root">
@@ -171,15 +182,16 @@ export async function refreshChrome() {
 let assistantHandle = null;
 function mountAssistantIfNeeded() {
     const me = session();
-    const wanted = CONFIG.assistant && me && me.role === "CUSTOMER";
+    // Помощник есть у всех ролей: набор его инструментов агент выбирает по роли в токене.
+    const wanted = CONFIG.assistant && me && me.role;
     if (!wanted) {
         assistantHandle?.destroy();
         assistantHandle = null;
         return;
     }
-    if (!assistantHandle || assistantHandle.email !== me.email) {
+    if (!assistantHandle || assistantHandle.email !== me.email || assistantHandle.role !== me.role) {
         assistantHandle?.destroy();
-        assistantHandle = mountAssistant(me.email);
+        assistantHandle = mountAssistant(me.email, me.role, me.user.id);
     }
 }
 

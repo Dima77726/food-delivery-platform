@@ -1,1 +1,1 @@
-[rabbitmq_management,rabbitmq_prometheus,rabbitmq_stomp].
+[rabbitmq_management,rabbitmq_prometheus,rabbitmq_stomp,rabbitmq_mqtt,rabbitmq_web_mqtt,rabbitmq_auth_backend_http].

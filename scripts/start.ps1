@@ -12,6 +12,8 @@
                     аналитика и поиск, остальное работает                               ~5 ГБ
       -Auth         добавляет Keycloak (+0,7 ГБ)
       -Tools        добавляет Kafka UI и Kibana (+1,5 ГБ)
+      -Cdc          добавляет CDC: Debezium читает WAL базы заказов в Kafka, ClickHouse — из Kafka (+0,5 ГБ;
+                    ClickHouse есть только без -Light). Нужен DEBEZIUM_DB_PASSWORD в .env
 
 .EXAMPLE
     ./scripts/start.ps1                  # всё
@@ -21,6 +23,7 @@ param(
     [switch]$Light,
     [switch]$Auth,
     [switch]$Tools,
+    [switch]$Cdc,
     [switch]$Agent,
     [switch]$NoBrowser,
     [switch]$NoSeed,
@@ -69,6 +72,7 @@ $profiles = @('--profile', 'full')
 if (-not $Light) { $profiles += @('--profile', 'stores') }
 if ($Auth) { $profiles += @('--profile', 'auth') }
 if ($Tools) { $profiles += @('--profile', 'tools') }
+if ($Cdc) { $profiles += @('--profile', 'cdc') }
 
 $stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
 $saved = @{}
@@ -172,9 +176,16 @@ if ($Agent) {
             Ok 'Ollama запущена'
 
             $env:AGENT_MODE = 'ollama'; $env:OLLAMA_TIMEOUT_SECONDS = '170'; $env:AGENT_TIMEOUT_SECONDS = '180'
+            # Вопросам ресторатора бывает нужно несколько вызовов инструментов (рестораны, затем заказы).
+            $env:MAX_TOOL_ROUNDS = '6'
             $env:ORDERS_BACKEND = 'platform'; $env:AUTH_MODE = 'jwt'
             $env:JWT_JWKS_URL = 'http://localhost:8080/.well-known/jwks.json'
             $env:PLATFORM_BASE_URL = 'http://localhost:8080'
+            # Проактивные сообщения: агент читает события заказов и платежей из Kafka своей группой.
+            # Нужен пакет aiokafka в .venv агента (pip install -e ".[proactive]"); без него — выключены.
+            & $agentPython -c 'import aiokafka' 2>$null
+            if ($LASTEXITCODE -eq 0) { $env:KAFKA_BOOTSTRAP_SERVERS = 'localhost:9094' }
+            else { Warn 'Проактивные сообщения помощника выключены: в .venv агента нет aiokafka' }
             if (-not (Wait-Http 'http://127.0.0.1:8001/health' 2 'Агент')) {
                 $p = Start-Process -FilePath $agentPython -WorkingDirectory $agentDir -WindowStyle Hidden -PassThru `
                     -ArgumentList '-m', 'uvicorn', 'food_delivery_agent.main:app', '--host', '127.0.0.1', '--port', '8001', '--no-access-log' `

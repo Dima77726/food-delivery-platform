@@ -270,6 +270,23 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .star-pick span.on { opacity: 1; color: #f5b301; }
 .map { width: 100%; height: 220px; border-radius: var(--radius-sm); background: linear-gradient(135deg, color-mix(in srgb, var(--info) 14%, var(--bg-2)), var(--bg-2)); border: 1px solid var(--border); }
 
+/* Адрес доставки и карты Leaflet */
+.addr-field { position: relative; }
+.addr-input { display: flex; gap: 8px; }
+.addr-input .input { flex: 1; min-width: 0; }
+.addr-list { position: absolute; z-index: 1100; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 6px; list-style: none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); max-height: 280px; overflow: auto; }
+.addr-list li { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.addr-list li:hover, .addr-list li.on { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.addr-hint:empty { display: none; }
+.addr-recent .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addr-map { height: 260px; overflow: hidden; }
+.order-map { height: 260px; overflow: hidden; }
+.map-fallback { height: 100%; display: grid; place-content: center; text-align: center; padding: 12px; }
+.map .leaflet-container, .map.leaflet-container { font: inherit; background: var(--bg-2); }
+.map-pin { background: none; border: 0; }
+.map-pin span { display: grid; place-items: center; width: 36px; height: 36px; font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .35)); }
+.addr-line { display: flex; gap: 8px; align-items: flex-start; }
+
 /* Вход */
 .auth { min-height: calc(100vh - var(--nav-h)); display: grid; place-items: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 440px; }
@@ -313,3 +330,35 @@ table.tbl { width: 100%; border-collapse: collapse; }
 @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 .banner { padding: 12px 16px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--text); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
 .tag-role { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg-2); color: var(--muted); }
+
+/* ---------- Живые обновления и чат заказа ---------- */
+.live-dot { color: var(--muted); white-space: nowrap; }
+.live-dot.live { color: var(--accent); }
+.oc { display: flex; flex-direction: column; gap: 6px; }
+.oc-log { display: flex; flex-direction: column; gap: 6px; max-height: 320px; min-height: 120px; overflow-y: auto; padding: 4px 2px; }
+.oc-msg { display: flex; }
+.oc-msg.mine { justify-content: flex-end; }
+.oc-bubble { max-width: 85%; padding: 8px 12px; border-radius: 14px; background: color-mix(in srgb, var(--muted) 14%, transparent); overflow-wrap: anywhere; white-space: pre-wrap; }
+.oc-msg.mine .oc-bubble { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.oc-msg.pending .oc-bubble { opacity: .6; }
+.oc-who { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.oc-meta { font-size: 11px; color: var(--muted); margin-top: 2px; text-align: right; }
+.oc-typing { min-height: 1.2em; }
+.oc-form { display: flex; gap: 6px; }
+.oc-form .input { flex: 1; }
+
+/* Условия заказа и предложения курьеру */
+.field > span { font-size: 13px; font-weight: 650; color: var(--muted); }
+.ok-text { color: var(--accent); }
+.bad-text { color: var(--danger); }
+.card.subtle { background: var(--bg); box-shadow: none; border: 1px solid var(--border); }
+.offer { border: 2px solid var(--primary); }
+.countdown { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.countdown > i { display: block; height: 100%; background: var(--primary); transition: width 1s linear; }
+
+/* Помощник: карточка подготовленного действия, сообщение «пишет первым», счётчик на кнопке */
+.action-card { margin-top: 8px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--primary); background: color-mix(in srgb, var(--primary) 7%, transparent); display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.action-card.done { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.action-card.canceled, .action-card.failed { border-color: var(--border); background: transparent; }
+.msg.proactive { border-color: var(--primary); }
+.fab-badge { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 12px; display: grid; place-items: center; }

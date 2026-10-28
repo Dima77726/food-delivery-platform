@@ -1,30 +1,68 @@
 // Страница заказа: этапы, хронология, оплата, трек курьера, отмена и отзыв.
 
 import { get, post, restaurantName } from "../api.js";
+import { orderMap, loadLeaflet, formatAddress } from "../geo.js";
+import { sseStream, stomp } from "../live.js";
+import { mountChat } from "../chat.js";
 import { html, raw, delegate, money, emojiFor, statusBadge, dateTime, timeOnly, empty, skeleton, toast, reportError, modal, confirmDialog, DELIVERY_STATUS } from "../ui.js";
 
 const STEPS = [["CREATED", "Создан"], ["PAID", "Оплачен"], ["ACCEPTED", "Принят"], ["COOKING", "Готовится"], ["READY_FOR_DELIVERY", "Ждёт курьера"], ["IN_DELIVERY", "В пути"], ["DELIVERED", "Доставлен"]];
 const STEP_INDEX = { CREATED: 0, PAYMENT_PENDING: 0, PAID: 1, ACCEPTED: 2, COOKING: 3, READY_FOR_DELIVERY: 4, IN_DELIVERY: 5, DELIVERED: 6 };
 const FINAL = new Set(["DELIVERED", "CANCELED"]);
 const TAGS = ["быстро", "вкусно", "горячо", "вежливый курьер", "красиво упаковано"];
+// Чат с курьером открывается, когда заказ ждёт курьера или уже в пути; после доставки остаётся для чтения.
+const CHAT_STATUSES = new Set(["READY_FOR_DELIVERY", "IN_DELIVERY", "DELIVERED"]);
+const LIVE_LABEL = { live: "● обновляется вживую", reconnecting: "○ переподключение…", closed: "" };
 
 export default async function orderPage({ root, params, me, onLeave }) {
     const uid = me.user.id;
     const oid = params.id;
     root.innerHTML = html`<div class="container">${skeleton(2)}</div>`.value;
 
-    let order; let events = []; let payments = []; let track = null; let name = "";
+    let order; let events = []; let payments = []; let track = null; let name = ""; let refunds = [];
+    const REFUND_STATUS = { PENDING: ["yellow", "на рассмотрении"], APPROVED: ["green", "одобрен"], REJECTED: ["red", "отклонён"] };
+    let liveState = "reconnecting";
+    // Чат живёт в своём элементе: перерисовка страницы переносит его на новое место, не теряя переписку и ввод.
+    const chatHost = document.createElement("div");
+    let chat = null;
+    let stopTrack = null;
+    // Карта создаётся один раз и переносится между перерисовками; если Leaflet не загрузился, остаётся схема.
+    let leaflet = null;
+    let map = null;
+    loadLeaflet().then(() => { leaflet = true; }, () => { leaflet = false; }).finally(() => order && draw());
 
     async function load() {
         order = await get(`/api/v1/customers/${uid}/orders/${oid}`);
-        [events, payments, name] = await Promise.all([
+        [events, payments, name, refunds] = await Promise.all([
             get(`/api/v1/customers/${uid}/orders/${oid}/events`).catch(() => []),
             get(`/api/v1/customers/${uid}/orders/${oid}/payments`).catch(() => []),
             restaurantName(order.restaurantId),
+            order.status === "DELIVERED" ? get(`/api/v1/customers/${uid}/orders/${oid}/refund-requests`).catch(() => []) : [],
         ]);
         track = ["IN_DELIVERY", "DELIVERED"].includes(order.status)
             ? await get(`/api/v1/customers/${uid}/orders/${oid}/track?limit=200`).catch(() => null)
             : null;
+        // Трек отдаётся от новых точек к старым, а маршрут рисуется от начала к курьеру.
+        track?.positions?.sort((a, b) => new Date(a.recordedAt ?? a.createdAt) - new Date(b.recordedAt ?? b.createdAt));
+    }
+
+    const trackPoints = (positions) => positions
+        .map((p) => [p.latitude ?? p.lat, p.longitude ?? p.lon ?? p.lng])
+        .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+
+    function destination() {
+        const a = order.deliveryAddress;
+        return a?.latitude != null ? [Number(a.latitude), Number(a.longitude)] : null;
+    }
+
+    const mapSlot = () => html`<div class="map" data-order-map><div class="map-fallback muted small">Загружаем карту…</div></div>`;
+
+    function mountMap() {
+        const slot = root.querySelector("[data-order-map]");
+        if (!slot || leaflet === false) return;
+        map ??= orderMap();
+        map.mount(slot);
+        map.update({ destination: destination(), path: trackPoints(track?.positions || []) });
     }
 
     function mapSvg(positions) {
@@ -43,32 +81,107 @@ export default async function orderPage({ root, params, me, onLeave }) {
             <text x="${sx(lx)}" y="${sy(ly) - 12}" font-size="26" text-anchor="middle">🛵</text></svg>`;
     }
 
+    /** Из чего сложилась сумма: скидка, доставка по спросу на момент оформления, чаевые, время. */
+    function termsLines(t) {
+        if (!t) return "";
+        const line = (label, value) => html`<div class="cart-line"><span style="flex:1" class="muted">${label}</span><b>${value}</b></div>`;
+        return html`${Number(t.discount) > 0 ? line(`Промокод ${t.promoCode}`, `−${money(t.discount)}`) : ""}
+            ${Number(t.deliveryFee) > 0 ? line(`Доставка${Number(t.surgeMultiplier) > 1 ? ` (спрос ×${t.surgeMultiplier})` : ""}`, money(t.deliveryFee)) : ""}
+            ${Number(t.tipAmount) > 0 ? line("Чаевые курьеру", money(t.tipAmount)) : ""}
+            ${t.scheduledFor ? line("Доставить к", dateTime(t.scheduledFor)) : ""}`;
+    }
+
+    function refundDialog() {
+        modal({
+            title: "Что-то не так с заказом?",
+            body: html`<div class="stack"><p class="muted small">Отметьте, чего не было или что пришло испорченным. Небольшие суммы возвращаются сразу, остальные — после проверки поддержкой.</p>
+                ${order.items.map((i) => html`<div class="row between"><span>${emojiFor(i.menuItemName)} ${i.menuItemName} <span class="muted small">${money(i.price)}</span></span>
+                    <select class="input" style="width:90px" data-refund-item="${i.id}">${Array.from({ length: i.quantity + 1 }, (_, n) => html`<option value="${n}">${n} шт</option>`)}</select></div>`)}
+                <div class="field"><label>Что случилось</label><textarea class="input" id="refund-reason" maxlength="500" placeholder="Например: не привезли напиток"></textarea></div></div>`,
+            actions: [
+                { label: "Отмена" },
+                {
+                    label: "Отправить заявку", kind: "primary", close: false,
+                    onClick: async ({ close, root: dialog }) => {
+                        const items = [...dialog.querySelectorAll("[data-refund-item]")]
+                            .map((s) => ({ orderItemId: Number(s.dataset.refundItem), quantity: Number(s.value) }))
+                            .filter((i) => i.quantity > 0);
+                        const reason = dialog.querySelector("#refund-reason").value.trim();
+                        if (!items.length || !reason) { toast("Выберите позиции и опишите, что случилось", "bad"); return false; }
+                        try {
+                            const request = await post(`/api/v1/customers/${uid}/orders/${oid}/refund-requests`, { items, reason });
+                            toast(request.status === "APPROVED" ? `Возврат ${money(request.amount)} одобрен` : "Заявка отправлена в поддержку", "ok");
+                            close();
+                            await load();
+                            draw();
+                        } catch (error) { reportError(error); }
+                        return false;
+                    },
+                },
+            ],
+        });
+    }
+
     function draw() {
         const canceled = order.status === "CANCELED";
         const idx = STEP_INDEX[order.status] ?? 0;
         const canCancel = ["CREATED", "PAYMENT_PENDING", "PAID"].includes(order.status);
+        const showTrack = order.status === "IN_DELIVERY" || (order.status === "DELIVERED" && track?.positions?.length);
+        const address = order.deliveryAddress;
         root.innerHTML = html`<div class="container">
-            <div class="page-head"><a class="btn sm" href="#/orders">← Заказы</a><h1>Заказ №${order.id}</h1>${statusBadge(order.status)}<span class="muted right">${emojiFor(name)} ${name}</span></div>
+            <div class="page-head"><a class="btn sm" href="#/orders">← Заказы</a><h1>Заказ №${order.id}</h1>${statusBadge(order.status)}<span class="live-dot small ${liveState}">${FINAL.has(order.status) ? "" : LIVE_LABEL[liveState]}</span><span class="muted right">${emojiFor(name)} ${name}</span></div>
             <div class="split"><div class="stack lg">
                 <div class="card">
                     ${canceled ? html`<div class="banner" style="background:color-mix(in srgb,var(--danger) 14%,transparent)">Заказ отменён${payments.some((p) => p.status === "SUCCEEDED") ? ". Деньги будут возвращены." : "."}</div>`
                         : html`<div class="stepper">${STEPS.map(([key, label], i) => html`<div class="step ${i < idx || order.status === "DELIVERED" ? "done" : i === idx ? "now" : ""}">${label}</div>`)}</div>`}
                     ${order.status === "PAYMENT_PENDING" ? html`<p class="muted small center">Платёж проводится, это занимает несколько секунд…</p>` : ""}
                 </div>
-                ${order.status === "IN_DELIVERY" || (order.status === "DELIVERED" && track?.positions?.length) ? html`<div class="card stack"><h3>🛵 Курьер ${order.status === "IN_DELIVERY" ? "в пути" : "доставил заказ"}</h3>${mapSvg(track?.positions || [])}
-                    <span class="muted small">${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
+                ${showTrack ? html`<div class="card stack"><h3>🛵 Курьер ${order.status === "IN_DELIVERY" ? "в пути" : "доставил заказ"}</h3>${leaflet !== false ? mapSlot() : mapSvg(track?.positions || [])}
+                    ${address ? html`<div class="addr-line muted small"><span>📍</span><span>${formatAddress(address)}</span></div>` : ""}
+                    <span class="muted small" data-track-time>${track?.positions?.length ? `Обновлено в ${timeOnly(track.positions[track.positions.length - 1].recordedAt ?? track.positions[track.positions.length - 1].createdAt)}` : ""}</span></div>` : ""}
+                ${address && !showTrack ? html`<div class="card stack"><h3>📍 Адрес доставки</h3><div><b>${address.address}</b>${address.details ? html`<div class="muted small">${address.details}</div>` : ""}</div>
+                    ${destination() && leaflet !== false && !canceled ? mapSlot() : ""}</div>` : ""}
+                ${CHAT_STATUSES.has(order.status) ? html`<div class="card stack"><h3>💬 Чат с курьером</h3><div data-chat-slot></div></div>` : ""}
                 <div class="card stack"><h3>Состав заказа</h3>
                     ${order.items.map((i) => html`<div class="cart-line"><span style="font-size:26px">${emojiFor(i.menuItemName)}</span><div style="flex:1"><b>${i.menuItemName}</b><div class="muted small">${money(i.price)} × ${i.quantity}</div></div><b>${money(i.lineTotal)}</b></div>`)}
+                    ${termsLines(order.terms)}
                     <div class="total"><span>Итого</span><span>${money(order.totalAmount)}</span></div></div>
                 <div class="card stack"><h3>Хронология</h3><ul class="timeline">${[...events].reverse().map((e) => html`<li><b>${e.description}</b><div class="muted small">${dateTime(e.createAt)}</div></li>`)}</ul></div>
             </div>
             <aside class="stack sticky">
                 <div class="card stack"><h3>Оплата</h3>${payments.length ? payments.map((p) => html`<div class="row between"><span>${p.method === "CARD" ? "💳 Картой" : "💵 Наличными"}</span>
                     <span class="badge ${p.status === "SUCCEEDED" ? "green" : p.status === "FAILED" ? "red" : "yellow"}">${{ SUCCEEDED: "Оплачено", FAILED: "Отказ", REFUNDED: "Возврат", PENDING: "Ожидает" }[p.status] || p.status}</span></div>${p.failureReason ? html`<div class="err small">${p.failureReason}</div>` : ""}`) : html`<p class="muted">Платежей пока нет</p>`}</div>
-                ${order.status === "DELIVERED" ? html`<button class="btn primary block" data-act="review">⭐ Оставить отзыв</button>` : ""}
+                ${order.status === "DELIVERED" ? html`<button class="btn primary block" data-act="review">⭐ Оставить отзыв</button>
+                    <button class="btn ghost block" data-act="refund">↩ Проблема с заказом</button>` : ""}
+                ${refunds.length ? html`<div class="card stack"><h3>Возвраты</h3>${refunds.map((r) => html`<div class="stack"><div class="row between"><b>${money(r.amount)}</b>
+                    <span class="badge ${REFUND_STATUS[r.status]?.[0] || ""}">${REFUND_STATUS[r.status]?.[1] || r.status}</span></div>
+                    <div class="muted small">${r.items.map((i) => `${i.name} × ${i.quantity}`).join(", ")} · ${r.reason}</div></div>`)}</div>` : ""}
                 ${canCancel ? html`<button class="btn danger block" data-act="cancel">Отменить заказ</button>` : ""}
                 ${["CREATED"].includes(order.status) ? html`<button class="btn primary block" data-act="pay">Оплатить</button>` : ""}
             </aside></div></div>`.value;
+        mountMap();
+        attachChat();
+        followTrack();
+    }
+
+    function attachChat() {
+        const slot = root.querySelector("[data-chat-slot]");
+        if (!slot) return;
+        chat ??= mountChat(chatHost, { orderId: oid, me: { id: uid }, closed: FINAL.has(order.status) });
+        chat.setClosed(FINAL.has(order.status));
+        slot.replaceWith(chatHost);
+    }
+
+    /** Пока заказ в пути, точки курьера приходят через WebSocket — сразу, без опроса трека. */
+    function followTrack() {
+        if (order.status !== "IN_DELIVERY") { stopTrack?.(); stopTrack = null; return; }
+        stopTrack ??= stomp().subscribe(`/topic/order.${oid}.track`, (position) => {
+            track ??= { positions: [] };
+            track.positions = [...(track.positions || []), position];
+            if (map) map.update({ destination: destination(), path: trackPoints(track.positions) });
+            const stamp = root.querySelector("[data-track-time]");
+            if (stamp) stamp.textContent = `Обновлено в ${timeOnly(position.recordedAt ?? position.createdAt)}`;
+        });
     }
 
     function reviewDialog() {
@@ -131,6 +244,7 @@ export default async function orderPage({ root, params, me, onLeave }) {
             draw();
         },
         review: reviewDialog,
+        refund: refundDialog,
     });
 
     try {
@@ -141,10 +255,30 @@ export default async function orderPage({ root, params, me, onLeave }) {
     }
     draw();
 
+    // Статус и хронология приходят потоком SSE: событие — перечитали заказ. Перечитывание схлопывается, если события
+    // идут пачкой (история при подключении). Пока поток недоступен, работает прежний опрос раз в 4 секунды.
+    let reloadQueued = false;
+    const reload = () => {
+        if (reloadQueued) return;
+        reloadQueued = true;
+        setTimeout(async () => {
+            reloadQueued = false;
+            if (document.querySelector(".overlay")) return;
+            try { await load(); draw(); } catch { /* следующее событие повторит */ }
+        }, 150);
+    };
+    const stopStream = FINAL.has(order.status) ? null : sseStream(`/api/v1/customers/${uid}/orders/${oid}/stream`, {
+        onEvent: (name) => { if (name === "order-event" || name === "status") reload(); },
+        onState: (state) => {
+            liveState = state;
+            const dot = root.querySelector(".live-dot");
+            if (dot) { dot.className = `live-dot small ${state}`; dot.textContent = LIVE_LABEL[state]; }
+            if (state === "closed") reload();
+        },
+    });
     const timer = setInterval(async () => {
-        if (FINAL.has(order.status) && !document.querySelector(".overlay")) return;
-        if (document.querySelector(".overlay")) return;
+        if (liveState === "live" || FINAL.has(order.status) || document.querySelector(".overlay")) return;
         try { await load(); draw(); } catch { /* повторим */ }
     }, 4000);
-    onLeave(() => clearInterval(timer));
+    onLeave(() => { clearInterval(timer); stopStream?.(); stopTrack?.(); chat?.destroy(); map?.destroy(); });
 }

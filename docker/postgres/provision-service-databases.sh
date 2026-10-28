@@ -117,5 +117,59 @@ WHERE to_regclass('public.app_user') IS NOT NULL
 \gexec
 SQL
 
+    # Секреты интеграций: хеши ключей партнёров, ключи подписи вебхуков, ключи и адреса Web Push.
+    psql -v ON_ERROR_STOP=1 -q -d "$IDENTITY_DB_NAME" -v user="$reader" <<'SQL'
+SELECT format('REVOKE SELECT ON TABLE partner_api_key FROM %I', :'user')
+WHERE to_regclass('public.partner_api_key') IS NOT NULL
+\gexec
+SELECT format('GRANT SELECT (id, user_id, name, prefix, created_at, last_used_at, revoked_at) ON TABLE partner_api_key TO %I', :'user')
+WHERE to_regclass('public.partner_api_key') IS NOT NULL
+\gexec
+SQL
+    psql -v ON_ERROR_STOP=1 -q -d "$NOTIFICATION_DB_NAME" -v user="$reader" <<'SQL'
+SELECT format('REVOKE SELECT ON TABLE %I FROM %I', t, :'user')
+FROM unnest(ARRAY['webhook_subscription', 'push_subscription', 'telegram_link_code']) AS t
+WHERE to_regclass('public.' || t) IS NOT NULL
+\gexec
+SELECT format('GRANT SELECT (id, restaurant_id, created_by, url, description, event_types, active, consecutive_failures, disabled_reason, created_at, updated_at) ON TABLE webhook_subscription TO %I', :'user')
+WHERE to_regclass('public.webhook_subscription') IS NOT NULL
+\gexec
+SELECT format('GRANT SELECT (id, user_id, user_agent, created_at, last_success_at) ON TABLE push_subscription TO %I', :'user')
+WHERE to_regclass('public.push_subscription') IS NOT NULL
+\gexec
+SQL
+    # Ограничения выше действуют на таблицы, которые уже есть: при самом первом запуске их создают
+    # миграции сервисов позже, поэтому они применяются со следующего запуска (provision идёт при каждом up).
+
     echo "Учётная запись только для чтения $reader готова"
+fi
+
+# ---------- Debezium (CDC, профиль cdc): чтение WAL базы заказов ----------
+#
+# Отдельная роль с правом REPLICATION и только чтением базы заказов, а не суперпользователь. Публикация
+# FOR ALL TABLES создаётся здесь, от суперпользователя: так она не зависит от того, создал ли уже
+# Liquibase таблицы сервиса, а Debezium не нужны права владельца таблиц. Какие таблицы читать, Debezium
+# решает сам (table.include.list). Без DEBEZIUM_DB_PASSWORD ничего не заводится.
+if [ -n "${DEBEZIUM_DB_PASSWORD:-}" ]; then
+    psql -v ON_ERROR_STOP=1 -q -v user="$DEBEZIUM_DB_USER" -v password="$DEBEZIUM_DB_PASSWORD" -v db="$ORDER_DB_NAME" <<'SQL'
+SELECT format('CREATE ROLE %I LOGIN REPLICATION PASSWORD %L', :'user', :'password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'user')
+\gexec
+SELECT format('ALTER ROLE %I LOGIN REPLICATION PASSWORD %L', :'user', :'password')
+\gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'db', :'user')
+\gexec
+SQL
+    psql -v ON_ERROR_STOP=1 -q -d "$ORDER_DB_NAME" -v user="$DEBEZIUM_DB_USER" -v owner="$ORDER_DB_USER" <<'SQL'
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'user')
+\gexec
+SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', :'user')
+\gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', :'owner', :'user')
+\gexec
+SELECT 'CREATE PUBLICATION debezium_orders FOR ALL TABLES'
+WHERE NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'debezium_orders')
+\gexec
+SQL
+    echo "Учётная запись Debezium $DEBEZIUM_DB_USER и публикация debezium_orders готовы"
 fi
