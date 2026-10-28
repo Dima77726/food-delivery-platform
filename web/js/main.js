@@ -26,6 +26,7 @@ const ROUTES = [
     ["/admin", "admin", ["ADMIN"], true],
     ["/admin/users", "admin-users", ["ADMIN"], true],
     ["/admin/audit", "admin-audit", ["ADMIN"], true],
+    ["/admin/business", "admin-business", ["ADMIN"], true],
 ];
 
 
@@ -33,7 +34,7 @@ const NAV_BY_ROLE = {
     CUSTOMER: [["/", "Рестораны"], ["/orders", "Мои заказы"], ["/profile", "Уведомления"]],
     RESTAURANT_OWNER: [["/owner", "Мои рестораны"], ["/", "Каталог"], ["/profile", "Профиль"]],
     COURIER: [["/courier", "Доставки"], ["/profile", "Профиль"]],
-    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/audit", "Журнал"], ["/", "Каталог"]],
+    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/business", "Промо и возвраты"], ["/admin/audit", "Журнал"], ["/", "Каталог"]],
     GUEST: [["/", "Рестораны"]],
 };
 
@@ -179,15 +180,16 @@ export async function refreshChrome() {
 let assistantHandle = null;
 function mountAssistantIfNeeded() {
     const me = session();
-    const wanted = CONFIG.assistant && me && me.role === "CUSTOMER";
+    // Помощник есть у всех ролей: набор его инструментов агент выбирает по роли в токене.
+    const wanted = CONFIG.assistant && me && me.role;
     if (!wanted) {
         assistantHandle?.destroy();
         assistantHandle = null;
         return;
     }
-    if (!assistantHandle || assistantHandle.email !== me.email) {
+    if (!assistantHandle || assistantHandle.email !== me.email || assistantHandle.role !== me.role) {
         assistantHandle?.destroy();
-        assistantHandle = mountAssistant(me.email);
+        assistantHandle = mountAssistant(me.email, me.role, me.user.id);
     }
 }
 

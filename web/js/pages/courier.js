@@ -1,11 +1,11 @@
 // Курьер: доступные доставки, свои доставки, движение по маршруту и завершение.
 
-import { get, post } from "../api.js";
+import { get, post, put } from "../api.js";
 import { longPoll, pollFetch } from "../live.js";
 import { mountChat } from "../chat.js";
 import { connectCourierMqtt } from "../mqtt-gps.js";
 import { mapsLink } from "../geo.js";
-import { html, delegate, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, modal, DELIVERY_STATUS } from "../ui.js";
+import { html, delegate, money, ago, dateTime, empty, skeleton, toast, reportError, statusBadge, modal, DELIVERY_STATUS } from "../ui.js";
 
 // Учебный маршрут: курьер «едет» к точке клиента, пока включена отправка позиции. Координат ресторана в каталоге
 // нет, поэтому старт — в паре километров к юго-западу от клиента. Без точки клиента — маршрут по центру Москвы.
@@ -33,13 +33,24 @@ export default async function courierPage({ root, me, onLeave }) {
     let gpsTransport = (() => { try { return localStorage.getItem("gpsTransport") || "http"; } catch { return "http"; } })();
     let mqttLink = null;
     let mqttState = "";
+    // Автоназначение: курьер «на линии» шлёт отметку с координатами раз в 30 с, сервер предлагает ему ближайшие
+    // доставки (30 с на ответ). Точка — центр Москвы: в учебном стенде нет настоящего GPS телефона.
+    let online = false;
+    let offers = [];
+    let earnings = null;
+    let heartbeat = null;
+    let offerTimer = null;
 
     root.innerHTML = html`<div class="container"><div class="page-head"><h1>Доставки</h1></div>${skeleton(3)}</div>`.value;
 
     const mqttLabel = () => MQTT_LABELS[mqttState] || (mqttState.startsWith("error:") ? "ошибка: " + mqttState.slice(6) : "подключится с первой точкой");
 
     async function load() {
-        [available, mine] = await Promise.all([get("/api/v1/deliveries/available").catch(() => []), get(`/api/v1/couriers/${uid}/deliveries`).catch(() => [])]);
+        [available, mine, earnings] = await Promise.all([
+            get("/api/v1/deliveries/available").catch(() => []),
+            get(`/api/v1/couriers/${uid}/deliveries`).catch(() => []),
+            get(`/api/v1/couriers/${uid}/earnings`).catch(() => null),
+        ]);
     }
 
     const active = () => mine.filter((d) => d.status !== "DELIVERED");
@@ -63,10 +74,46 @@ export default async function courierPage({ root, me, onLeave }) {
                 ${isRiding ? html`<div class="muted small">Позиция уходит каждые 2 секунды ${gpsTransport === "mqtt" ? "по MQTT (топик couriers/" + uid + "/deliveries/" + d.id + "/position)" : "запросом POST"}: клиент видит курьера на своей карте.</div>` : ""}` : ""}</div>`;
     }
 
+    function offerCard(o) {
+        const left = Math.max(0, Math.round((new Date(o.expiresAt) - Date.now()) / 1000));
+        return html`<div class="card stack offer"><div class="row between"><h3>⚡ Предложение: заказ №${o.orderId}</h3><b data-left="${o.offerId}">${left} с</b></div>
+            <div class="countdown"><i data-bar="${o.offerId}" style="width:${Math.min(100, left / 30 * 100)}%"></i></div>
+            <div class="addr-line"><span>📍</span><div style="flex:1"><b>${o.deliveryAddress || "адрес не указан"}</b>
+                <div class="muted small">${o.distanceMeters != null ? `${(o.distanceMeters / 1000).toFixed(1)} км от вас` : ""}${Number(o.tipAmount) > 0 ? ` · чаевые ${money(o.tipAmount)}` : ""}</div></div></div>
+            <div class="row"><button class="btn primary" style="flex:1" data-act="accept" data-id="${o.offerId}">Беру</button><button class="btn ghost" data-act="decline" data-id="${o.offerId}">Не могу</button></div></div>`;
+    }
+
+    async function sendPresence(on) {
+        const [latitude, longitude] = FROM;
+        await put(`/api/v1/couriers/${uid}/presence`, { online: on, latitude, longitude });
+    }
+
+    async function refreshOffers() {
+        try { offers = await get(`/api/v1/couriers/${uid}/offers`); } catch { offers = []; }
+        if (!document.querySelector(".overlay")) draw();
+    }
+
+    function setOnline(on) {
+        online = on;
+        clearInterval(heartbeat);
+        clearInterval(offerTimer);
+        heartbeat = offerTimer = null;
+        if (on) {
+            heartbeat = setInterval(() => sendPresence(true).catch(() => {}), 30_000);
+            offerTimer = setInterval(refreshOffers, 3000);
+            refreshOffers();
+        } else {
+            offers = [];
+        }
+    }
+
     function draw() {
         const done = mine.filter((d) => d.status === "DELIVERED");
         root.innerHTML = html`<div class="container"><div class="page-head"><h1>Доставки</h1><span class="muted right">Новые доставки приходят сразу (long polling)</span></div>
-            <div class="kpis"><div class="kpi"><div class="v">${available.length}</div><div class="l">ждут курьера</div></div><div class="kpi"><div class="v">${active().length}</div><div class="l">у меня в работе</div></div><div class="kpi"><div class="v">${done.length}</div><div class="l">доставлено всего</div></div></div>
+            <div class="kpis"><div class="kpi"><div class="v">${available.length}</div><div class="l">ждут курьера</div></div><div class="kpi"><div class="v">${active().length}</div><div class="l">у меня в работе</div></div><div class="kpi"><div class="v">${earnings ? earnings.deliveries : done.length}</div><div class="l">доставлено всего</div></div><div class="kpi"><div class="v">${money(earnings?.tips ?? 0)}</div><div class="l">чаевые</div></div></div>
+            <div class="card row between"><div><b>${online ? "🟢 Вы на линии" : "⚪ Вы не на линии"}</b><div class="muted small">${online ? "Ближайшие доставки предлагаются вам автоматически — на ответ 30 секунд." : "Выйдите на линию, чтобы получать предложения доставок рядом."}</div></div>
+                <button class="btn ${online ? "ghost" : "primary"}" data-act="online">${online ? "Уйти с линии" : "Выйти на линию"}</button></div>
+            ${offers.map(offerCard)}
             <div class="tabs"><button class="tab ${tab === "available" ? "on" : ""}" data-act="tab" data-tab="available">Доступные (${available.length})</button><button class="tab ${tab === "mine" ? "on" : ""}" data-act="tab" data-tab="mine">Мои (${active().length})</button><button class="tab ${tab === "done" ? "on" : ""}" data-act="tab" data-tab="done">История (${done.length})</button></div>
             <div class="grid">${tab === "available" ? (available.length ? available.map((d) => card(d, "available")) : "") : tab === "mine" ? active().map((d) => card(d, "mine")) : done.map((d) => card(d, "done"))}</div>
             ${(tab === "available" && !available.length) ? empty("🛵", "Свободных доставок нет", "Они появятся, когда ресторан передаст готовый заказ.") : ""}
@@ -120,6 +167,16 @@ export default async function courierPage({ root, me, onLeave }) {
 
     delegate(root, "click", {
         tab: (el) => { tab = el.dataset.tab; draw(); },
+        online: async () => {
+            try {
+                await sendPresence(!online);
+                setOnline(!online);
+                toast(online ? "Вы на линии" : "Вы ушли с линии", "ok");
+            } catch (error) { reportError(error); }
+            draw();
+        },
+        accept: (el) => act(async () => { await post(`/api/v1/couriers/${uid}/offers/${el.dataset.id}/accept`); offers = []; tab = "mine"; }, "Доставка ваша"),
+        decline: (el) => act(async () => { await post(`/api/v1/couriers/${uid}/offers/${el.dataset.id}/decline`); offers = offers.filter((o) => String(o.offerId) !== el.dataset.id); }),
         assign: (el) => act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/assign`), "Доставка ваша"),
         pickup: (el) => act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/pick-up`), "Заказ у вас, клиент получил уведомление"),
         deliver: (el) => { stopRide(Number(el.dataset.id)); return act(() => post(`/api/v1/couriers/${uid}/deliveries/${el.dataset.id}/deliver`), "Доставка завершена"); },
@@ -147,7 +204,19 @@ export default async function courierPage({ root, me, onLeave }) {
     });
 
     await load();
+    online = await get(`/api/v1/couriers/${uid}/presence`).then((p) => p.online).catch(() => false);
+    setOnline(online);
     draw();
+    // Обратный отсчёт предложений — без перерисовки всей страницы.
+    const ticker = setInterval(() => {
+        for (const o of offers) {
+            const left = Math.max(0, Math.round((new Date(o.expiresAt) - Date.now()) / 1000));
+            const label = root.querySelector(`[data-left="${o.offerId}"]`);
+            const bar = root.querySelector(`[data-bar="${o.offerId}"]`);
+            if (label) label.textContent = `${left} с`;
+            if (bar) bar.style.width = `${Math.min(100, left / 30 * 100)}%`;
+        }
+    }, 1000);
 
     // Свободные доставки — long polling: сервер держит запрос, пока список не изменится (до 25 с), и сразу отвечает,
     // когда ресторан передаст заказ или его заберёт другой курьер. Версия списка — ETag, клиент шлёт её в If-None-Match.
@@ -170,5 +239,5 @@ export default async function courierPage({ root, me, onLeave }) {
         if (document.querySelector(".overlay")) return;
         try { mine = await get(`/api/v1/couriers/${uid}/deliveries`); draw(); } catch { /* повторим */ }
     }, 15000);
-    onLeave(() => { clearInterval(timer); stopPoll(); [...riding.keys()].forEach(stopRide); mqttLink?.close(); });
+    onLeave(() => { clearInterval(timer); clearInterval(ticker); setOnline(false); stopPoll(); [...riding.keys()].forEach(stopRide); mqttLink?.close(); });
 }

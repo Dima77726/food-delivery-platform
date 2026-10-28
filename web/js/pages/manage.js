@@ -1,7 +1,7 @@
 // Управление рестораном: заказы (канбан), меню, аналитика, отзывы, интеграции и настройки.
 
 import { get, post, patch, del, api, restaurant } from "../api.js";
-import { html, delegate, modal, formValues, confirmDialog, money, emojiFor, coverStyle, ago, empty, skeleton, toast, reportError, statusBadge, ORDER_STATUS } from "../ui.js";
+import { html, delegate, modal, formValues, confirmDialog, money, dateTime, emojiFor, coverStyle, ago, empty, skeleton, toast, reportError, statusBadge, ORDER_STATUS } from "../ui.js";
 import { navigate } from "../nav.js";
 import { sseStream } from "../live.js";
 import { integrationsTab } from "./integrations.js";
@@ -36,16 +36,21 @@ export default async function managePage({ root, params, query, onLeave }) {
     async function loadOrders() {
         const columns = await Promise.all(COLUMNS.map(([status]) => get(`/api/v1/restaurants/${rid}/orders?status=${status}&page=0&size=50`).catch(() => ({ content: [], totalElements: 0 }))));
         const [inDelivery, delivered] = await Promise.all(["IN_DELIVERY", "DELIVERED"].map((s) => get(`/api/v1/restaurants/${rid}/orders?status=${s}&page=0&size=1`).catch(() => ({ totalElements: 0 }))));
-        state.orders = { columns, inDelivery: inDelivery.totalElements, delivered: delivered.totalElements };
+        // Заказы ко времени: готовить можно за час до срока, раньше сервис не даст начать.
+        const scheduled = await get(`/api/v1/restaurants/${rid}/orders/scheduled`).catch(() => []);
+        state.orders = { columns, inDelivery: inDelivery.totalElements, delivered: delivered.totalElements, scheduled };
     }
 
     function ordersView() {
         if (!state.orders) return skeleton(4);
-        const { columns, inDelivery, delivered } = state.orders;
+        const { columns, inDelivery, delivered, scheduled } = state.orders;
+        const at = new Map(scheduled.map((s) => [s.orderId, s]));
         return html`<div class="row wrap" style="margin-bottom:14px"><span class="badge blue">🛵 В пути: ${inDelivery}</span><span class="badge green">✓ Доставлено: ${delivered}</span>
+            ${scheduled.length ? html`<span class="badge yellow">⏰ Ко времени: ${scheduled.length}</span>` : ""}
             <span class="muted small right">Обновляется автоматически</span></div>
             <div class="kanban">${COLUMNS.map(([status, title, action, verb], i) => html`<div class="col"><h4>${title}<span class="badge ${columns[i].content.length ? "orange" : ""}">${columns[i].content.length}</span></h4>
                 ${columns[i].content.map((o) => html`<div class="ticket"><div class="row between"><b>№${o.id}</b><span class="muted small">${ago(o.createdAt)}</span></div>
+                    ${at.has(o.id) ? html`<div class="small"><span class="badge yellow" title="${at.get(o.id).prepReminded ? "Пора готовить" : "Готовить можно за час до срока"}">⏰ к ${dateTime(at.get(o.id).scheduledFor)}</span></div>` : ""}
                     <div class="muted small">${o.itemsCount} поз. · <b style="color:var(--text)">${money(o.totalAmount)}</b></div>
                     <button class="btn sm ${status === "PAID" ? "primary" : ""}" data-act="advance" data-verb="${verb}" data-id="${o.id}">${action}</button></div>`)}
                 ${columns[i].content.length ? "" : html`<div class="muted small center" style="padding:24px 0">Пусто</div>`}</div>`)}</div>`;

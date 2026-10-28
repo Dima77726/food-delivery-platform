@@ -160,9 +160,16 @@ if ($Agent) {
             Ok 'Ollama запущена'
 
             $env:AGENT_MODE = 'ollama'; $env:OLLAMA_TIMEOUT_SECONDS = '170'; $env:AGENT_TIMEOUT_SECONDS = '180'
+            # Вопросам ресторатора бывает нужно несколько вызовов инструментов (рестораны, затем заказы).
+            $env:MAX_TOOL_ROUNDS = '6'
             $env:ORDERS_BACKEND = 'platform'; $env:AUTH_MODE = 'jwt'
             $env:JWT_JWKS_URL = 'http://localhost:8080/.well-known/jwks.json'
             $env:PLATFORM_BASE_URL = 'http://localhost:8080'
+            # Проактивные сообщения: агент читает события заказов и платежей из Kafka своей группой.
+            # Нужен пакет aiokafka в .venv агента (pip install -e ".[proactive]"); без него — выключены.
+            & $agentPython -c 'import aiokafka' 2>$null
+            if ($LASTEXITCODE -eq 0) { $env:KAFKA_BOOTSTRAP_SERVERS = 'localhost:9094' }
+            else { Warn 'Проактивные сообщения помощника выключены: в .venv агента нет aiokafka' }
             if (-not (Wait-Http 'http://127.0.0.1:8001/health' 2 'Агент')) {
                 $p = Start-Process -FilePath $agentPython -WorkingDirectory $agentDir -WindowStyle Hidden -PassThru `
                     -ArgumentList '-m', 'uvicorn', 'food_delivery_agent.main:app', '--host', '127.0.0.1', '--port', '8001', '--no-access-log' `
