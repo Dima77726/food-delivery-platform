@@ -72,6 +72,9 @@ services:
       PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
       PAYMENT_DB_USER: ${PAYMENT_DB_USER:?задайте PAYMENT_DB_USER в .env}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?задайте PAYMENT_DB_PASSWORD в .env}
+      # Учётная запись только для чтения (Grafana, ручной анализ). Без пароля не заводится.
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER:-analytics_reader}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-}
       # Учётка Debezium (CDC): только репликация и чтение базы заказов. Без пароля не заводится.
       DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER:-debezium}
       DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD:-}
@@ -883,6 +886,22 @@ services:
     ports:
       - "${ELASTIC_PORT:-9200}:9200"
 
+  # Kibana: интерфейс к Elasticsearch - Discover для просмотра индексов поиска и Dev Tools для запросов.
+  # Профиль tools (около 1 ГБ памяти): включайте, когда разбираетесь с поиском. Работает вместе с профилем
+  # stores, где живёт сам Elasticsearch.
+  kibana:
+    profiles: ["tools"]
+    image: docker.elastic.co/kibana/kibana:9.2.0
+    container_name: food-delivery-kibana
+    mem_limit: 1g
+    restart: unless-stopped
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      NODE_OPTIONS: --max-old-space-size=600
+      TELEMETRY_OPTIN: "false"
+    ports:
+      - "127.0.0.1:${KIBANA_PORT:-5601}:5601"
+
   prometheus:
     image: prom/prometheus:v3.1.0
     container_name: food-delivery-prometheus
@@ -1106,7 +1125,7 @@ services:
   grafana:
     image: grafana/grafana:11.5.1
     container_name: food-delivery-grafana
-    mem_limit: 256m
+    mem_limit: 384m
     restart: unless-stopped
     depends_on:
       - prometheus
@@ -1124,6 +1143,13 @@ services:
       - GF_SMTP_HOST=mailpit:1025
       - GF_SMTP_FROM_ADDRESS=alerts@food-delivery.local
       - GF_SMTP_FROM_NAME=Food Delivery Alerts
+      # Бизнес-источники (provisioning/datasources/business.yml): базы сервисов учётной записью только для
+      # чтения и ClickHouse. Пароли - из .env; плагин ClickHouse скачивается при первом старте контейнера.
+      - ANALYTICS_DB_USER=${ANALYTICS_DB_USER:-analytics_reader}
+      - ANALYTICS_DB_PASSWORD=${ANALYTICS_DB_PASSWORD:-}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - food_delivery_grafana_data:/var/lib/grafana
