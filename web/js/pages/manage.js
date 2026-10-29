@@ -52,7 +52,8 @@ export default async function managePage({ root, params, query, onLeave }) {
                 ${columns[i].content.map((o) => html`<div class="ticket"><div class="row between"><b>№${o.id}</b><span class="muted small">${ago(o.createdAt)}</span></div>
                     ${at.has(o.id) ? html`<div class="small"><span class="badge yellow" title="${at.get(o.id).prepReminded ? "Пора готовить" : "Готовить можно за час до срока"}">⏰ к ${dateTime(at.get(o.id).scheduledFor)}</span></div>` : ""}
                     <div class="muted small">${o.itemsCount} поз. · <b style="color:var(--text)">${money(o.totalAmount)}</b></div>
-                    <button class="btn sm ${status === "PAID" ? "primary" : ""}" data-act="advance" data-verb="${verb}" data-id="${o.id}">${action}</button></div>`)}
+                    <div class="row"><button class="btn sm ${status === "PAID" ? "primary" : ""}" data-act="advance" data-verb="${verb}" data-id="${o.id}">${action}</button>
+                    <a class="btn sm ghost" href="#/messenger?order=${o.id}" title="Переписки по заказу">💬</a></div></div>`)}
                 ${columns[i].content.length ? "" : html`<div class="muted small center" style="padding:24px 0">Пусто</div>`}</div>`)}</div>`;
     }
 

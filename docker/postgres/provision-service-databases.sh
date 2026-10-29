@@ -65,6 +65,14 @@ provision "$ORDER_DB_NAME" "$ORDER_DB_USER" "$ORDER_DB_PASSWORD"
 
 provision "$PAYMENT_DB_NAME" "$PAYMENT_DB_USER" "$PAYMENT_DB_PASSWORD"
 
+# База мессенджера — только если задан пароль. Аналитической учётке она НЕ открывается (grant_read ниже её
+# не касается): там личная и рабочая переписка, а не данные для дашбордов.
+if [ -n "${MESSENGER_DB_PASSWORD:-}" ]; then
+    provision "$MESSENGER_DB_NAME" "$MESSENGER_DB_USER" "$MESSENGER_DB_PASSWORD"
+else
+    echo "MESSENGER_DB_PASSWORD не задан: база мессенджера не создаётся"
+fi
+
 # ---------- Учётная запись только для чтения: Grafana и ручной анализ ----------
 #
 # Аналитику и дашбордам нужны данные всех сервисов, но не право их менять: поэтому отдельная роль

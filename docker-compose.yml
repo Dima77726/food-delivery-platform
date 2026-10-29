@@ -72,6 +72,10 @@ services:
       PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payments}
       PAYMENT_DB_USER: ${PAYMENT_DB_USER:?задайте PAYMENT_DB_USER в .env}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?задайте PAYMENT_DB_PASSWORD в .env}
+      # База мессенджера. Без пароля не заводится (и мессенджер не стартует) — остальной стек это не задевает.
+      MESSENGER_DB_NAME: ${MESSENGER_DB_NAME:-messenger}
+      MESSENGER_DB_USER: ${MESSENGER_DB_USER:-messenger}
+      MESSENGER_DB_PASSWORD: ${MESSENGER_DB_PASSWORD:-}
       # Учётная запись только для чтения (Grafana, ручной анализ). Без пароля не заводится.
       ANALYTICS_DB_USER: ${ANALYTICS_DB_USER:-analytics_reader}
       ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-}
@@ -96,7 +100,7 @@ services:
     volumes:
       - ./docker/grpc-certs/generate-certs.sh:/generate-certs.sh:ro
       - food_delivery_grpc_certs:/certs
-    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service", "notification-service"]
+    entrypoint: ["sh", "/generate-certs.sh", "/certs", "insights-service", "catalog-service", "identity-service", "order-service", "tracking-service", "notification-service", "messenger-service"]
 
   # Одноразовый перенос заказов и платежей из базы монолита в базы order-service
   # и payment-service. Ждёт, пока все три схемы появятся, переносит только в пустые базы
@@ -457,6 +461,8 @@ services:
       - GRPC_TLS_CERTIFICATE=file:/certs/identity-service.crt
       - GRPC_TLS_PRIVATE_KEY=file:/certs/identity-service.key
       - GRPC_TLS_CA=file:/certs/ca.crt
+      # Кого пускать на gRPC (по имени из сертификата). Мессенджер спрашивает имена и права на рестораны.
+      - APP_GRPC_SECURITY_ALLOWEDCLIENTS=insights-service,catalog-service,order-service,notification-service,messenger-service
       - IDENTITY_DB_HOST=postgres
       - IDENTITY_DB_PORT=5432
       - IDENTITY_DB_NAME=${IDENTITY_DB_NAME:-identity}
@@ -514,6 +520,8 @@ services:
       - GRPC_TLS_CERTIFICATE=file:/certs/order-service.crt
       - GRPC_TLS_PRIVATE_KEY=file:/certs/order-service.key
       - GRPC_TLS_CA=file:/certs/ca.crt
+      # Кого пускать на gRPC. Мессенджер спрашивает, чей заказ и кто его курьер.
+      - APP_GRPC_SECURITY_ALLOWEDCLIENTS=insights-service,tracking-service,messenger-service
       - ORDER_DB_HOST=postgres
       - ORDER_DB_PORT=5432
       - ORDER_DB_NAME=${ORDER_DB_NAME:-orders}
@@ -664,6 +672,9 @@ services:
       - TELEGRAM_BOT_TOKEN
       - TELEGRAM_BOT_USERNAME
       - TELEGRAM_POLLING_ENABLED=${TELEGRAM_POLLING_ENABLED:-true}
+      # Уведомления мессенджера в Telegram — только этим пользователям (номера через запятую), пока стенд
+      # проверяют на настоящем боте. Пусто — всем, кто привязал Telegram.
+      - TELEGRAM_MESSENGER_ALLOWED_USER_IDS=${TELEGRAM_MESSENGER_ALLOWED_USER_IDS:-}
       # polling — бот сам спрашивает Telegram; webhook — Telegram присылает сообщения на публичный https-адрес
       # TELEGRAM_WEBHOOK_PUBLIC_URL с секретом TELEGRAM_WEBHOOK_SECRET (у локального стека такого адреса нет).
       - TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
@@ -688,6 +699,95 @@ services:
       - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
       # Открытые ключи для проверки токенов — у сервиса пользователей. Секрета подписи у сервиса нет.
       - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  # Мессенджер: личные, групповые и рабочие чаты, переписки по заказам, вложения, звонки (docs/messenger).
+  # Своя база в общем PostgreSQL, вложения — в приватном бакете MinIO, живые события — WebSocket через шлюз,
+  # между экземплярами — обменник RabbitMQ. Уведомления в Telegram отправляет notification-service.
+  messenger-service:
+    profiles: ["full", "messenger"]
+    image: ghcr.io/dima77726/food-delivery-messenger-service:${MESSENGER_SERVICE_TAG:-${IMAGE_TAG:-main}}
+    container_name: food-delivery-messenger-service
+    mem_limit: 512m
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      grpc-certs:
+        condition: service_completed_successfully
+      postgres-provision:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - food_delivery_grpc_certs:/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - MANAGEMENT_PORT=8081
+      - MESSENGER_DB_HOST=postgres
+      - MESSENGER_DB_PORT=5432
+      - MESSENGER_DB_NAME=${MESSENGER_DB_NAME:-messenger}
+      - MESSENGER_DB_USER=${MESSENGER_DB_USER:-messenger}
+      - MESSENGER_DB_PASSWORD
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER
+      - RABBITMQ_PASSWORD
+      # Живые события между экземплярами — через RabbitMQ (обменник messenger.live).
+      - MESSENGER_LIVE_RELAY_ENABLED=true
+      - MESSENGER_ALLOWED_ORIGINS=${MESSENGER_ALLOWED_ORIGINS:-http://localhost:*}
+      # Адрес веб-интерфейса для ссылок «Открыть чат» в Telegram. Кнопка в Telegram появляется только у https-адреса.
+      - MESSENGER_PUBLIC_URL=${MESSENGER_PUBLIC_URL:-http://localhost:8070}
+      - ORDER_GRPC_ADDRESS=static://order-service:9090
+      - IDENTITY_GRPC_ADDRESS=static://identity-service:9090
+      - SPRING_PROFILES_ACTIVE=grpc-tls
+      - GRPC_TLS_CERTIFICATE=file:/certs/messenger-service.crt
+      - GRPC_TLS_PRIVATE_KEY=file:/certs/messenger-service.key
+      - GRPC_TLS_CA=file:/certs/ca.crt
+      # Вложения: приватный бакет в том же MinIO, что и фото меню.
+      - APP_ATTACHMENTS_ENABLED=${ATTACHMENTS_ENABLED:-true}
+      - APP_ATTACHMENTS_ENDPOINT=http://minio:9000
+      - APP_ATTACHMENTS_ACCESSKEY=${MINIO_ROOT_USER}
+      - APP_ATTACHMENTS_SECRETKEY=${MINIO_ROOT_PASSWORD}
+      # Ключ подписи коротких ссылок на вложения; пусто — случайный на запуск (ссылки живут 5 минут).
+      - APP_ATTACHMENTS_LINKSECRET=${ATTACHMENTS_LINK_SECRET:-}
+      # Проверка файлов антивирусом (clamd). Пусто — выключена; см. docs/messenger.
+      - APP_ATTACHMENTS_CLAMAVHOST=${ATTACHMENTS_CLAMAV_HOST:-}
+      # Звонки: STUN и TURN (coturn из профиля turn). Без TURN звонки идут напрямую — в пределах одной сети этого хватает.
+      - APP_CALLS_STUNURLS=${CALLS_STUN_URLS:-}
+      - APP_CALLS_TURNURLS=${CALLS_TURN_URLS:-}
+      - APP_CALLS_TURNSECRET=${TURN_SECRET:-}
+      - TZ=${TZ}
+      - TRACING_EXPORT_ENABLED=true
+      - OTEL_TRACES_ENDPOINT=http://tempo:4318/v1/traces
+      - JWT_JWK_SET_URI=http://identity-service:8080/.well-known/jwks.json
+
+  # TURN-ретранслятор для звонков (профиль turn): нужен, когда участники не могут соединиться напрямую
+  # (симметричный NAT, мобильная сеть). Учётные данные выдаёт мессенджер по общему секрету TURN_SECRET.
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.6.3
+    container_name: food-delivery-coturn
+    mem_limit: 64m
+    restart: unless-stopped
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SECRET:-}"
+      - "--realm=food-delivery.local"
+      - "--listening-port=3478"
+      - "--min-port=49160"
+      - "--max-port=49200"
+      - "--external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}"
+      - "--no-cli"
+      - "--no-tls"
+      - "--no-dtls"
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
 
   api-gateway:
     profiles: ["full"]
@@ -716,6 +816,8 @@ services:
       - PAYMENT_SERVICE_URL=http://payment-service:8080
       - TRACKING_SERVICE_URL=http://tracking-service:8080
       - TRACKING_WS_URL=ws://tracking-service:8080
+      - MESSENGER_SERVICE_URL=http://messenger-service:8080
+      - MESSENGER_WS_URL=ws://messenger-service:8080
       # Ограничение частоты запросов по адресу клиента; счётчики лежат в Redis.
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
       - REDIS_HOST=redis

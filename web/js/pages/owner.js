@@ -36,9 +36,15 @@ export default async function ownerPage({ root, me }) {
             ${list.length ? html`<div class="grid">${list.map((r) => html`<a class="card rest-card ${r.active ? "" : "closed"}" href="#/owner/${r.id}">
                 <div class="rest-cover" style="${coverStyle(r.name)}">${emojiFor(r.name, r.description)}<span class="tag badge white">${r.active ? "Открыто" : "Закрыто"}</span></div>
                 <div class="rest-body"><h3>${r.name}</h3><div class="muted small">📍 ${r.city}</div><div class="muted small">${r.description || ""}</div>
-                <span class="btn sm" style="margin-top:6px;align-self:flex-start">Управлять →</span></div></a>`)}</div>`
+                <span class="row" style="margin-top:6px"><span class="btn sm">Управлять →</span><span class="btn sm ghost" data-staff="${r.id}">👥 Сотрудники и чаты</span></span></div></a>`)}</div>`
                 : empty("🏪", "У вас пока нет ресторанов", "Создайте первый: добавьте меню, и клиенты смогут заказывать.")}</div>`.value;
     }
+
+    // Кнопка внутри карточки-ссылки: переход к сотрудникам вместо управления меню.
+    root.addEventListener("click", (event) => {
+        const staff = event.target.closest("[data-staff]");
+        if (staff) { event.preventDefault(); location.hash = `#/staff/${staff.dataset.staff}`; }
+    }, true);
 
     delegate(root, "click", {
         create: () => modal({
