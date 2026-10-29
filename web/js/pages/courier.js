@@ -63,7 +63,9 @@ export default async function courierPage({ root, me, onLeave }) {
                 ${mode !== "done" ? html`<a class="btn sm ghost" href="${mapsLink(d.deliveryAddress)}" target="_blank" rel="noopener">🗺️ На карте</a>` : ""}</div>`
                 : html`<div class="muted small">Адрес не указан: заказ оформлен без адреса</div>`}
             ${mode === "available" ? html`<button class="btn primary" data-act="assign" data-id="${d.id}">Взять доставку</button>` : ""}
-            ${mode === "mine" ? html`<button class="btn ghost" data-act="chat" data-order="${d.orderId}">💬 Чат с клиентом</button>` : ""}
+            ${mode === "mine" ? html`<div class="row wrap"><button class="btn ghost" data-act="chat" data-order="${d.orderId}">💬 Чат с клиентом</button>
+                <a class="btn ghost" href="#/messenger?order=${d.orderId}&scope=RESTAURANT_COURIER">🏪 Ресторану</a>
+                <a class="btn ghost" href="#/messenger?order=${d.orderId}&scope=SUPPORT_COURIER">🛟 Поддержке</a></div>` : ""}
             ${d.status === "ASSIGNED" ? html`<button class="btn primary" data-act="pickup" data-id="${d.id}">📦 Забрал заказ в ресторане</button>` : ""}
             ${d.status === "PICKED_UP" ? html`<div class="row wrap"><button class="btn ${isRiding ? "danger" : ""}" data-act="ride" data-id="${d.id}">${isRiding ? "⏸ Остановить отправку позиции" : "🛵 Поехали (симуляция GPS)"}</button>
                 <button class="btn green" data-act="deliver" data-id="${d.id}">✓ Доставил</button></div>

@@ -156,6 +156,10 @@ export default async function orderPage({ root, params, me, onLeave }) {
                 ${refunds.length ? html`<div class="card stack"><h3>Возвраты</h3>${refunds.map((r) => html`<div class="stack"><div class="row between"><b>${money(r.amount)}</b>
                     <span class="badge ${REFUND_STATUS[r.status]?.[0] || ""}">${REFUND_STATUS[r.status]?.[1] || r.status}</span></div>
                     <div class="muted small">${r.items.map((i) => `${i.name} × ${i.quantity}`).join(", ")} · ${r.reason}</div></div>`)}</div>` : ""}
+                <div class="card stack"><h3>💬 Переписка по заказу</h3>
+                    <a class="btn block" href="#/messenger?order=${order.id}&scope=CUSTOMER_RESTAURANT">Написать ресторану</a>
+                    ${CHAT_STATUSES.has(order.status) ? html`<a class="btn block" href="#/messenger?order=${order.id}&scope=CUSTOMER_COURIER">Написать курьеру</a>` : ""}
+                    <a class="btn ghost block" href="#/messenger?order=${order.id}&scope=SUPPORT_CUSTOMER">Написать в поддержку</a></div>
                 ${canCancel ? html`<button class="btn danger block" data-act="cancel">Отменить заказ</button>` : ""}
                 ${["CREATED"].includes(order.status) ? html`<button class="btn primary block" data-act="pay">Оплатить</button>` : ""}
             </aside></div></div>`.value;

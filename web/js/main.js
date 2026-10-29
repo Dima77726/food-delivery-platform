@@ -6,6 +6,8 @@ import { html, initials, ROLE_LABELS, ROLE_ICONS, toast, reportError, $, delegat
 import { mountAssistant } from "./assistant.js";
 import { navigate, homeFor } from "./nav.js";
 import { ensureNotificationFeed, unreadCount, onUnreadChange, markAllSeen } from "./notifications.js";
+import { ensureMessenger, unreadTotal, onUnread } from "./messenger-client.js";
+import { mountCalls } from "./calls.js";
 
 const CONFIG = window.APP_CONFIG || {};
 
@@ -28,14 +30,18 @@ const ROUTES = [
     ["/admin/audit", "admin-audit", ["ADMIN"], true],
     ["/tools", "tools", [], false],
     ["/admin/business", "admin-business", ["ADMIN"], true],
+    ["/messenger", "messenger", [], true],
+    ["/messenger/:chatId", "messenger", [], true],
+    ["/staff/:id", "staff", [], true],
+    ["/join", "join", [], true],
 ];
 
 
 const NAV_BY_ROLE = {
-    CUSTOMER: [["/", "Рестораны"], ["/orders", "Мои заказы"], ["/profile", "Уведомления"]],
-    RESTAURANT_OWNER: [["/owner", "Мои рестораны"], ["/", "Каталог"], ["/profile", "Профиль"]],
-    COURIER: [["/courier", "Доставки"], ["/profile", "Профиль"]],
-    ADMIN: [["/admin", "Обзор"], ["/admin/users", "Пользователи"], ["/admin/business", "Промо и возвраты"], ["/admin/audit", "Журнал"], ["/", "Каталог"], ["/tools", "Инструменты"]],
+    CUSTOMER: [["/", "Рестораны"], ["/orders", "Мои заказы"], ["/messenger", "Сообщения"], ["/profile", "Уведомления"]],
+    RESTAURANT_OWNER: [["/owner", "Мои рестораны"], ["/messenger", "Сообщения"], ["/", "Каталог"], ["/profile", "Профиль"]],
+    COURIER: [["/courier", "Доставки"], ["/messenger", "Сообщения"], ["/profile", "Профиль"]],
+    ADMIN: [["/admin", "Обзор"], ["/messenger", "Поддержка"], ["/admin/users", "Пользователи"], ["/admin/business", "Промо и возвраты"], ["/admin/audit", "Журнал"], ["/", "Каталог"], ["/tools", "Инструменты"]],
     GUEST: [["/", "Рестораны"], ["/tools", "Инструменты"]],
 };
 
@@ -99,7 +105,7 @@ function renderShell(content) {
     const role = me?.role || "GUEST";
     const { path } = parseHash();
     const links = (NAV_BY_ROLE[role] || NAV_BY_ROLE.GUEST)
-        .map(([to, label]) => html`<a href="#${to}" class="${path === to || (to !== "/" && path.startsWith(to + "/")) ? "active" : ""}">${label}</a>`);
+        .map(([to, label]) => html`<a href="#${to}" class="${path === to || (to !== "/" && path.startsWith(to + "/")) ? "active" : ""}" ${to === "/messenger" ? html`data-messenger-link` : ""}>${label}${to === "/messenger" && unreadTotal() ? html`<span class="nav-count">${unreadTotal()}</span>` : ""}</a>`);
 
     app.innerHTML = html`
         <header class="nav">
@@ -115,8 +121,19 @@ function renderShell(content) {
 
     if (!content) mountAssistantIfNeeded();
     ensureNotificationFeed(me?.email ?? null);
+    // Мессенджер слушает на любой странице: входящий звонок должен прозвенеть, где бы ни был пользователь.
+    ensureMessenger();
+    if (me) mountCalls();
     if (path === "/profile") markAllSeen();
 }
+
+// Непрочитанные сообщения — на пункте «Сообщения», точечно.
+onUnread((count) => {
+    const link = document.querySelector("[data-messenger-link]");
+    if (!link) return;
+    link.querySelector(".nav-count")?.remove();
+    if (count) link.insertAdjacentHTML("beforeend", `<span class="nav-count">${count}</span>`);
+});
 
 // Счётчик на колокольчике обновляется точечно, без перерисовки всей панели.
 onUnreadChange((count) => {
