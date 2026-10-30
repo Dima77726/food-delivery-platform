@@ -1,0 +1,62 @@
+<!--
+  ClickHouse для локального стека: меньше памяти и диска.
+
+  По умолчанию сервер пишет собственную телеметрию в таблицы базы system и постоянно сливает
+  их части. На ноутбуке за несколько недель trace_log и text_log заняли 7 ГБ диска при 28 КБ
+  настоящих данных, а фоновые слияния держали около гигабайта памяти. Здесь эти журналы
+  выключены; оставлен только query_log с коротким сроком хранения — по нему удобно смотреть,
+  какие запросы шлёт insights-service.
+-->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+    </logger>
+
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <latency_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <query_views_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <error_log remove="1"/>
+    <part_log remove="1"/>
+    <session_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <blob_storage_log remove="1"/>
+    <backup_log remove="1"/>
+
+    <query_log replace="1">
+        <database>system</database>
+        <table>query_log</table>
+        <engine>ENGINE = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + INTERVAL 3 DAY</engine>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+
+    <!-- Кэши рассчитаны на сервер с десятками гигабайт; витрине в килобайты хватает малых. -->
+    <mark_cache_size>67108864</mark_cache_size>
+    <index_mark_cache_size>16777216</index_mark_cache_size>
+    <uncompressed_cache_size>16777216</uncompressed_cache_size>
+    <index_uncompressed_cache_size>16777216</index_uncompressed_cache_size>
+
+    <!-- Пулы фоновых потоков: по умолчанию сотни потоков, каждый со своим стеком. -->
+    <background_pool_size>4</background_pool_size>
+    <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+    <background_schedule_pool_size>16</background_schedule_pool_size>
+    <background_common_pool_size>4</background_common_pool_size>
+    <background_move_pool_size>2</background_move_pool_size>
+    <background_fetches_pool_size>2</background_fetches_pool_size>
+    <background_buffer_flush_schedule_pool_size>2</background_buffer_flush_schedule_pool_size>
+    <background_message_broker_schedule_pool_size>2</background_message_broker_schedule_pool_size>
+    <background_distributed_schedule_pool_size>2</background_distributed_schedule_pool_size>
+
+    <!-- Пороги MergeTree считаются от размера пула (4 × 2 = 8): с прежними значениями (20–25)
+         сервер не стартует с ошибкой BAD_ARGUMENTS. -->
+    <merge_tree>
+        <number_of_free_entries_in_pool_to_execute_mutation>4</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>4</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>4</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+    </merge_tree>
+</clickhouse>

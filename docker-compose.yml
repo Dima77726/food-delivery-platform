@@ -9,6 +9,14 @@
 # full и stores укладывается примерно в 12 ГБ потолков, а реально занимает меньше.
 # Таблица бюджета — в README, раздел «Память».
 
+# Общие JVM-опции девяти Spring-сервисов (подключаются строкой `- *service-jvm`).
+# Под кучей в 300 МБ G1 тратит заметную долю на собственные структуры, а C2 — на
+# скомпилированный код и потоки компилятора; SerialGC и один C1 экономят около
+# 80–100 МБ на сервис ценой чуть более медленного кода, что для локального стека не важно.
+# JAVA_TOOL_OPTIONS читается JVM до аргументов ENTRYPOINT, так что -XX:MaxRAMPercentage
+# из Dockerfile сохраняется. Вернуть настройки JVM по умолчанию: SERVICE_JAVA_OPTS=" " в .env.
+x-service-jvm: &service-jvm "JAVA_TOOL_OPTIONS=${SERVICE_JAVA_OPTS:--XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=64m -Xss512k}"
+
 services:
   postgres:
     image: postgres:16
@@ -337,6 +345,7 @@ services:
     environment:
       # Основной базы у сервиса нет: отзывы — в MongoDB, граф — в Neo4j, витрина — в ClickHouse.
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       # gRPC-клиенты: каталог (название ресторана для GraphQL), сервис заказов (заказ для отзыва
       # и графа) и сервис пользователей (права на ресторан для аналитики).
@@ -401,6 +410,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
       # Права на рестораны знает сервис пользователей — каталог спрашивает его по gRPC.
@@ -454,6 +464,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
       # Взаимный TLS на gRPC: свой сертификат (CN=identity-service) и CA, которому верить.
@@ -508,6 +519,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - GRPC_PORT=9090
       - REDIS_HOST=redis
@@ -556,6 +568,7 @@ services:
         condition: service_completed_successfully
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - PAYMENT_DB_HOST=postgres
       - PAYMENT_DB_PORT=5432
@@ -597,6 +610,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       # Чей заказ и чья доставка — спрашивает у сервиса заказов по gRPC.
       - ORDER_GRPC_ADDRESS=static://order-service:9090
@@ -645,6 +659,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - NOTIFICATION_DB_HOST=postgres
       - NOTIFICATION_DB_PORT=5432
@@ -723,6 +738,7 @@ services:
       - food_delivery_grpc_certs:/certs:ro
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - MESSENGER_DB_HOST=postgres
       - MESSENGER_DB_PORT=5432
@@ -805,6 +821,7 @@ services:
         condition: service_healthy
     environment:
       - SERVER_PORT=8080
+      - *service-jvm
       - MANAGEMENT_PORT=8081
       - INSIGHTS_SERVICE_URL=http://insights-service:8080
       - CATALOG_SERVICE_URL=http://catalog-service:8080
@@ -886,6 +903,12 @@ services:
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       MAX_HEAP_SIZE: 512M
       HEAP_NEWSIZE: 128M
+      # Настройки по умолчанию рассчитаны на выделенный сервер: JVM по числу ядер ноутбука
+      # заводит 16 потоков GC, AlwaysPreTouch сразу занимает всю кучу, а потолок direct-памяти
+      # (кэш файлов и сети) выходит больше 2 ГБ. JVM_EXTRA_OPTS добавляется последним и
+      # перекрывает значения из jvm*-server.options.
+      MAX_DIRECT_MEMORY_SIZE: 256M
+      JVM_EXTRA_OPTS: -XX:-AlwaysPreTouch -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1 -XX:CICompilerCount=2
       TZ: ${TZ}
     volumes:
       - food_delivery_cassandra_data:/var/lib/cassandra
@@ -951,6 +974,8 @@ services:
         hard: 262144
     volumes:
       - food_delivery_clickhouse_data:/var/lib/clickhouse
+      # Без системных журналов и с малыми кэшами: см. комментарий в самом файле.
+      - ./docker/clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --database \"$$CLICKHOUSE_DB\" --query 'SELECT 1'"]
       interval: 10s
