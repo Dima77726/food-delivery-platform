@@ -55,7 +55,7 @@ PostgreSQL, Redis и Kafka через Testcontainers.
 ./scripts/start.ps1 -Light           # без Mongo, Neo4j, ClickHouse, Elasticsearch (~5 ГБ)
 ./scripts/start.ps1 -Agent           # плюс ИИ-помощник: Ollama на видеокарте и агент
 ./scripts/start.ps1 -Auth            # плюс Keycloak
-./scripts/start.ps1 -Bpm             # плюс Camunda 8: сага оплаты как BPMN-процесс
+./scripts/start.ps1 -Bpm             # плюс Camunda 8: заказ от оплаты до доставки как BPMN-процесс
 ```
 
 Скрипт поднимает контейнеры, ждёт готовности, при первом запуске заносит демо-данные и открывает

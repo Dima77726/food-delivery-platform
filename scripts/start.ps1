@@ -14,7 +14,7 @@
       -Tools        добавляет Kafka UI и Kibana (+1,5 ГБ)
       -Cdc          добавляет CDC: Debezium читает WAL базы заказов в Kafka, ClickHouse — из Kafka (+0,5 ГБ;
                     ClickHouse есть только без -Light). Нужен DEBEZIUM_DB_PASSWORD в .env
-      -Bpm          добавляет Camunda 8 и переводит сагу оплаты order-service на процесс payment-saga;
+      -Bpm          добавляет Camunda 8 и ведёт заказ процессом order-lifecycle (оплата → доставка);
                     Operate — http://localhost:8091/operate, вход demo/demo (+0,7 ГБ)
 
 .EXAMPLE

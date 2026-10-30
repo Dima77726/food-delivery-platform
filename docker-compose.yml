@@ -551,8 +551,10 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
       - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
-      # Кто ведёт сагу оплаты: native (сам сервис) или camunda (процесс payment-saga, профиль bpm).
+      # Кто ведёт сагу оплаты: native (сам сервис) или camunda (процесс order-lifecycle, профиль bpm).
       - SAGA_ENGINE=${SAGA_ENGINE:-native}
+      # Только для camunda: через сколько процесс поднимет эскалацию, если ресторан не принял оплаченный заказ.
+      - ORDER_ACCEPTANCE_SLA=${ORDER_ACCEPTANCE_SLA:-PT10M}
       - CAMUNDA_CLIENT_ENABLED=${CAMUNDA_CLIENT_ENABLED:-false}
       - CAMUNDA_GRPC_ADDRESS=http://camunda:26500
       - CAMUNDA_REST_ADDRESS=http://camunda:8080

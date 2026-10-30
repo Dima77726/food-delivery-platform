@@ -398,32 +398,43 @@ stateDiagram-v2
 | Сообщение невозможно обработать | после повторов — в `<топик>-dlt` и алерт | `*DltListener` |
 | Оплата «зависла» | таймаут → отмена (+ возврат) | `PaymentTimeoutJob` / `app.saga.*` |
 
-### 5.4 Та же сага на Camunda 8 (режим `bpm`)
+### 5.4 Заказ целиком на Camunda 8 (режим `bpm`)
 
-Ожидание исхода оплаты может вести не сам order-service, а оркестратор **Camunda 8**: процесс
-`payment-saga` (`order-service: src/main/resources/bpmn/payment-saga.bpmn`). Включается
-`./scripts/start.ps1 -Bpm` (профиль `bpm` + `SAGA_ENGINE=camunda`, `CAMUNDA_CLIENT_ENABLED=true`).
-Без флага всё работает как раньше.
+Сагу оплаты и дальнейший путь заказа может вести оркестратор **Camunda 8**: процесс `order-lifecycle`
+(`order-service: src/main/resources/bpmn/order-lifecycle.bpmn`), один экземпляр на заказ, от запроса оплаты
+до доставки. Включается `./scripts/start.ps1 -Bpm` (профиль `bpm` + `SAGA_ENGINE=camunda`,
+`CAMUNDA_CLIENT_ENABLED=true`). Без флага всё работает как раньше.
 
 ```mermaid
 flowchart LR
-    S((Оплата запрошена)) --> G{Ждём исход}
-    G -->|сообщение payment-succeeded| P[order-mark-paid] --> E1((Оплачен))
-    G -->|сообщение payment-failed| F[order-cancel-payment-failed] --> E2((Отменён: отказ))
+    S((Оплата запрошена)) --> G{Ждём исход оплаты}
+    G -->|payment-succeeded| P[order-mark-paid] --> F
+    G -->|payment-failed| X[order-cancel-payment-failed] --> E2((Отменён: отказ))
     G -->|таймер PAYMENT_TIMEOUT| T[order-expire-payment] --> E3((Отменён по таймауту))
-    G -->|сообщение order-canceled| E4((Отменён клиентом))
+    G -->|order-canceled| E4((Отменён клиентом))
+    subgraph F[Выполнение заказа]
+        A[Ресторан принимает] --> C[Начинает готовить] --> R[Готовится] --> D[Ждёт курьера] --> V[Курьер везёт]
+        A -. SLA ORDER_ACCEPTANCE_SLA .-> O[order-acceptance-overdue]
+    end
+    F --> E1((Доставлен))
+    F -. order-canceled .-> E5((Отменён после оплаты))
 ```
 
+- **Оплата — оркестрация.** Процесс решает, что делать с исходом: обработчики заданий
+  (`order.saga.camunda.OrderLifecycleWorkers`) вызывают те же compare-and-set переходы из `PaymentSaga`.
+  Исходы из Kafka становятся сообщениями (ключ корреляции — `orderId`, `messageId` — `eventId`: повтор
+  отбрасывает сам брокер). Таймаут — таймер процесса; `PaymentTimeoutJob` в этом режиме следит только
+  за неоплаченными `CREATED`.
+- **Дальше — наблюдение.** Статусы меняют ресторан и курьер через API, как и раньше; после коммита каждая
+  смена уходит процессу сообщением (`OrderStatusMessageListener`), и он переходит к следующему шагу.
+  Ранние сообщения брокер держит час, так что быстрый ресторан не обгонит процесс.
+- **SLA принятия.** Непрерывающий таймер на шаге «Ресторан принимает»: через `ORDER_ACCEPTANCE_SLA`
+  (10 мин) — задание-эскалация и метрика `orders.acceptance.overdue`, заказ продолжает ждать.
 - **Что осталось прежним.** Команда «спиши» пишется в outbox в той же транзакции, что и переход в
   `PAYMENT_PENDING`; экземпляр процесса создаётся там же (Camunda недоступна → запрос оплаты откатывается).
-  Переходы статусов — те же compare-and-set из `PaymentSaga`, их вызывают обработчики заданий
-  (`order.saga.camunda.PaymentProcessWorkers`).
-- **Что делает процесс.** Исходы из Kafka становятся сообщениями (ключ корреляции — `orderId`,
-  `messageId` — `eventId`, так что повтор отбрасывает сам брокер); таймаут — таймер процесса вместо
-  `PaymentTimeoutJob` (задача в этом режиме следит только за неоплаченными `CREATED`); отмена клиентом
-  завершает процесс сообщением `order-canceled`.
-- **Где смотреть.** Operate — http://localhost:8091/operate (demo/demo): экземпляр на каждый заказ,
-  путь по схеме, переменные, инциденты, если задание упало трижды.
+- **Где смотреть.** Operate — http://localhost:8091/operate (demo/demo). Заказ в работе — активный экземпляр
+  на текущем шаге; завершённые — в фильтре **Finished Instances**. Там же переменные и инциденты, если
+  задание упало трижды. REST API — `POST http://localhost:8091/v2/process-instances/search`.
 - **Память.** Один контейнер `camunda/camunda` (Zeebe + Operate + Tasklist) с хранилищем H2, без
   Elasticsearch: ~620 МБ при лимите 1 ГБ.
 
