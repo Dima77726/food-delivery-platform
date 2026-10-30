@@ -515,6 +515,10 @@ services:
       # Redis: гео-индекс курьеров на линии, коэффициент спроса, фильтр Блума промокодов.
       redis:
         condition: service_healthy
+      # Только с профилем bpm: без него Camunda не поднимается, и ждать её не нужно.
+      camunda:
+        condition: service_healthy
+        required: false
     volumes:
       - food_delivery_grpc_certs:/certs:ro
     environment:
@@ -547,6 +551,11 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       # Сколько заказ ждёт оплаты, прежде чем отмениться сам.
       - PAYMENT_TIMEOUT=${PAYMENT_TIMEOUT:-PT15M}
+      # Кто ведёт сагу оплаты: native (сам сервис) или camunda (процесс payment-saga, профиль bpm).
+      - SAGA_ENGINE=${SAGA_ENGINE:-native}
+      - CAMUNDA_CLIENT_ENABLED=${CAMUNDA_CLIENT_ENABLED:-false}
+      - CAMUNDA_GRPC_ADDRESS=http://camunda:26500
+      - CAMUNDA_REST_ADDRESS=http://camunda:8080
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
@@ -1283,8 +1292,37 @@ services:
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
 
+  # Camunda 8 - оркестратор процессов (профиль bpm). Сага оплаты order-service идёт через него,
+  # если запустить с SAGA_ENGINE=camunda и CAMUNDA_CLIENT_ENABLED=true (см. scripts/start.ps1 -Bpm).
+  # Один контейнер: брокер Zeebe (gRPC 26500), REST API и веб-интерфейсы Operate/Tasklist (8080
+  # внутри, http://localhost:8091/operate снаружи; вход demo/demo). Вторичное хранилище - H2,
+  # поэтому Elasticsearch не нужен; конфигурация - docker/camunda/application.yaml.
+  # Лицензия Camunda 8 Self-Managed разрешает такое использование для разработки, не для продакшена.
+  camunda:
+    profiles: ["bpm"]
+    image: camunda/camunda:8.10.7
+    container_name: food-delivery-camunda
+    mem_limit: 1g
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - food_delivery_camunda_data:/usr/local/camunda/data
+      - ./docker/camunda/application.yaml:/usr/local/camunda/config/application.yaml:ro
+    healthcheck:
+      # curl в образе нет, поэтому запрос к actuator через /dev/tcp bash.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9600 && printf 'GET /actuator/health/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && head -n 1 <&3 | grep -q 200"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    ports:
+      - "${CAMUNDA_WEB_PORT:-8091}:8080"
+      - "${CAMUNDA_GRPC_PORT:-26500}:26500"
+
 volumes:
   food_delivery_postgres_data:
+  food_delivery_camunda_data:
   food_delivery_kafka_data:
   food_delivery_rabbitmq_data:
   food_delivery_redis_data:
