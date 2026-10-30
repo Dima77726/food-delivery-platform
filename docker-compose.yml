@@ -558,6 +558,10 @@ services:
       - CAMUNDA_CLIENT_ENABLED=${CAMUNDA_CLIENT_ENABLED:-false}
       - CAMUNDA_GRPC_ADDRESS=http://camunda:26500
       - CAMUNDA_REST_ADDRESS=http://camunda:8080
+      # Журнал аудита в блокчейне: включается вместе с профилем chain (start.ps1 -Chain).
+      - LEDGER_ENABLED=${LEDGER_ENABLED:-false}
+      - LEDGER_RPC_URL=http://anvil:8545
+      - LEDGER_ANCHOR_INTERVAL=${LEDGER_ANCHOR_INTERVAL:-PT5M}
       - TZ=${TZ}
       # Трассы уходят в Tempo; без этих двух строк сервис трассирует, но никуда не отправляет.
       - TRACING_EXPORT_ENABLED=true
@@ -1322,9 +1326,34 @@ services:
       - "${CAMUNDA_WEB_PORT:-8091}:8080"
       - "${CAMUNDA_GRPC_PORT:-26500}:26500"
 
+  # Локальная сеть Ethereum (профиль chain) для журнала аудита, заверенного в блокчейне:
+  # order-service раз в несколько минут пишет Merkle-корень новых записей audit_log в контракт
+  # AuditAnchor (см. docs/project-guide.md, раздел про блокчейн). Anvil из Foundry: один процесс,
+  # блок на каждую транзакцию, десять разблокированных тестовых счетов - денег здесь нет.
+  # Состояние цепочки сохраняется в том food_delivery_anvil_data, иначе после перезапуска
+  # контракт и корни пропали бы и проверка показала бы CHAIN_UNAVAILABLE.
+  anvil:
+    profiles: ["chain"]
+    image: ghcr.io/foundry-rs/foundry:v1.2.3
+    container_name: food-delivery-anvil
+    mem_limit: 128m
+    restart: unless-stopped
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--state", "/home/foundry/state.json", "--state-interval", "30"]
+    volumes:
+      - food_delivery_anvil_data:/home/foundry
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${ANVIL_PORT:-8545}:8545"
+
 volumes:
   food_delivery_postgres_data:
   food_delivery_camunda_data:
+  food_delivery_anvil_data:
   food_delivery_kafka_data:
   food_delivery_rabbitmq_data:
   food_delivery_redis_data:
