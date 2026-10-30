@@ -16,6 +16,8 @@
                     ClickHouse есть только без -Light). Нужен DEBEZIUM_DB_PASSWORD в .env
       -Bpm          добавляет Camunda 8 и ведёт заказ процессом order-lifecycle (оплата → доставка);
                     Operate — http://localhost:8091/operate, вход demo/demo (+0,7 ГБ)
+      -Chain        добавляет локальную сеть Ethereum (Anvil) и заверение журнала аудита order-service
+                    в блокчейне: GET /api/v1/admin/audit-anchors (+0,02 ГБ)
 
 .EXAMPLE
     ./scripts/start.ps1                  # всё
@@ -27,6 +29,7 @@ param(
     [switch]$Tools,
     [switch]$Cdc,
     [switch]$Bpm,
+    [switch]$Chain,
     [switch]$Agent,
     [switch]$NoBrowser,
     [switch]$NoSeed,
@@ -77,11 +80,13 @@ if ($Auth) { $profiles += @('--profile', 'auth') }
 if ($Tools) { $profiles += @('--profile', 'tools') }
 if ($Cdc) { $profiles += @('--profile', 'cdc') }
 if ($Bpm) { $profiles += @('--profile', 'bpm') }
+if ($Chain) { $profiles += @('--profile', 'chain') }
 
 $stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
 $sagaVars = @('SAGA_ENGINE', 'CAMUNDA_CLIENT_ENABLED')
+$ledgerVars = @('LEDGER_ENABLED')
 $saved = @{}
-foreach ($name in $stores + $sagaVars) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+foreach ($name in $stores + $sagaVars + $ledgerVars) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
     if ($Light) {
         # Значения из окружения важнее .env: облегчённый режим не требует правки файла.
@@ -93,11 +98,22 @@ try {
         $env:CAMUNDA_CLIENT_ENABLED = 'true'
         Warn 'Сага оплаты идёт через Camunda: процессы видны в http://localhost:8091/operate (demo/demo)'
     }
+    if ($Chain) {
+        $env:LEDGER_ENABLED = 'true'
+        Warn 'Журнал аудита заверяется в блокчейне (Anvil, http://localhost:8545): /api/v1/admin/audit-anchors'
+    }
     $env:WEB_PORT = "$WebPort"
     docker compose @profiles up -d
     if ($LASTEXITCODE -ne 0) { throw 'docker compose не смог запустить контейнеры (см. сообщение выше).' }
 } finally {
-    foreach ($name in $stores + $sagaVars) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
+if ($Bpm) { $profiles += @('--profile', 'bpm') }
+if ($Chain) { $profiles += @('--profile', 'chain') }
+
+$stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
+$sagaVars = @('SAGA_ENGINE', 'CAMUNDA_CLIENT_ENABLED')
+$ledgerVars = @('LEDGER_ENABLED')
+$saved = @{}
+foreach ($name in $stores + $sagaVars + $ledgerVars) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 }
 
 # ---------- Готовность ----------
