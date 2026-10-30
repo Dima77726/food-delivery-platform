@@ -14,6 +14,8 @@
       -Tools        добавляет Kafka UI и Kibana (+1,5 ГБ)
       -Cdc          добавляет CDC: Debezium читает WAL базы заказов в Kafka, ClickHouse — из Kafka (+0,5 ГБ;
                     ClickHouse есть только без -Light). Нужен DEBEZIUM_DB_PASSWORD в .env
+      -Bpm          добавляет Camunda 8 и переводит сагу оплаты order-service на процесс payment-saga;
+                    Operate — http://localhost:8091/operate, вход demo/demo (+0,7 ГБ)
 
 .EXAMPLE
     ./scripts/start.ps1                  # всё
@@ -24,6 +26,7 @@ param(
     [switch]$Auth,
     [switch]$Tools,
     [switch]$Cdc,
+    [switch]$Bpm,
     [switch]$Agent,
     [switch]$NoBrowser,
     [switch]$NoSeed,
@@ -73,21 +76,28 @@ if (-not $Light) { $profiles += @('--profile', 'stores') }
 if ($Auth) { $profiles += @('--profile', 'auth') }
 if ($Tools) { $profiles += @('--profile', 'tools') }
 if ($Cdc) { $profiles += @('--profile', 'cdc') }
+if ($Bpm) { $profiles += @('--profile', 'bpm') }
 
 $stores = @('STORE_MONGO_ENABLED', 'STORE_NEO4J_ENABLED', 'STORE_CLICKHOUSE_ENABLED', 'STORE_ELASTICSEARCH_ENABLED')
+$sagaVars = @('SAGA_ENGINE', 'CAMUNDA_CLIENT_ENABLED')
 $saved = @{}
-foreach ($name in $stores) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+foreach ($name in $stores + $sagaVars) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
     if ($Light) {
         # Значения из окружения важнее .env: облегчённый режим не требует правки файла.
         foreach ($name in $stores) { [Environment]::SetEnvironmentVariable($name, 'false') }
         Warn 'Облегчённый режим: отзывы, рекомендации, аналитика и поиск выключены'
     }
+    if ($Bpm) {
+        $env:SAGA_ENGINE = 'camunda'
+        $env:CAMUNDA_CLIENT_ENABLED = 'true'
+        Warn 'Сага оплаты идёт через Camunda: процессы видны в http://localhost:8091/operate (demo/demo)'
+    }
     $env:WEB_PORT = "$WebPort"
     docker compose @profiles up -d
     if ($LASTEXITCODE -ne 0) { throw 'docker compose не смог запустить контейнеры (см. сообщение выше).' }
 } finally {
-    foreach ($name in $stores) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
+    foreach ($name in $stores + $sagaVars) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
 }
 
 # ---------- Готовность ----------

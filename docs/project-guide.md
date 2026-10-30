@@ -398,6 +398,35 @@ stateDiagram-v2
 | Сообщение невозможно обработать | после повторов — в `<топик>-dlt` и алерт | `*DltListener` |
 | Оплата «зависла» | таймаут → отмена (+ возврат) | `PaymentTimeoutJob` / `app.saga.*` |
 
+### 5.4 Та же сага на Camunda 8 (режим `bpm`)
+
+Ожидание исхода оплаты может вести не сам order-service, а оркестратор **Camunda 8**: процесс
+`payment-saga` (`order-service: src/main/resources/bpmn/payment-saga.bpmn`). Включается
+`./scripts/start.ps1 -Bpm` (профиль `bpm` + `SAGA_ENGINE=camunda`, `CAMUNDA_CLIENT_ENABLED=true`).
+Без флага всё работает как раньше.
+
+```mermaid
+flowchart LR
+    S((Оплата запрошена)) --> G{Ждём исход}
+    G -->|сообщение payment-succeeded| P[order-mark-paid] --> E1((Оплачен))
+    G -->|сообщение payment-failed| F[order-cancel-payment-failed] --> E2((Отменён: отказ))
+    G -->|таймер PAYMENT_TIMEOUT| T[order-expire-payment] --> E3((Отменён по таймауту))
+    G -->|сообщение order-canceled| E4((Отменён клиентом))
+```
+
+- **Что осталось прежним.** Команда «спиши» пишется в outbox в той же транзакции, что и переход в
+  `PAYMENT_PENDING`; экземпляр процесса создаётся там же (Camunda недоступна → запрос оплаты откатывается).
+  Переходы статусов — те же compare-and-set из `PaymentSaga`, их вызывают обработчики заданий
+  (`order.saga.camunda.PaymentProcessWorkers`).
+- **Что делает процесс.** Исходы из Kafka становятся сообщениями (ключ корреляции — `orderId`,
+  `messageId` — `eventId`, так что повтор отбрасывает сам брокер); таймаут — таймер процесса вместо
+  `PaymentTimeoutJob` (задача в этом режиме следит только за неоплаченными `CREATED`); отмена клиентом
+  завершает процесс сообщением `order-canceled`.
+- **Где смотреть.** Operate — http://localhost:8091/operate (demo/demo): экземпляр на каждый заказ,
+  путь по схеме, переменные, инциденты, если задание упало трижды.
+- **Память.** Один контейнер `camunda/camunda` (Zeebe + Operate + Tasklist) с хранилищем H2, без
+  Elasticsearch: ~620 МБ при лимите 1 ГБ.
+
 ---
 
 ## 6. Сквозные механизмы и почему они такие

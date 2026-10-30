@@ -55,6 +55,7 @@ PostgreSQL, Redis и Kafka через Testcontainers.
 ./scripts/start.ps1 -Light           # без Mongo, Neo4j, ClickHouse, Elasticsearch (~5 ГБ)
 ./scripts/start.ps1 -Agent           # плюс ИИ-помощник: Ollama на видеокарте и агент
 ./scripts/start.ps1 -Auth            # плюс Keycloak
+./scripts/start.ps1 -Bpm             # плюс Camunda 8: сага оплаты как BPMN-процесс
 ```
 
 Скрипт поднимает контейнеры, ждёт готовности, при первом запуске заносит демо-данные и открывает
@@ -123,6 +124,7 @@ docker compose --profile full up -d
 | Swagger UI (insights) | http://localhost:8080/swagger-ui.html |
 | GraphQL / песочница GraphiQL | http://localhost:8080/graphql, http://localhost:8080/graphiql |
 | Kafka UI (профиль `tools`) | http://localhost:8090 |
+| Camunda Operate (профиль `bpm`, `-Bpm`), demo/demo | http://localhost:8091/operate |
 | Kibana для Elasticsearch (профиль `tools`) | http://localhost:5601 |
 | RabbitMQ (интерфейс управления) | http://localhost:15672 |
 | Mailpit (письма уведомлений) | http://localhost:8025 |
@@ -151,6 +153,7 @@ Prometheus, а снаружи их не видно.
 | Cassandra (входит в `full`) | 1,5 ГБ |
 | MongoDB, Neo4j, ClickHouse, Elasticsearch (профиль `stores`) | ~3,8 ГБ |
 | Kafka UI (профиль `tools`) | 0,5 ГБ |
+| Camunda 8 (профиль `bpm`) | 1 ГБ (реально ~0,6 ГБ) |
 
 Это потолки, а не расход: реально стек занимает заметно меньше. Но всё сразу — около 13 ГБ
 потолков, поэтому на 16 ГБ поднимайте только то, с чем работаете. Интеграционные тесты
